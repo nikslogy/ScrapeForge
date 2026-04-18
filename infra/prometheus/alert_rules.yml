@@ -1,0 +1,70 @@
+groups:
+  - name: scrapeforge
+    rules:
+      # Success rate below 90% for 5 minutes
+      - alert: LowSuccessRate
+        expr: >
+          (
+            sum(rate(scrapeforge_scrape_requests_total{status="completed"}[5m]))
+            /
+            sum(rate(scrapeforge_scrape_requests_total[5m]))
+          ) < 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scrape success rate below 90%"
+          description: "Success rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # Queue depth over 500 for 10 minutes
+      - alert: HighQueueDepth
+        expr: sum(scrapeforge_queue_depth) > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue depth exceeds 500"
+          description: "Total queue depth is {{ $value }} for 10+ minutes."
+
+      # Worker memory above 85% of 2GB limit
+      - alert: HighMemoryUsage
+        expr: scrapeforge_worker_process_resident_memory_bytes > (2 * 1024 * 1024 * 1024 * 0.85)
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Worker memory usage above 85%"
+          description: "Worker RSS is {{ $value | humanize1024 }}B."
+
+      # Browser pool at maximum capacity
+      - alert: BrowserPoolExhausted
+        expr: scrapeforge_browser_pool_size{state="active"} >= 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Browser pool fully exhausted"
+          description: "All {{ $value }} browser contexts are active for 1+ minute."
+
+      # API P95 latency above 10 seconds
+      - alert: HighApiLatency
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(scrapeforge_http_duration_seconds_bucket[5m])) by (le)
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API P95 latency above 10s"
+          description: "P95 latency is {{ $value }}s."
+
+      # No scrape requests processed for 5 minutes
+      - alert: WorkerIdle
+        expr: sum(rate(scrapeforge_scrape_requests_total[5m])) == 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "No scrape requests processed in 5 minutes"
+          description: "The worker is idle or down."

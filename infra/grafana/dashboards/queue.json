@@ -1,0 +1,57 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Queue Depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "scrapeforge_queue_depth",
+          "legendFormat": "{{queue}}"
+        }
+      ]
+    },
+    {
+      "title": "Jobs Queued / sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(scrapeforge_jobs_queued_total[5m])",
+          "legendFormat": "{{queue}} — {{mode}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "title": "Avg Processing Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(scrapeforge_scrape_duration_seconds_sum[5m]) / rate(scrapeforge_scrape_duration_seconds_count[5m])",
+          "legendFormat": "Tier {{tier}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "title": "LLM Cost Cumulative",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "scrapeforge_llm_cost_total"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["scrapeforge"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "ScrapeForge — Queue",
+  "uid": "scrapeforge-queue"
+}

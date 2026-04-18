@@ -1,0 +1,486 @@
+openapi: 3.1.0
+info:
+  title: ScrapeForge API
+  version: 1.0.0
+  description: |
+    ScrapeForge is a high-performance web scraping API with tiered engine routing,
+    AI-powered data extraction, proxy management, and real-time streaming.
+  contact:
+    name: ScrapeForge Support
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Scrape
+    description: Core scraping operations
+  - name: Extract
+    description: AI-powered data extraction
+  - name: Status
+    description: Job status & results
+  - name: Streaming
+    description: Server-Sent Events for real-time progress
+  - name: Keys
+    description: API key management
+  - name: Health
+    description: Service health
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  uptime:
+                    type: number
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Prometheus text format metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /v1/scrape:
+    post:
+      summary: Scrape a web page
+      description: |
+        Submits a scrape request. If no `webhookUrl` is provided, the request is
+        processed synchronously and the response contains the scraped content.
+        Otherwise, it returns immediately with a job ID and delivers results
+        to the webhook when complete.
+
+        Only `url` is required. All other fields have safe defaults — leave them
+        out if you're not sure. Omit `webhookUrl` entirely to get a synchronous
+        response (do **not** send an empty string).
+      tags: [Scrape]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScrapeRequest"
+            examples:
+              minimal:
+                summary: Minimal — just a URL
+                value:
+                  url: https://example.com
+              markdown:
+                summary: Scrape as clean markdown
+                value:
+                  url: https://en.wikipedia.org/wiki/Web_scraping
+                  formats: [markdown]
+              javascriptHeavy:
+                summary: JS-heavy site with screenshot
+                value:
+                  url: https://www.cnn.com
+                  formats: [markdown, screenshot]
+                  screenshot: true
+                  waitFor: "main"
+              mobileView:
+                summary: Mobile emulation (iPhone)
+                value:
+                  url: https://techcrunch.com
+                  mobile: true
+                  formats: [markdown]
+      responses:
+        "200":
+          description: Scrape completed (synchronous mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeResult"
+        "202":
+          description: Job queued (async / webhook mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobQueued"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          description: Scrape failed across all tiers (anti-bot, DNS, etc.)
+        "504":
+          description: Job timed out
+
+  /v1/extract:
+    post:
+      summary: Extract structured data with AI
+      description: |
+        Scrapes the page and uses LLM-powered extraction to return structured
+        JSON matching the provided schema. Falls back to markdown content if
+        AI extraction fails. Required fields: `url` + `schema`. Omit
+        `webhookUrl` entirely for a synchronous response.
+      tags: [Extract]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtractRequest"
+            examples:
+              productPage:
+                summary: Extract product fields
+                value:
+                  url: https://example.com/product/123
+                  schema:
+                    properties:
+                      title: { type: string }
+                      price: { type: string }
+                      currency: { type: string }
+                      inStock: { type: boolean }
+              articleMetadata:
+                summary: Extract article metadata
+                value:
+                  url: https://en.wikipedia.org/wiki/Web_scraping
+                  schema:
+                    properties:
+                      title: { type: string }
+                      summary: { type: string }
+                      authors:
+                        type: array
+                        items: { type: string }
+      responses:
+        "200":
+          description: Extraction completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          description: Extraction failed
+        "504":
+          description: Extraction timed out
+
+  /v1/status/{jobId}:
+    get:
+      summary: Get job status
+      tags: [Status]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: job_abc123def456
+      responses:
+        "200":
+          description: Job status and result (if completed)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ScrapeResult"
+                  - type: object
+                    properties:
+                      jobId:
+                        type: string
+                      status:
+                        type: string
+                        enum: [queued, processing, waiting]
+        "404":
+          description: Job not found
+
+  /v1/scrape/stream:
+    get:
+      summary: Stream job progress via SSE
+      description: |
+        Opens a Server-Sent Events stream for a given job. Events include
+        `started`, `headers`, `content`, `extraction`, `complete`, and `error`.
+      tags: [Streaming]
+      security: []
+      parameters:
+        - name: jobId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /v1/keys/rotate:
+    post:
+      summary: Rotate API key
+      description: |
+        Deactivates the current API key and generates a new one. The new key
+        inherits the old key's name and rate limit settings.
+      tags: [Keys]
+      responses:
+        "200":
+          description: Key rotated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  key:
+                    type: string
+                    description: The new full API key (shown only once)
+                  keyId:
+                    type: string
+                  prefix:
+                    type: string
+        "404":
+          description: Current key not found
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "Pass your API key as Authorization: Bearer sf_live_..."
+
+  schemas:
+    ScrapeRequest:
+      type: object
+      required: [url]
+      description: |
+        Only `url` is required. Every other property is optional and has a safe
+        default. If you omit a property entirely, the server uses its default.
+        Do not send empty strings for URL-typed fields (`webhookUrl`, `waitFor`) —
+        omit them instead.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The URL to scrape. Must be a public HTTP/HTTPS address.
+          example: https://example.com
+        formats:
+          type: array
+          description: Which output formats to return in `content`.
+          items:
+            type: string
+            enum: [html, markdown, text, screenshot, json]
+          default: [markdown]
+        waitFor:
+          type: string
+          nullable: true
+          description: |
+            CSS selector to wait for before extracting content. Forces the
+            browser tier. Leave empty to skip.
+          example: "#main-content"
+        timeout:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          default: 60000
+          description: Per-request timeout in milliseconds.
+        proxy:
+          type: string
+          enum: [none, datacenter, residential, mobile, auto]
+          default: auto
+          description: |
+            Proxy tier. `auto` lets the router pick based on domain history.
+        headers:
+          type: object
+          description: Extra HTTP headers to send with the request.
+          additionalProperties:
+            type: string
+        cookies:
+          type: array
+          description: Cookies to set before navigation.
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name: { type: string }
+              value: { type: string }
+              domain: { type: string }
+              path: { type: string }
+        screenshot:
+          type: boolean
+          default: false
+          description: If true, returns a base64 PNG in `content.screenshot`.
+        mobile:
+          type: boolean
+          default: false
+          description: |
+            Emulate an iPhone (390×844 viewport + iOS Safari UA). Forces the
+            browser tier so JS-rendered mobile layouts work.
+        blockResources:
+          type: boolean
+          default: true
+          description: Block fonts, media, and tracker domains in browser tiers.
+        cacheTtl:
+          type: integer
+          minimum: 0
+          maximum: 2592000
+          default: 3600
+          description: Cache TTL in seconds. Set to 0 to skip cache entirely.
+        webhookUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: |
+            If provided, results are delivered asynchronously via POST webhook
+            and the API returns `202 Queued` immediately. **Omit this field
+            entirely** (do not send `""`) for a synchronous response.
+
+    ExtractRequest:
+      allOf:
+        - $ref: "#/components/schemas/ScrapeRequest"
+        - type: object
+          required: [schema]
+          properties:
+            schema:
+              type: object
+              description: JSON Schema describing the data you want to extract
+              example:
+                properties:
+                  title:
+                    type: string
+                  price:
+                    type: string
+
+    ScrapeResult:
+      type: object
+      properties:
+        jobId:
+          type: string
+        url:
+          type: string
+        status:
+          type: string
+          enum: [completed, failed]
+        content:
+          type: object
+          properties:
+            markdown:
+              type: string
+            text:
+              type: string
+            html:
+              type: string
+            screenshot:
+              type: string
+              description: Base64-encoded PNG (only when screenshot=true)
+            json:
+              type: object
+              description: Structured data from AI extraction
+        metadata:
+          type: object
+          properties:
+            tierUsed:
+              type: integer
+              minimum: 1
+              maximum: 5
+            proxyTier:
+              type: string
+            latencyMs:
+              type: integer
+            qualityScore:
+              type: number
+              minimum: 0
+              maximum: 1
+            cached:
+              type: boolean
+            costBreakdown:
+              type: object
+              properties:
+                compute:
+                  type: number
+                proxy:
+                  type: number
+                captcha:
+                  type: number
+                llm:
+                  type: number
+                total:
+                  type: number
+
+    JobQueued:
+      type: object
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          example: queued
+        statusUrl:
+          type: string
+
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              details:
+                type: object
+
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Invalid or deactivated API key.
+
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              retryAfter:
+                type: integer
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer

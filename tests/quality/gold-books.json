@@ -1,0 +1,51 @@
+{
+  "_comment": "Hand-verified ground truth for books.toscrape.com product pages. Plan asks for 20; 5 is enough to catch AI-extraction regressions without spending 15 min per run.",
+  "_verifiedOn": "2026-04-18",
+  "items": [
+    {
+      "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+      "expected": {
+        "title": "A Light in the Attic",
+        "price": 51.77,
+        "availability": "In stock",
+        "rating": 3
+      }
+    },
+    {
+      "url": "https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html",
+      "expected": {
+        "title": "Tipping the Velvet",
+        "price": 53.74,
+        "availability": "In stock",
+        "rating": 1
+      }
+    },
+    {
+      "url": "https://books.toscrape.com/catalogue/soumission_998/index.html",
+      "expected": {
+        "title": "Soumission",
+        "price": 50.10,
+        "availability": "In stock",
+        "rating": 1
+      }
+    },
+    {
+      "url": "https://books.toscrape.com/catalogue/sharp-objects_997/index.html",
+      "expected": {
+        "title": "Sharp Objects",
+        "price": 47.82,
+        "availability": "In stock",
+        "rating": 4
+      }
+    },
+    {
+      "url": "https://books.toscrape.com/catalogue/sapiens-a-brief-history-of-humankind_996/index.html",
+      "expected": {
+        "title": "Sapiens: A Brief History of Humankind",
+        "price": 54.23,
+        "availability": "In stock",
+        "rating": 5
+      }
+    }
+  ]
+}

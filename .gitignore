@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.log
+.turbo/
+.next/
+coverage/
+*.tsbuildinfo
+.extraction-cache/
+cookies.txt
+*.swp
+tests/antibot/out/

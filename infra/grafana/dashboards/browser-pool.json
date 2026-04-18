@@ -1,0 +1,45 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Browser Contexts",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "scrapeforge_browser_pool_size",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "title": "Worker Memory (RSS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "scrapeforge_worker_process_resident_memory_bytes",
+          "legendFormat": "RSS"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "title": "Scrape Duration by Tier (Browser Tiers)",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(scrapeforge_scrape_duration_seconds_bucket{tier=~\"3|4|5\"}[5m])) by (le, tier)",
+          "legendFormat": "Tier {{tier}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["scrapeforge"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "ScrapeForge — Browser Pool",
+  "uid": "scrapeforge-browser"
+}

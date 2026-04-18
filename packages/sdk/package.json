@@ -1,0 +1,9 @@
+{
+  "name": "@scrapeforge/sdk",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'SDK will be implemented in Phase 7'"
+  }
+}

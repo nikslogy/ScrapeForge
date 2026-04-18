@@ -1,0 +1,54 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "title": "Proxy Success Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "scrapeforge_proxy_success_rate",
+          "legendFormat": "{{provider}} — {{tier}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Cost by Tier (last 1h)",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (tier) (increase(scrapeforge_scrape_cost_per_request_sum[1h]))",
+          "legendFormat": "Tier {{tier}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] }
+    },
+    {
+      "title": "Requests by Proxy Tier",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (tier) (rate(scrapeforge_scrape_requests_total[5m]))",
+          "legendFormat": "Tier {{tier}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["scrapeforge"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "ScrapeForge — Proxy Health",
+  "uid": "scrapeforge-proxy"
+}
