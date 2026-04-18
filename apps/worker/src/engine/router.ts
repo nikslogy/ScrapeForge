@@ -44,10 +44,33 @@ const JS_HEAVY_DOMAINS = new Set<string>([
   'www.tiktok.com',
 ]);
 
+// Domains where we know T1/T2/T3 cannot succeed — either Cloudflare Enterprise,
+// DataDome, or aggressive Akamai serving cloaked 200-OK block pages at the HTTP
+// tier. Skip straight to T4 so we don't burn 30s of escalation on tiers that
+// only produce false positives. Kept deliberately short and evidence-based —
+// a domain earns a spot only after the harness shows it fails at T1/T2 AND
+// succeeds at T4. Nike/Target were tried and REMOVED because they were already
+// passing cleanly at T1/T2.
+const HARD_DOMAINS = new Set<string>([
+  'nowsecure.nl',
+  'walmart.com',
+  'www.walmart.com',
+  'google.com',
+  'www.google.com',
+]);
+
 function isJsHeavyDomain(domain: string): boolean {
   if (JS_HEAVY_DOMAINS.has(domain)) return true;
   // Also match subdomains of the listed roots (e.g., m.amazon.com, en.wikipedia.org).
   for (const d of JS_HEAVY_DOMAINS) {
+    if (domain.endsWith('.' + d)) return true;
+  }
+  return false;
+}
+
+function isHardDomain(domain: string): boolean {
+  if (HARD_DOMAINS.has(domain)) return true;
+  for (const d of HARD_DOMAINS) {
     if (domain.endsWith('.' + d)) return true;
   }
   return false;
@@ -70,6 +93,16 @@ export class SmartRouter {
       options.screenshot || options.waitFor || options.mobile;
 
     if (requiresBrowser) {
+      const proxy = await this.resolveProxy(domain, options.proxy);
+      return this.executeBrowser(url, options, domain, proxy);
+    }
+
+    // Known-hard domains: go straight to the browser tier and don't let the
+    // adaptive cache fool us with a lucky T2 success into pinning a flaky
+    // tier. These sites (Cloudflare Enterprise, DataDome, aggressive Akamai)
+    // materially only succeed at T4+, so the 30s of T1→T2→T3 timeout is pure
+    // waste. Cache updates still happen so metrics reflect reality.
+    if (isHardDomain(domain)) {
       const proxy = await this.resolveProxy(domain, options.proxy);
       return this.executeBrowser(url, options, domain, proxy);
     }
@@ -108,7 +141,7 @@ export class SmartRouter {
           headers: options.headers,
           timeout: Math.min(options.timeout || 15_000, 15_000),
         });
-        if (isValidContent(r.html, r.statusCode)) {
+        if (isValidContent(r.html, r.statusCode, url)) {
           await this.updateDomainStrategy(domain, 1, true, r.latencyMs);
           return { ...r, tierUsed: 1, ...proxyMeta };
         }
@@ -124,7 +157,7 @@ export class SmartRouter {
           timeout: Math.min(options.timeout || 15_000, 15_000),
           proxy: proxyUrl,
         });
-        if (isValidContent(r.html, r.statusCode)) {
+        if (isValidContent(r.html, r.statusCode, url)) {
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           if (proxy) await this.proxyManager.recordResult(proxy, domain, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
@@ -164,7 +197,7 @@ export class SmartRouter {
         mobile: options.mobile,
         screenshot: options.screenshot,
       });
-      if (isValidContent(r.html, r.statusCode)) {
+      if (isValidContent(r.html, r.statusCode, url)) {
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return { ...r, tierUsed: 4, ...proxyMeta };
       }
@@ -190,7 +223,7 @@ export class SmartRouter {
         blockResources: options.blockResources,
         screenshot: options.screenshot,
       });
-      if (isValidContent(r.html, r.statusCode)) {
+      if (isValidContent(r.html, r.statusCode, url)) {
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return {
           ...r,
@@ -221,7 +254,7 @@ export class SmartRouter {
     if (tier <= 1) {
       try {
         const r = await tier1Fetch(url, { headers: options.headers });
-        if (isValidContent(r.html, r.statusCode)) {
+        if (isValidContent(r.html, r.statusCode, url)) {
           await this.updateDomainStrategy(domain, tier, true, r.latencyMs);
           return { ...r, tierUsed: tier, ...proxyMeta };
         }
@@ -232,7 +265,7 @@ export class SmartRouter {
     if (tier === 2) {
       try {
         const r = await tier2Fetch(url, { headers: options.headers, proxy: proxyUrl });
-        if (isValidContent(r.html, r.statusCode)) {
+        if (isValidContent(r.html, r.statusCode, url)) {
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
         }
@@ -251,11 +284,41 @@ export class SmartRouter {
     proxy: SelectedProxy | null,
   ): Promise<RouterResult> {
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
-    const context = await this.getBrowserContext();
+
+    // ── T4: Patchright browser ──
+    let context = await this.getBrowserContext();
     try {
       const r = await tier4Fetch(url, context, options);
-      await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
-      return { ...r, tierUsed: 4, ...proxyMeta };
+      if (isValidContent(r.html, r.statusCode, url)) {
+        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
+        return { ...r, tierUsed: 4, ...proxyMeta };
+      }
+      // Cloaked block page (200 OK, short body / block phrase). Don't
+      // record as success — fall through to T5 stealth.
+      await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
+    } catch {
+      /* fall through to stealth */
+    } finally {
+      this.releaseBrowserContext(context);
+    }
+
+    // ── T5: stealth ──
+    context = await this.getBrowserContext();
+    try {
+      const r = await tier4StealthFetch(url, context, {
+        waitFor: options.waitFor,
+        timeout: options.timeout,
+        blockResources: options.blockResources,
+        screenshot: options.screenshot,
+      });
+      if (isValidContent(r.html, r.statusCode, url)) {
+        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
+        return { ...r, tierUsed: 5, ...proxyMeta };
+      }
+      // Both tiers produced a block page. Return the T5 result so the caller
+      // still sees what the site served, tagged with tier 5.
+      await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
+      return { ...r, tierUsed: 5, ...proxyMeta };
     } finally {
       this.releaseBrowserContext(context);
     }

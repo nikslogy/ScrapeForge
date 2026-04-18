@@ -56,6 +56,88 @@ const MOBILE_INIT_SCRIPT = `
   })();
 `;
 
+// Baseline fingerprint patches applied to every T4 page. Fixes the three
+// big Patchright tells flagged by bot.sannysoft.com: missing window.chrome,
+// empty navigator.plugins, and stripped WebGL vendor/renderer. Runs before
+// any page script, so the values are set by the time detection code sees them.
+const FINGERPRINT_INIT_SCRIPT = `
+  (function() {
+    try {
+      // window.chrome — real Chrome has this object populated. Patchright
+      // leaves it undefined in headless mode, which is a cheap bot signal.
+      if (!window.chrome) {
+        Object.defineProperty(window, 'chrome', {
+          get: function() {
+            return {
+              app: { isInstalled: false },
+              runtime: {},
+              csi: function() {},
+              loadTimes: function() {
+                return {
+                  requestTime: Date.now() / 1000 - Math.random() * 10,
+                  startLoadTime: Date.now() / 1000 - Math.random() * 5,
+                  commitLoadTime: Date.now() / 1000 - Math.random() * 3,
+                  finishDocumentLoadTime: Date.now() / 1000 - Math.random(),
+                  finishLoadTime: Date.now() / 1000,
+                  firstPaintTime: Date.now() / 1000 - Math.random() * 2,
+                  firstPaintAfterLoadTime: 0,
+                  navigationType: 'Other',
+                  wasFetchedViaSpdy: false,
+                  wasNpnNegotiated: true,
+                  npnNegotiatedProtocol: 'h2',
+                  wasAlternateProtocolAvailable: false,
+                  connectionInfo: 'h2',
+                };
+              },
+            };
+          },
+          configurable: true,
+        });
+      }
+
+      // navigator.plugins — real Chrome ships the PDF viewer by default;
+      // an empty list screams headless.
+      var fakePlugins = [
+        { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+      ];
+      Object.defineProperty(navigator, 'plugins', {
+        get: function() { return fakePlugins; },
+        configurable: true,
+      });
+      Object.defineProperty(navigator, 'mimeTypes', {
+        get: function() {
+          return [
+            { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+            { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+          ];
+        },
+        configurable: true,
+      });
+
+      // WebGL vendor/renderer — SwiftShader in headless containers is a
+      // dead giveaway. Spoof a common Intel iGPU signature.
+      var origGetParameter = WebGLRenderingContext.prototype.getParameter;
+      WebGLRenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) return 'Intel Inc.';                   // UNMASKED_VENDOR_WEBGL
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine';     // UNMASKED_RENDERER_WEBGL
+        return origGetParameter.call(this, parameter);
+      };
+      if (typeof WebGL2RenderingContext !== 'undefined') {
+        var origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+        WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) return 'Intel Inc.';
+          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+          return origGetParameter2.call(this, parameter);
+        };
+      }
+    } catch (e) { /* best-effort */ }
+  })();
+`;
+
 export async function tier4Fetch(
   url: string,
   context: BrowserContext,
@@ -76,6 +158,12 @@ export async function tier4Fetch(
   const page = await context.newPage();
 
   try {
+    // Apply fingerprint patches before anything navigates. Patchright
+    // already hides webdriver at the C++ layer, but still leaves
+    // window.chrome undefined and navigator.plugins empty, which several
+    // commercial fingerprinters key on.
+    await page.addInitScript(FINGERPRINT_INIT_SCRIPT);
+
     if (options.blockResources !== false) {
       await installResourceBlocker(page);
     }

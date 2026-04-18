@@ -42,10 +42,37 @@ export async function tier1Fetch(
 }
 
 /**
+ * Domains that legitimately return large (>1KB) pages for ANY path. If we
+ * get <1000 chars of HTML from one of these at T1/T2, it's almost certainly
+ * a cloaked block page served at HTTP 200 — escalate.
+ */
+const CONTENT_HEAVY_DOMAINS = [
+  'walmart.com',
+  'amazon.com',
+  'target.com',
+  'ebay.com',
+  'bestbuy.com',
+  'google.com',
+  'youtube.com',
+  'linkedin.com',
+  'facebook.com',
+  'instagram.com',
+  'twitter.com',
+  'x.com',
+];
+
+/**
  * Returns false if the page looks like a bot-detection challenge
  * rather than real content.
+ *
+ * `url` is optional — when supplied, enables a short-body check for
+ * content-heavy domains (walmart's block page is a 423-char 200 OK).
  */
-export function isValidContent(html: string, statusCode: number): boolean {
+export function isValidContent(
+  html: string,
+  statusCode: number,
+  url?: string,
+): boolean {
   if (statusCode === 403 || statusCode === 429 || statusCode === 503) return false;
   if (statusCode >= 500) return false;
   // No length floor here. Legitimate tiny pages (example.com = 167 bytes)
@@ -64,8 +91,34 @@ export function isValidContent(html: string, statusCode: number): boolean {
     'enable javascript and cookies to continue',
     'to discuss automated access to amazon data',
     'errors/validatecaptcha',
+    'unusual traffic from your computer network',
+    'our systems have detected unusual traffic',
+    'robot or human',
+    'blocked.gif',
+    'px-captcha',
+    'pxcaptcha',
+    'perimeterx',
+    'datadome',
+    'shieldsquare',
   ];
 
   const lowerHtml = html.toLowerCase();
-  return !blockIndicators.some((indicator) => lowerHtml.includes(indicator));
+  if (blockIndicators.some((indicator) => lowerHtml.includes(indicator))) {
+    return false;
+  }
+
+  // Cloaked-block check: some sites serve a 200 OK with a near-empty body
+  // when they suspect automation (walmart, google SERP). If the URL's host
+  // matches a known content-heavy domain and the body is <1KB, treat it as
+  // a block so the router escalates.
+  if (url && html.length < 1000) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      if (CONTENT_HEAVY_DOMAINS.some((d) => host === d || host.endsWith('.' + d))) {
+        return false;
+      }
+    } catch { /* bad URL — skip the heuristic */ }
+  }
+
+  return true;
 }
