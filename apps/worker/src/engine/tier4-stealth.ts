@@ -1,5 +1,11 @@
 import type { BrowserContext, Page } from 'patchright';
-import { installResourceBlocker } from '../browser/resource-blocker.js';
+import { assertPublicUrl } from '@scrapeforge/shared';
+import {
+  assertNavigationAllowed,
+  ensureContextOutboundGuard,
+  installOutboundGuard,
+  monitorOutbound,
+} from '../browser/outbound-guard.js';
 
 /**
  * Tier 4+: Stealth browser mode with deep anti-detection.
@@ -59,14 +65,19 @@ export async function tier4StealthFetch(
   latencyMs: number;
 }> {
   const start = performance.now();
+  // Refuse before spending a page on it. The guards below cover everything
+  // the page loads afterwards (see browser/outbound-guard.ts).
+  const target = await assertPublicUrl(url);
+  await ensureContextOutboundGuard(context);
   const page = await context.newPage();
+  const monitor = monitorOutbound(page);
 
   try {
     await applyStealthPatches(page);
 
-    if (options.blockResources !== false) {
-      await installResourceBlocker(page);
-    }
+    // Always installed: blockResources only toggles tracker/media blocking,
+    // never the SSRF check.
+    await installOutboundGuard(page, { blockResources: options.blockResources !== false });
 
     // Simulate human-like behavior
     await page.setExtraHTTPHeaders({
@@ -76,10 +87,13 @@ export async function tier4StealthFetch(
       'Sec-Ch-Ua-Platform': '"Windows"',
     });
 
-    const response = await page.goto(url, {
+    const response = await page.goto(target.href, {
       waitUntil: 'domcontentloaded',
       timeout: options.timeout || 30_000,
     });
+    // Route handlers never see redirect hops: check the chain before
+    // spending any more time on the page.
+    await assertNavigationAllowed(response, page.url());
 
     // Small random delay to look human
     await page.waitForTimeout(300 + Math.floor(Math.random() * 700));
@@ -111,6 +125,8 @@ export async function tier4StealthFetch(
       })();
     `);
 
+    // Page scripts may have navigated since the initial load.
+    await assertNavigationAllowed(null, page.url());
     const html = await page.content();
     const statusCode = response?.status() || 200;
 
@@ -120,6 +136,10 @@ export async function tier4StealthFetch(
       screenshot = buffer.toString('base64');
     }
 
+    // Nothing is returned if any redirect hop or WebSocket reached a
+    // blocked destination while the page was loading.
+    await monitor.assertClean();
+
     return {
       html,
       statusCode,
@@ -127,6 +147,7 @@ export async function tier4StealthFetch(
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    monitor.dispose();
     await page.close();
   }
 }

@@ -8,6 +8,7 @@ import { tier4Fetch } from './tier4-browser.js';
 import { tier4StealthFetch } from './tier4-stealth.js';
 import { ProxyManager, type SelectedProxy } from '../proxy/manager.js';
 import { calculateQualityScore } from '../extraction/quality-scorer.js';
+import type { AttemptOutcome, StageTracer } from '../tracing.js';
 
 // Minimum quality score below which a tier's response is treated as a
 // soft-block and escalation continues. Target.com, Bing SERPs, and the
@@ -134,6 +135,39 @@ function assessTier(
   return { ok: true, score };
 }
 
+// Tier fetchers throw whatever their libraries throw. Read the message
+// defensively: a thrown string or null must not crash the escalation loop
+// that is meant to absorb tier failures.
+function describeError(err: unknown): string {
+  const message = (err as { message?: unknown } | null)?.message;
+  if (typeof message === 'string') return message.slice(0, 120);
+  try {
+    return String(err).slice(0, 120);
+  } catch {
+    return 'unprintable error';
+  }
+}
+
+// Router tracing: every tier attempt is logged with its duration (on the
+// tracer's clock, from the start of the attempt including browser-context
+// acquisition) and how it ended. `outcome` reflects the acceptance gate; the
+// terminal tier's response may still be returned when rejected. If bookkeeping
+// after a decision throws, the router treats the tier as failed (unchanged
+// behavior) and a second 'error' entry for that tier records why.
+function attemptStart(tracer: StageTracer | undefined): number {
+  return tracer ? tracer.now() : 0;
+}
+
+function traceAttempt(
+  tracer: StageTracer | undefined,
+  tier: number,
+  t0: number,
+  outcome: AttemptOutcome,
+  reason?: string,
+): void {
+  tracer?.recordAttempt({ tier, ms: tracer.now() - t0, outcome, reason });
+}
+
 export class SmartRouter {
   private proxyManager: ProxyManager;
 
@@ -145,14 +179,18 @@ export class SmartRouter {
     this.proxyManager = new ProxyManager(redis);
   }
 
-  async route(url: string, options: ScrapeOptions): Promise<RouterResult> {
+  /**
+   * @param tracer Optional per-request tracer: receives one entry per tier
+   *   attempt and the accumulated "browser_acquire" stage.
+   */
+  async route(url: string, options: ScrapeOptions, tracer?: StageTracer): Promise<RouterResult> {
     const domain = new URL(url).hostname;
     const requiresBrowser =
       options.screenshot || options.waitFor || options.mobile;
 
     if (requiresBrowser) {
       const proxy = await this.resolveProxy(domain, options.proxy);
-      return this.executeBrowser(url, options, domain, proxy);
+      return this.executeBrowser(url, options, domain, proxy, tracer);
     }
 
     // Known-hard domains: go straight to the browser tier and don't let the
@@ -162,7 +200,7 @@ export class SmartRouter {
     // waste. Cache updates still happen so metrics reflect reality.
     if (isHardDomain(domain)) {
       const proxy = await this.resolveProxy(domain, options.proxy);
-      return this.executeBrowser(url, options, domain, proxy);
+      return this.executeBrowser(url, options, domain, proxy, tracer);
     }
 
     const cached = await this.getDomainStrategy(domain);
@@ -171,13 +209,13 @@ export class SmartRouter {
     // which blocks our T1 fingerprint every time, never got to cache T4 and
     // kept paying the full-escalation cost on every request.
     if (cached && cached.successRate >= 0.5 && cached.sampleSize >= 3) {
-      return this.executeAtTier(cached.tier, url, options, domain);
+      return this.executeAtTier(cached.tier, url, options, domain, tracer);
     }
 
     // Cold-start shortcut: well-known JS-heavy domains skip T1/T2 but
     // still fall back to T5/stealth if the browser is blocked.
     const skipHttpTiers = !cached && isJsHeavyDomain(domain);
-    return this.escalate(url, options, domain, { skipHttpTiers });
+    return this.escalate(url, options, domain, { skipHttpTiers }, tracer);
   }
 
   // ── Full escalation chain ──────────────────────────────
@@ -187,6 +225,7 @@ export class SmartRouter {
     options: ScrapeOptions,
     domain: string,
     flags: { skipHttpTiers?: boolean } = {},
+    tracer?: StageTracer,
   ): Promise<RouterResult> {
     const proxy = await this.resolveProxy(domain, options.proxy);
     const proxyUrl = proxy?.url;
@@ -201,6 +240,7 @@ export class SmartRouter {
 
     // ─── Tier 1: plain HTTP with impit defaults ───
     if (!flags.skipHttpTiers) {
+      let t0 = attemptStart(tracer);
       try {
         const r = await tier1Fetch(url, {
           headers: options.headers,
@@ -208,16 +248,21 @@ export class SmartRouter {
         });
         const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
         if (v.ok) {
+          traceAttempt(tracer, 1, t0, 'accepted');
           await this.updateDomainStrategy(domain, 1, true, r.latencyMs);
           return { ...r, tierUsed: 1, ...proxyMeta };
         }
         note(1, v.reason);
+        traceAttempt(tracer, 1, t0, 'rejected', v.reason);
         await this.updateDomainStrategy(domain, 1, false, r.latencyMs);
       } catch (err) {
-        note(1, `threw ${(err as Error).message.slice(0, 120)}`);
+        const msg = describeError(err);
+        note(1, `threw ${msg}`);
+        traceAttempt(tracer, 1, t0, 'error', msg);
       }
 
       // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
+      t0 = attemptStart(tracer);
       try {
         const r = await tier2Fetch(url, {
           headers: options.headers,
@@ -226,20 +271,25 @@ export class SmartRouter {
         });
         const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
         if (v.ok) {
+          traceAttempt(tracer, 2, t0, 'accepted');
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           if (proxy) await this.proxyManager.recordResult(proxy, domain, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
         }
         note(2, v.reason);
+        traceAttempt(tracer, 2, t0, 'rejected', v.reason);
         await this.updateDomainStrategy(domain, 2, false, r.latencyMs);
         if (proxy) await this.proxyManager.recordResult(proxy, domain, false, r.latencyMs);
       } catch (err) {
-        note(2, `threw ${(err as Error).message.slice(0, 120)}`);
+        const msg = describeError(err);
+        note(2, `threw ${msg}`);
+        traceAttempt(tracer, 2, t0, 'error', msg);
       }
     }
 
     // ─── Tier 3: Lightpanda lightweight browser ───
     if (isLightpandaConfigured()) {
+      const t0 = attemptStart(tracer);
       try {
         const r = await tier3Fetch(url, {
           waitFor: options.waitFor,
@@ -249,23 +299,30 @@ export class SmartRouter {
         if (r) {
           const v = assessTier(r.html, r.statusCode, 3, r.latencyMs, url);
           if (v.ok) {
+            traceAttempt(tracer, 3, t0, 'accepted');
             await this.updateDomainStrategy(domain, 3, true, r.latencyMs);
             return { ...r, tierUsed: 3, ...proxyMeta };
           }
           note(3, v.reason);
+          traceAttempt(tracer, 3, t0, 'rejected', v.reason);
         } else {
+          // tier3Fetch swallows its own failures and returns null.
           note(3, 'no result');
+          traceAttempt(tracer, 3, t0, 'error', 'no result');
         }
       } catch (err) {
-        note(3, `threw ${(err as Error).message.slice(0, 120)}`);
+        const msg = describeError(err);
+        note(3, `threw ${msg}`);
+        traceAttempt(tracer, 3, t0, 'error', msg);
       }
     }
 
     // ─── Tier 4: full Patchright headless browser ───
     let context: BrowserContext | null = null;
     let t4Result: { html: string; statusCode: number; latencyMs: number; screenshot?: string } | null = null;
+    let t0 = attemptStart(tracer);
     try {
-      context = await this.getBrowserContext();
+      context = await this.acquireContext(tracer);
       const r = await tier4Fetch(url, context, {
         waitFor: options.waitFor,
         timeout: options.timeout,
@@ -276,13 +333,17 @@ export class SmartRouter {
       t4Result = r;
       const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
       if (v.ok) {
+        traceAttempt(tracer, 4, t0, 'accepted');
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return { ...r, tierUsed: 4, ...proxyMeta };
       }
       note(4, v.reason);
+      traceAttempt(tracer, 4, t0, 'rejected', v.reason);
       await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
     } catch (err) {
-      note(4, `threw ${(err as Error).message.slice(0, 120)}`);
+      const msg = describeError(err);
+      note(4, `threw ${msg}`);
+      traceAttempt(tracer, 4, t0, 'error', msg);
     } finally {
       if (context) this.releaseBrowserContext(context);
       context = null;
@@ -295,13 +356,14 @@ export class SmartRouter {
     // can decide based on qualityScore whether the result is usable.
     // If T5 itself throws, we still want to fall back to T4's data if
     // we captured it — otherwise the caller gets nothing at all.
+    t0 = attemptStart(tracer);
     try {
       // Escalate proxy if current one failed at browser tier
       const stealthProxy = proxy
         ? (await this.proxyManager.escalate(domain, proxy.tier)) || proxy
         : null;
 
-      context = await this.getBrowserContext();
+      context = await this.acquireContext(tracer);
       const r = await tier4StealthFetch(url, context, {
         waitFor: options.waitFor,
         timeout: options.timeout,
@@ -310,6 +372,7 @@ export class SmartRouter {
       });
       const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
       if (v.ok) {
+        traceAttempt(tracer, 5, t0, 'accepted');
         await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
         return {
           ...r,
@@ -319,8 +382,11 @@ export class SmartRouter {
         };
       }
       note(5, v.reason);
+      traceAttempt(tracer, 5, t0, 'rejected', v.reason);
     } catch (err) {
-      note(5, `threw ${(err as Error).message.slice(0, 120)}`);
+      const msg = describeError(err);
+      note(5, `threw ${msg}`);
+      traceAttempt(tracer, 5, t0, 'error', msg);
     } finally {
       if (context) this.releaseBrowserContext(context);
     }
@@ -347,37 +413,48 @@ export class SmartRouter {
     url: string,
     options: ScrapeOptions,
     domain: string,
+    tracer?: StageTracer,
   ): Promise<RouterResult> {
     const proxy = await this.resolveProxy(domain, options.proxy);
     const proxyUrl = proxy?.url;
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
 
     if (tier <= 1) {
+      const t0 = attemptStart(tracer);
       try {
         const r = await tier1Fetch(url, { headers: options.headers });
         const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
         if (v.ok) {
+          traceAttempt(tracer, 1, t0, 'accepted');
           await this.updateDomainStrategy(domain, tier, true, r.latencyMs);
           return { ...r, tierUsed: tier, ...proxyMeta };
         }
-      } catch { /* fall through */ }
-      return this.escalate(url, options, domain);
+        traceAttempt(tracer, 1, t0, 'rejected', v.reason);
+      } catch (err) {
+        traceAttempt(tracer, 1, t0, 'error', describeError(err));
+      }
+      return this.escalate(url, options, domain, {}, tracer);
     }
 
     if (tier === 2) {
+      const t0 = attemptStart(tracer);
       try {
         const r = await tier2Fetch(url, { headers: options.headers, proxy: proxyUrl });
         const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
         if (v.ok) {
+          traceAttempt(tracer, 2, t0, 'accepted');
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
         }
-      } catch { /* fall through */ }
-      return this.escalate(url, options, domain);
+        traceAttempt(tracer, 2, t0, 'rejected', v.reason);
+      } catch (err) {
+        traceAttempt(tracer, 2, t0, 'error', describeError(err));
+      }
+      return this.escalate(url, options, domain, {}, tracer);
     }
 
     // Tiers 3-5 use browser
-    return this.executeBrowser(url, options, domain, proxy);
+    return this.executeBrowser(url, options, domain, proxy, tracer);
   }
 
   private async executeBrowser(
@@ -385,27 +462,34 @@ export class SmartRouter {
     options: ScrapeOptions,
     domain: string,
     proxy: SelectedProxy | null,
+    tracer?: StageTracer,
   ): Promise<RouterResult> {
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
 
     // ── T4: Patchright browser ──
-    let context = await this.getBrowserContext();
+    // Acquisition failures propagate (no stealth fallback), as before.
+    let t0 = attemptStart(tracer);
+    let context = await this.acquireForAttempt(tracer, 4, t0);
     try {
       const r = await tier4Fetch(url, context, options);
       const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
       if (v.ok) {
+        traceAttempt(tracer, 4, t0, 'accepted');
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return { ...r, tierUsed: 4, ...proxyMeta };
       }
+      traceAttempt(tracer, 4, t0, 'rejected', v.reason);
       await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
-    } catch {
+    } catch (err) {
+      traceAttempt(tracer, 4, t0, 'error', describeError(err));
       /* fall through to stealth */
     } finally {
       this.releaseBrowserContext(context);
     }
 
     // ── T5: stealth (terminal — accept whatever we get) ──
-    context = await this.getBrowserContext();
+    t0 = attemptStart(tracer);
+    context = await this.acquireForAttempt(tracer, 5, t0);
     try {
       const r = await tier4StealthFetch(url, context, {
         waitFor: options.waitFor,
@@ -415,13 +499,43 @@ export class SmartRouter {
       });
       const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
       if (v.ok) {
+        traceAttempt(tracer, 5, t0, 'accepted');
         await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
       } else {
+        traceAttempt(tracer, 5, t0, 'rejected', v.reason);
         await this.updateDomainStrategy(domain, 5, false, r.latencyMs);
       }
       return { ...r, tierUsed: 5, ...proxyMeta };
+    } catch (err) {
+      traceAttempt(tracer, 5, t0, 'error', describeError(err));
+      throw err;
     } finally {
       this.releaseBrowserContext(context);
+    }
+  }
+
+  // ── Browser contexts ───────────────────────────────────
+
+  // Waiting for a pooled context is pure queueing latency, so it is timed
+  // separately (accumulated across T4 and T5 within one request).
+  private acquireContext(tracer?: StageTracer): Promise<BrowserContext> {
+    return tracer
+      ? tracer.time('browser_acquire', () => this.getBrowserContext())
+      : this.getBrowserContext();
+  }
+
+  // For call sites where an acquisition failure escapes the tier's own
+  // try/catch: record the failed attempt, then rethrow unchanged.
+  private async acquireForAttempt(
+    tracer: StageTracer | undefined,
+    tier: number,
+    t0: number,
+  ): Promise<BrowserContext> {
+    try {
+      return await this.acquireContext(tracer);
+    } catch (err) {
+      traceAttempt(tracer, tier, t0, 'error', describeError(err));
+      throw err;
     }
   }
 

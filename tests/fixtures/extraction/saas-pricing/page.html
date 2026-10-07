@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pricing · Fieldnote — Shared notes for field teams</title>
+  <meta name="description" content="Simple pricing for teams of every size. Start free for 14 days, then pick Starter, Pro or Business. Save about 20% with annual billing.">
+  <meta property="og:title" content="Fieldnote pricing">
+  <meta property="og:description" content="Plans from $15/mo. Save about 20% with annual billing.">
+  <meta property="og:image" content="https://www.fieldnote.app/og/pricing.png">
+  <meta property="og:url" content="https://www.fieldnote.app/pricing">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://www.fieldnote.app/pricing">
+  <link rel="stylesheet" href="/_next/static/css/5e1f2a9c7b3d4e6f.css">
+  <style>
+    .tw-1x9k2a{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px}
+    [data-billing="annual"] .price--monthly{display:none}
+    [data-billing="monthly"] .price--annual{display:none}
+    .plan-card--featured{outline:2px solid #5b4dff}
+  </style>
+  <script async src="https://plausible.io/js/script.tagged-events.js" data-domain="fieldnote.app"></script>
+  <script>
+    !function(){var analytics=window.analytics=window.analytics||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","once","off","on"];analytics.load=function(key){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.src="https://cdn.segment.com/analytics.js/v1/"+key+"/analytics.min.js";var n=document.getElementsByTagName("script")[0];n.parentNode.insertBefore(t,n)};analytics.SNIPPET_VERSION="4.15.3";analytics.load("wK3pQ9xL2mN8vB4c");analytics.page("Pricing")}}();
+  </script>
+  <script id="pricing-config" type="application/json">{"currency":"USD","defaultBilling":"annual","plans":[{"id":"starter","name":"Starter","unitAmount":{"monthly":1900,"annual":18000},"seats":3},{"id":"pro","name":"Pro","unitAmount":{"monthly":4900,"annual":46800},"seats":10},{"id":"business","name":"Business","unitAmount":{"monthly":9900,"annual":94800},"seats":25},{"id":"enterprise","name":"Enterprise","unitAmount":null,"seats":null}],"addOns":[{"id":"extra-seat","unitAmount":{"monthly":800}}],"experiment":"pricing-v7-b"}</script>
+</head>
+<body class="antialiased bg-white text-slate-900">
+  <div id="__next">
+    <div class="announcement tw-8h2j4k" role="note">New: offline sync for iPad is here. <a href="/changelog/offline-ipad">Read the changelog →</a></div>
+
+    <header class="tw-3m9n1b sticky top-0 z-40">
+      <div class="mx-auto max-w-7xl flex items-center justify-between px-6 py-4">
+        <a href="/" class="tw-5q6w7e" aria-label="Fieldnote home"><img src="/logo.svg" alt="Fieldnote" width="112" height="28"></a>
+        <nav aria-label="Primary" class="hidden md:flex gap-8">
+          <a href="/product">Product</a>
+          <a href="/solutions">Solutions</a>
+          <a href="/customers">Customers</a>
+          <a href="/pricing" aria-current="page">Pricing</a>
+          <a href="/docs">Docs</a>
+        </nav>
+        <div class="flex gap-3"><a href="https://app.fieldnote.app/login">Log in</a><a class="btn btn-primary" href="https://app.fieldnote.app/signup">Start free trial</a></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero tw-0z9x8c text-center">
+        <h1 class="text-5xl font-semibold">Pricing that grows with your crew</h1>
+        <p class="mt-4 text-lg text-slate-600">Every plan includes unlimited notes, photo capture and offline mode. Try any plan free for 14 days.</p>
+
+        <div class="billing-toggle tw-7v6b5n" role="tablist" aria-label="Billing period">
+          <button role="tab" id="tab-monthly" aria-selected="false" data-billing-option="monthly">Monthly</button>
+          <button role="tab" id="tab-annual" aria-selected="true" data-billing-option="annual">Annual <span class="badge">Save ~20%</span></button>
+        </div>
+      </section>
+
+      <section aria-label="Plans" class="pricing-grid tw-1x9k2a" data-billing="annual">
+        <article class="plan-card tw-4c3x2z" data-plan="starter">
+          <h2 class="plan-name">Starter</h2>
+          <p class="plan-tagline">For small crews getting organized.</p>
+          <div class="price">
+            <p class="price--monthly"><span class="amount">$19</span><span class="per">/mo</span></p>
+            <p class="price--annual"><span class="amount">$15</span><span class="per">/mo</span> <span class="billed">billed annually ($180/yr)</span></p>
+          </div>
+          <p class="seats">Up to 3 seats</p>
+          <a class="btn btn-secondary" href="https://app.fieldnote.app/signup?plan=starter">Start free trial</a>
+          <ul class="features">
+            <li>Unlimited notes and checklists</li>
+            <li>5 GB photo storage per seat</li>
+            <li>Email support</li>
+          </ul>
+        </article>
+
+        <article class="plan-card plan-card--featured tw-4c3x2z" data-plan="pro">
+          <span class="ribbon">Most popular</span>
+          <h2 class="plan-name">Pro</h2>
+          <p class="plan-tagline">For growing teams that need workflows.</p>
+          <div class="price">
+            <p class="price--monthly"><span class="amount">$49</span><span class="per">/mo</span></p>
+            <p class="price--annual"><span class="amount">$39</span><span class="per">/mo</span> <span class="billed">billed annually ($468/yr)</span></p>
+          </div>
+          <p class="seats">10 seats included</p>
+          <a class="btn btn-primary" href="https://app.fieldnote.app/signup?plan=pro">Start free trial</a>
+          <ul class="features">
+            <li>Everything in Starter</li>
+            <li>Custom forms and approval workflows</li>
+            <li>50 GB photo storage per seat</li>
+            <li>Priority chat support</li>
+          </ul>
+        </article>
+
+        <article class="plan-card tw-4c3x2z" data-plan="business">
+          <h2 class="plan-name">Business</h2>
+          <p class="plan-tagline">For multi-site operations.</p>
+          <div class="price">
+            <p class="price--monthly"><span class="amount">$99</span><span class="per">/mo</span></p>
+            <p class="price--annual"><span class="amount">$79</span><span class="per">/mo</span> <span class="billed">billed annually ($948/yr)</span></p>
+          </div>
+          <p class="seats">25 seats included</p>
+          <a class="btn btn-secondary" href="https://app.fieldnote.app/signup?plan=business">Start free trial</a>
+          <ul class="features">
+            <li>Everything in Pro</li>
+            <li>SAML single sign-on</li>
+            <li>Audit log (1 year retention)</li>
+            <li>99.9% uptime SLA</li>
+          </ul>
+        </article>
+
+        <article class="plan-card tw-4c3x2z" data-plan="enterprise">
+          <h2 class="plan-name">Enterprise</h2>
+          <p class="plan-tagline">For regulated and large organizations.</p>
+          <div class="price">
+            <p class="price--custom"><span class="amount">Custom pricing</span></p>
+          </div>
+          <p class="seats">Unlimited seats</p>
+          <a class="btn btn-secondary" href="/contact-sales">Contact sales</a>
+          <ul class="features">
+            <li>Everything in Business</li>
+            <li>Dedicated success manager</li>
+            <li>Data residency (EU, US, AU)</li>
+            <li>Custom contract and invoicing</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="addons tw-9o8i7u" aria-labelledby="addons-h">
+        <h2 id="addons-h">Add-ons</h2>
+        <p>Need more people on Starter, Pro or Business? Add extra seats for $8/seat/mo, billed with your plan. Extra photo storage is $5 per 100 GB per month.</p>
+      </section>
+
+      <section class="compare tw-2w3e4r" aria-labelledby="compare-h">
+        <h2 id="compare-h">Compare plans</h2>
+        <table class="compare-table">
+          <thead><tr><th scope="col">Feature</th><th scope="col">Starter</th><th scope="col">Pro</th><th scope="col">Business</th><th scope="col">Enterprise</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Seats included</th><td>3</td><td>10</td><td>25</td><td>Unlimited</td></tr>
+            <tr><th scope="row">Photo storage per seat</th><td>5 GB</td><td>50 GB</td><td>200 GB</td><td>Custom</td></tr>
+            <tr><th scope="row">Offline mode</th><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><th scope="row">Custom forms</th><td>—</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><th scope="row">SAML SSO</th><td>—</td><td>—</td><td>✓</td><td>✓</td></tr>
+            <tr><th scope="row">Audit log</th><td>—</td><td>—</td><td>1 year</td><td>Unlimited</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="faq tw-6y5t4r" aria-labelledby="faq-h">
+        <h2 id="faq-h">Frequently asked questions</h2>
+        <details><summary>Can I switch between monthly and annual billing?</summary><p>Yes. Switching to annual billing applies the discount from your next renewal. Annual plans are billed upfront for 12 months.</p></details>
+        <details><summary>Do you offer discounts for nonprofits?</summary><p>Registered nonprofits get 50% off Starter and Pro. Contact us with your registration details.</p></details>
+        <details><summary>What happens when my trial ends?</summary><p>After 14 days your workspace becomes read-only until you choose a plan. Nothing is deleted.</p></details>
+      </section>
+    </main>
+
+    <div class="newsletter tw-1q1q1q"><form action="/api/newsletter" method="post"><label for="nl-email">Product updates, once a month</label><input id="nl-email" type="email" name="email" placeholder="you@company.com"><button type="submit">Subscribe</button></form></div>
+
+    <footer class="tw-8u8u8u border-t">
+      <nav aria-label="Footer"><a href="/security">Security</a> · <a href="/legal/terms">Terms</a> · <a href="/legal/privacy">Privacy</a> · <a href="/status">Status</a></nav>
+      <p>All prices in USD and exclusive of applicable taxes. © 2026 Fieldnote Labs, Inc.</p>
+    </footer>
+
+    <div class="cookie-banner tw-0c0c0c" role="dialog" aria-label="Cookie preferences">
+      <p>We use essential cookies to run Fieldnote and optional analytics cookies to improve it.</p>
+      <button type="button">Decline optional</button><button type="button">Accept all</button>
+    </div>
+  </div>
+  <script src="/_next/static/chunks/pages/pricing-9a8b7c6d5e4f3a2b.js" defer></script>
+</body>
+</html>

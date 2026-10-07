@@ -1,0 +1,18 @@
+{
+  "id": "next-data",
+  "url": "https://www.ridgelinerunning.com/products/ridgeline-trail-runner-2?color=black",
+  "category": "spa-embedded-json",
+  "description": "Next.js product page as served before hydration: a loading skeleton with only the title and price as text, and the full product (SKU, images, variants, rating) inside script#__NEXT_DATA__ (application/json), along with recommendation products and a promo.",
+  "schema": {
+    "name": "string — product name",
+    "price": "number — current price",
+    "currency": "string — ISO 4217 code",
+    "sku": "string — product SKU (style code, not a size variant)",
+    "images": "url[] — absolute URLs of the product's own images"
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "sku and images exist only in __NEXT_DATA__ (they would render after hydration; the engine must read embedded JSON without executing scripts). Image paths are relative ('/media/catalog/rtr2/black-side.jpg') and must be made absolute against the page URL. Decoys inside the same JSON: variant SKUs (RTR2-BLK-085 ...), recommendation products (Road Runner 4 $119.95, socks $24) and their images, promo 15% off, the /_next/image preload URLs.",
+  "tags": ["embedded-json", "next-js", "spa", "relative-urls", "decoys"],
+  "nonVisibleFields": ["sku", "images"]
+}

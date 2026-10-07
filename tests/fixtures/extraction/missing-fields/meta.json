@@ -1,0 +1,16 @@
+{
+  "id": "missing-fields",
+  "url": "https://www.trailmart.com/dp/B0CKX7T2QF/kestrel-outdoor-trailblazer-2-person-tent",
+  "category": "ecommerce-pdp",
+  "description": "Marketplace product page for an item that is 'Currently unavailable' (no price in the buy box) and has no ratings ('No customer reviews yet', '0 customer ratings'), surrounded by priced and rated carousels, sponsored products and a price for a different color variant in embedded JSON.",
+  "schema": {
+    "title": "string — product title",
+    "price": "number — current price",
+    "rating": "number — average customer rating",
+    "brand": "string — brand name"
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "Shorthand fields are nullable, so null price and rating are the correct, complete answer (the engine should report them as missing/not_found, not fill them). Decoys: 'also viewed' prices $139.99/$189.95/$229.00/$24.99 and ratings 4.4/4.6/4.2/4.7, sponsored $39.99/$59.99, the Desert Sand variant '$149.99' in window.tmData, R-Value 4.2, weight 4.2 Pounds. Brand is 'Kestrel Outdoor' (overview table, JSON-LD, 'Visit the Kestrel Outdoor Store'); Manufacturer 'Kestrel Outdoor Co.' is a different field.",
+  "tags": ["pdp", "nulls", "unavailable", "decoys", "json-ld"]
+}

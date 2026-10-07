@@ -1,0 +1,20 @@
+{
+  "id": "value-at-end",
+  "url": "https://ferrite-db.dev/blog/building-ferrite-embedded-time-series-storage/",
+  "category": "long-article",
+  "description": "Long technical blog post (~6,300 visible words, 13 sections, code blocks, table of contents) whose version and license appear only in the final 'Release information' section. Generated deterministically by generate.ts.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string" },
+      "version": { "type": "string", "description": "Current release version, from the release information" },
+      "license": { "type": "string", "description": "SPDX identifier of the project's license" },
+      "author": { "type": "string" }
+    },
+    "required": ["title", "version", "license", "author"]
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "Tests that long inputs are not silently cut from the end: 'Version: 3.14.2' and 'License: Apache-2.0' sit in the last ~1% of the text. Decoys: older releases mentioned in the body (2.0, 2.4, 3.9, 3.13), an MIT-licensed vendored codec, 'Minimum supported Rust version: 1.79', CC BY 4.0 for site content in the footer, reviewers thanked at the end (Tomasz Wierzbicki, Amara Osei). The author is the byline (Ines Valdivia). If the engine cannot fit the page it must report truncation (partial) rather than guess.",
+  "tags": ["article", "long-input", "generated", "decoys"]
+}

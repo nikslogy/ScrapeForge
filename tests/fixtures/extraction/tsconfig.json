@@ -1,0 +1,13 @@
+// Typecheck for the extraction corpus and its scoring: npx tsc -p tests/fixtures/extraction
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../../..",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts", "../../engine/scoring.ts", "../../engine/scoring.test.ts", "../../engine/fixtures.test.ts"]
+}

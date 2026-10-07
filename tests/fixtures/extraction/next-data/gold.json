@@ -1,0 +1,11 @@
+{
+  "name": "Ridgeline Trail Runner 2",
+  "price": 129.95,
+  "currency": "USD",
+  "sku": "RTR2-BLK",
+  "images": [
+    "https://www.ridgelinerunning.com/media/catalog/rtr2/black-side.jpg",
+    "https://www.ridgelinerunning.com/media/catalog/rtr2/black-top.jpg",
+    "https://www.ridgelinerunning.com/media/catalog/rtr2/black-sole.jpg"
+  ]
+}

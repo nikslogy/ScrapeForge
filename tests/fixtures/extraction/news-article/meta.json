@@ -1,0 +1,17 @@
+{
+  "id": "news-article",
+  "url": "https://www.harborledger.com/news/climate/2026/09/14/city-council-approves-seawall-plan/",
+  "category": "news-article",
+  "description": "News story with kicker, headline, dek, two-author byline, published and updated <time> elements, nine body paragraphs, a pull quote, contributor note, newsletter signup, related-articles list with other bylines, most-read rail and a consent dialog. Carries NewsArticle JSON-LD with UTC timestamps.",
+  "schema": {
+    "headline": "string — article headline",
+    "authors": "string[] — byline authors, in order",
+    "publishedAt": "datetime — original publication time, as in the page's datetime attribute",
+    "section": "string — site section the article belongs to",
+    "summary": { "type": "string", "x-derived": true, "description": "One-sentence summary of the article" }
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "summary is x-derived: it is an inference, so gold is null and scoring skips it (any reasonable summary is acceptable; it must be flagged derived in evidence). publishedAt gold is the visible <time datetime> '2026-09-14T06:30:00-04:00'; the JSON-LD/meta '2026-09-14T10:30:00Z' is the same instant and scores as equal. The updated time (15:12 ET) is a decoy. Authors are the two byline names; 'Priya Nair contributed reporting' is not a byline author, and the related-articles bylines (Daniel Reyes, Lena Fischer, Graham Osei, Maya Okafor) are decoys. Section is 'Climate' (kicker, breadcrumb, JSON-LD articleSection).",
+  "tags": ["article", "json-ld", "derived", "dates", "decoys"]
+}

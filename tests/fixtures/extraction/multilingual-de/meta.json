@@ -1,0 +1,17 @@
+{
+  "id": "multilingual-de",
+  "url": "https://www.kaffeehaus-technik.de/kaffeevollautomaten/hausmann-brava-x7-schwarz.html",
+  "category": "ecommerce-pdp",
+  "description": "German shop product page (Shopware-style) with schema.org microdata: price '1.299,00 €*', struck UVP '1.499,00 €', 'Sie sparen 200,00 € (13 %)', 'Auf Lager', 'Lieferzeit 2-3 Werktage', 'Bewertung 4,5 von 5', financing per month, a German cookie banner and accessory cards with their own prices, ratings and stock states.",
+  "schema": {
+    "name": "string — product name",
+    "price": "number — current price",
+    "currency": "string — ISO 4217 code",
+    "inStock": "boolean — whether the item is in stock",
+    "rating": "number — average rating out of 5"
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "German number formats: '1.299,00' is 1299 (dot = thousands), '4,5' is 4.5 (comma = decimal). inStock true from 'Auf Lager' (and microdata InStock); 'Nicht vorrätig' on an accessory is a decoy. Decoys: UVP 1.499,00 €, savings 200,00 €, financing 54,13 € mtl., accessories 24,99/39,90/12,49 € with ratings 4,8/4,2/4,6, header cart 0,00 €, free shipping from 49 €, review mentioning 600 €, power '1.450 W'. Currency EUR is shown as €.",
+  "tags": ["pdp", "i18n", "locale-numbers", "microdata", "decoys"]
+}

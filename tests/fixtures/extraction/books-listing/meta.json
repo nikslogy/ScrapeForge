@@ -1,0 +1,23 @@
+{
+  "id": "books-listing",
+  "url": "https://books.toscrape.com/catalogue/category/books/mystery_3/index.html",
+  "category": "ecommerce-listing",
+  "description": "Category page (books.toscrape template) with 20 article.product_pod cards inside ol.row, a 50-link category nav, a pager, and a 'Recently viewed' sidebar of 3 cards built from the same product_pod component.",
+  "schema": {
+    "books": [
+      {
+        "title": "string — full book title",
+        "price": "number — price in GBP",
+        "rating": "integer — star rating from 1 to 5",
+        "inStock": "boolean — true when the card says In stock",
+        "url": "url — absolute link to the book's page"
+      }
+    ]
+  },
+  "expectedShape": "array",
+  "recordKey": "title",
+  "expectStatus": "complete",
+  "notes": "Long titles are truncated in the link text ('The Murder of Roger ...'); the full title is in a[title] and img[alt], and gold uses the full title. Links are relative ('../../../sharp-objects_997/index.html') and must resolve against the page URL to https://books.toscrape.com/catalogue/<slug>/index.html. Ratings exist only as classes 'star-rating One'..'Five'. Two cards are 'Out of stock' (inStock false). The 3 'Recently viewed' sidebar cards (Tipping the Velvet, Soumission, The Requiem Red) reuse the product_pod markup but are not part of the listing. Page 1 of 2: only these 20 records are on this snapshot.",
+  "tags": ["listing", "books", "decoys", "relative-urls", "class-encoded"],
+  "nonVisibleFields": ["rating"]
+}

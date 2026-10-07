@@ -1,0 +1,19 @@
+{
+  "id": "book-pdp-jsonld",
+  "url": "https://books.toscrape.com/catalogue/sharp-objects_997/index.html",
+  "category": "ecommerce-pdp",
+  "description": "Bookstore product page (books.toscrape template) carrying a JSON-LD Product with offer, availability and aggregateRating, plus a 'recently viewed' strip of four other books.",
+  "schema": {
+    "title": "string — book title",
+    "price": "number — price including tax",
+    "currency": "string — ISO 4217 currency code of the price",
+    "availability": "string — availability line exactly as displayed, e.g. 'In stock (3 available)'",
+    "rating": "number — star rating from 1 to 5",
+    "upc": "string — UPC from the product information table"
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "Structured data covers title/price/currency/rating; availability text and UPC come from the page (JSON-LD availability is the schema.org URL, not the displayed line). Currency GBP is shown only as the £ symbol. Rating 4 is the class 'star-rating Four' and JSON-LD ratingValue; it is not printed as a number. The 'Products you recently viewed' cards (prices £19.63, £56.50, £16.64, £44.10) must not leak into the single-item output.",
+  "tags": ["pdp", "json-ld", "structured-data", "decoys", "books"],
+  "nonVisibleFields": ["rating"]
+}

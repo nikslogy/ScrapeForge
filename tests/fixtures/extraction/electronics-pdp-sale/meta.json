@@ -1,0 +1,26 @@
+{
+  "id": "electronics-pdp-sale",
+  "url": "https://www.voltaro.com/p/lumetra-aerobook-14-oled-laptop/LMT-AB14-2026",
+  "category": "ecommerce-pdp",
+  "description": "Electronics retailer laptop page: sale price with struck-through original, 'Save $200', a 16GB/32GB variant picker with per-variant prices (16GB selected), a specs table, rating summary with histogram, financing offer and four 'Customers also bought' decoy cards.",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "name": { "type": "string" },
+      "salePrice": { "type": "number", "description": "Current price of the selected configuration" },
+      "originalPrice": { "type": ["number", "null"], "description": "Struck-through regular price before the discount" },
+      "currency": { "type": "string", "description": "ISO 4217 code" },
+      "ram": { "type": "integer", "description": "Memory of the selected configuration, in GB" },
+      "storage": { "type": "integer", "description": "SSD capacity in GB" },
+      "weightKg": { "type": "number", "description": "Weight in kilograms" },
+      "rating": { "type": "number", "description": "Average customer rating out of 5" },
+      "reviewCount": { "type": "integer" }
+    },
+    "required": ["name", "salePrice", "currency"]
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "Selected variant is 16GB (aria-pressed=true, legend 'Memory: 16GB'): salePrice 1099.99, originalPrice 1299.99. The 32GB variant ($1,349.99), the JSON-LD AggregateOffer (lowPrice/highPrice, two offers), the financing line ($45.83/mo.), protection plan ($189.99), reviews mentioning $1,500 and $1,349.99, and the decoy cards ($49.99, $29.99, $1,449.99/$1,599.99, $39.99; ratings 4.7/4.5/4.4/4.6) must not be picked. Weight '1.4 kg (3.09 lb)' → 1.4. Rating 4.6 from '(2,315 reviews)'. Currency is shown as $ on a US site.",
+  "tags": ["pdp", "json-ld", "variants", "sale-price", "decoys", "table", "hashed-classes"]
+}

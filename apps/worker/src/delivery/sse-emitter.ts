@@ -24,7 +24,10 @@ export class SseEmitter {
     await this.emit(jobId, 'content', { format, preview: preview.slice(0, 500) });
   }
 
-  async emitExtraction(jobId: string, data: Record<string, unknown>): Promise<void> {
+  // Extraction data is an object for single-entity pages, an array of records
+  // for listing pages, or a whole ExtractionOutcome; anything JSON-serializable
+  // goes, exactly as for emit().
+  async emitExtraction(jobId: string, data: unknown): Promise<void> {
     await this.emit(jobId, 'extraction', data);
   }
 

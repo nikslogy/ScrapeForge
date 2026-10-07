@@ -1,0 +1,32 @@
+{
+  "id": "specs-comparison-table",
+  "url": "https://www.specsheetweekly.com/phones/best-phones-2026-specs-compared/",
+  "category": "comparison-table",
+  "description": "Editorial comparison page with one dense table of 15 phones x 8 columns (model, price, screen, battery, weight, storage, 5G, release year), a repeated header row after row 8, a footnote row spanning all columns, an 'Our picks' box and a deals rail with different prices.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "phones": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "price": { "type": ["number", "null"], "description": "Launch price in USD from the table; null when not announced" },
+            "screenInches": { "type": "number" },
+            "batteryMah": { "type": "integer" },
+            "weightG": { "type": "integer" },
+            "has5g": { "type": "boolean" },
+            "releaseYear": { "type": "integer" }
+          },
+          "required": ["model"]
+        }
+      }
+    }
+  },
+  "expectedShape": "array",
+  "recordKey": "model",
+  "expectStatus": "complete",
+  "notes": "Output is wrapped as {phones: [...]} by the customer schema; gold lists the bare records. The repeated header row and the footnote row are not phones (exactly 15 records). Halcyon P8 price is 'TBA' → null. Battery cells use thousands separators ('5,000'). The picks box ($949 Nova X1 Pro, $179 Orbis A16, $299 Fennec Lite) and the deals rail ($599, $749, $449) are street prices, not launch prices.",
+  "tags": ["table", "listing", "repeated-header", "nulls", "decoys"]
+}

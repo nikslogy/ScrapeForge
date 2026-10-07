@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { ScrapeJobData, createCacheKey, isUrlSafe } from '@scrapeforge/shared';
+import { ScrapeJobData, createCacheKey, checkPublicUrl } from '@scrapeforge/shared';
 
 // Empty strings coming from form-style API explorers (Scalar, Swagger UI)
 // should be treated as "field not provided" rather than "invalid value".
@@ -43,10 +43,23 @@ export async function scrapeRoutes(app: FastifyInstance) {
     const body = parseResult.data;
     const user = request.user!;
 
-    if (!isUrlSafe(body.url)) {
+    const urlCheck = await checkPublicUrl(body.url);
+    if (!urlCheck.ok) {
       return reply.status(400).send({
-        error: 'URL targets a private or reserved address range.',
+        error: urlCheck.reason === 'dns'
+          ? 'Could not resolve host.'
+          : 'URL targets a private or reserved address range.',
       });
+    }
+    if (body.webhookUrl) {
+      const webhookCheck = await checkPublicUrl(body.webhookUrl);
+      if (!webhookCheck.ok) {
+        return reply.status(400).send({
+          error: webhookCheck.reason === 'dns'
+            ? 'Could not resolve webhookUrl host.'
+            : 'webhookUrl targets a private or reserved address range.',
+        });
+      }
     }
 
     const { redis, queues, queueEvents } = app;

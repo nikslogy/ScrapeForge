@@ -1,0 +1,15 @@
+{
+  "id": "challenge-page",
+  "url": "https://www.shopmarten.com/products/alpine-down-jacket",
+  "category": "blocked",
+  "description": "Cloudflare managed-challenge interstitial ('Just a moment...', 'Verifying you are human', Turnstile widget iframe, _cf_chl_opt script, Ray ID footer) served instead of the product page.",
+  "schema": {
+    "title": "string — product title",
+    "price": "number — current price",
+    "rating": "number — average rating"
+  },
+  "expectedShape": "object",
+  "expectStatus": "failed",
+  "notes": "Nothing on this page belongs to the requested product. The engine must detect the challenge, return status 'failed' with data null and spend no LLM tokens. Returning 'Just a moment...' as a title or the Ray ID/refresh numbers as a price is a hallucination. All tokens and site keys in the markup are fake.",
+  "tags": ["blocked", "challenge", "cloudflare", "no-llm"]
+}

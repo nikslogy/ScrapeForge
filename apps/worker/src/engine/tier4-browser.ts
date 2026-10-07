@@ -1,5 +1,11 @@
 import type { BrowserContext } from 'patchright';
-import { installResourceBlocker } from '../browser/resource-blocker.js';
+import { assertPublicUrl } from '@scrapeforge/shared';
+import {
+  assertNavigationAllowed,
+  ensureContextOutboundGuard,
+  installOutboundGuard,
+  monitorOutbound,
+} from '../browser/outbound-guard.js';
 
 const FLATTEN_SHADOW_DOM_SCRIPT = `
   (function() {
@@ -155,7 +161,12 @@ export async function tier4Fetch(
   latencyMs: number;
 }> {
   const start = performance.now();
+  // Refuse before spending a page on it. The guards below cover everything
+  // the page loads afterwards (see browser/outbound-guard.ts).
+  const target = await assertPublicUrl(url);
+  await ensureContextOutboundGuard(context);
   const page = await context.newPage();
+  const monitor = monitorOutbound(page);
 
   try {
     // Apply fingerprint patches before anything navigates. Patchright
@@ -164,9 +175,9 @@ export async function tier4Fetch(
     // commercial fingerprinters key on.
     await page.addInitScript(FINGERPRINT_INIT_SCRIPT);
 
-    if (options.blockResources !== false) {
-      await installResourceBlocker(page);
-    }
+    // Always installed: blockResources only toggles tracker/media blocking,
+    // never the SSRF check.
+    await installOutboundGuard(page, { blockResources: options.blockResources !== false });
 
     // Mobile emulation: apply viewport + UA at the PAGE level so pooled
     // desktop contexts stay reusable. Overrides cleared on page.close().
@@ -176,10 +187,13 @@ export async function tier4Fetch(
       await page.addInitScript(MOBILE_INIT_SCRIPT);
     }
 
-    const response = await page.goto(url, {
+    const response = await page.goto(target.href, {
       waitUntil: 'domcontentloaded',
       timeout: Math.min(options.timeout || 20_000, 20_000),
     });
+    // Route handlers never see redirect hops: check the chain before
+    // spending any more time on the page.
+    await assertNavigationAllowed(response, page.url());
 
     if (options.waitFor) {
       await page.waitForSelector(options.waitFor, {
@@ -198,6 +212,8 @@ export async function tier4Fetch(
     // Flatten Shadow DOM so extraction can read hidden content
     await page.evaluate(FLATTEN_SHADOW_DOM_SCRIPT);
 
+    // Page scripts may have navigated since the initial load.
+    await assertNavigationAllowed(null, page.url());
     const html = await page.content();
     const statusCode = response?.status() || 200;
 
@@ -207,6 +223,10 @@ export async function tier4Fetch(
       screenshot = buffer.toString('base64');
     }
 
+    // Nothing is returned if any redirect hop or WebSocket reached a
+    // blocked destination while the page was loading.
+    await monitor.assertClean();
+
     return {
       html,
       statusCode,
@@ -214,6 +234,7 @@ export async function tier4Fetch(
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    monitor.dispose();
     await page.close();
   }
 }

@@ -1,0 +1,3957 @@
+{
+  "meta": {
+    "date": "2026-10-07",
+    "startedAt": "2026-10-07T17:53:36.024Z",
+    "machine": {
+      "os": "Linux 6.18.44-fc-v77 (linux/x64)",
+      "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+      "cpus": 4,
+      "availableParallelism": 4,
+      "totalMemGiB": 15.7,
+      "loadAvgAtStart": [
+        1.41,
+        1.76,
+        1.57
+      ]
+    },
+    "node": "v22.22.0",
+    "versions": {
+      "bullmq": "5.74.0",
+      "ioredis": "5.10.1",
+      "piscina": "5.1.4",
+      "impit": "0.13.0",
+      "jsdom": "25.0.1",
+      "redis": "7.0.15"
+    },
+    "redis": {
+      "port": 6391,
+      "startedByHarness": true,
+      "persistence": "off (--save \"\" --appendonly no) when started by the harness"
+    },
+    "config": {
+      "redisPort": 6391,
+      "date": "2026-10-07",
+      "only": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "Q"
+      ],
+      "queueN": 500,
+      "warmup": 50,
+      "idleSamples": 8,
+      "idleMs": 10000,
+      "extractSmallN": 300,
+      "extractLargeN": 50,
+      "fetchN": 300,
+      "fullN": 200,
+      "browserN": 20,
+      "resultBytes": 51200,
+      "levels": [
+        1,
+        5,
+        20
+      ]
+    },
+    "finishedAt": "2026-10-07T18:03:51.143Z",
+    "durationSec": 615
+  },
+  "notes": {
+    "timestamps": "Producer and worker run in separate processes; worker timestamps are corrected by the measured clock offset (see each scenario.clock).",
+    "phases": "enqueue = Queue.add; pickup = add resolved → processor start; process = processor body; finalize = processor end → worker completed event (moveToFinished); notify = completed → waitUntilFinished resolved; afterProcess = finalize + notify; overhead = total − process.",
+    "field": "__latency"
+  },
+  "scenarios": {
+    "A": {
+      "description": "In-process no-op async call; Redis PING round trip on the harness Redis; JSON cost of a ~50 KB ScrapeResult.",
+      "noop": [
+        {
+          "label": "no-op async call sequential",
+          "concurrency": 1,
+          "n": 20000,
+          "wallMs": 16,
+          "throughputPerSec": 1230746.7,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20000,
+            "min": 0,
+            "mean": 0,
+            "p50": 0,
+            "p95": 0.001,
+            "p99": 0.003,
+            "max": 1.391
+          }
+        },
+        {
+          "label": "no-op async call concurrency 5",
+          "concurrency": 5,
+          "n": 20000,
+          "wallMs": 12,
+          "throughputPerSec": 1653744.6,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20000,
+            "min": 0.001,
+            "mean": 0.002,
+            "p50": 0.001,
+            "p95": 0.002,
+            "p99": 0.002,
+            "max": 1.838
+          }
+        },
+        {
+          "label": "no-op async call concurrency 20",
+          "concurrency": 20,
+          "n": 20000,
+          "wallMs": 15,
+          "throughputPerSec": 1365469.4,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20000,
+            "min": 0.002,
+            "mean": 0.007,
+            "p50": 0.005,
+            "p95": 0.012,
+            "p99": 0.031,
+            "max": 0.925
+          }
+        }
+      ],
+      "redisPing": [
+        {
+          "label": "redis PING sequential",
+          "concurrency": 1,
+          "n": 2000,
+          "wallMs": 163,
+          "throughputPerSec": 12294.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 2000,
+            "min": 0.04,
+            "mean": 0.081,
+            "p50": 0.063,
+            "p95": 0.153,
+            "p99": 0.506,
+            "max": 4.135
+          }
+        },
+        {
+          "label": "redis PING concurrency 5",
+          "concurrency": 5,
+          "n": 2000,
+          "wallMs": 66,
+          "throughputPerSec": 30505.8,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 2000,
+            "min": 0.031,
+            "mean": 0.114,
+            "p50": 0.093,
+            "p95": 0.172,
+            "p99": 0.26,
+            "max": 6.179
+          }
+        },
+        {
+          "label": "redis PING concurrency 20",
+          "concurrency": 20,
+          "n": 2000,
+          "wallMs": 21,
+          "throughputPerSec": 96048.2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 2000,
+            "min": 0.027,
+            "mean": 0.123,
+            "p50": 0.115,
+            "p95": 0.243,
+            "p99": 0.296,
+            "max": 0.379
+          }
+        }
+      ],
+      "json": {
+        "resultBytes": 51208,
+        "stringify": {
+          "n": 500,
+          "min": 0.137,
+          "mean": 0.164,
+          "p50": 0.146,
+          "p95": 0.201,
+          "p99": 0.453,
+          "max": 2.231
+        },
+        "parse": {
+          "n": 500,
+          "min": 0.03,
+          "mean": 0.037,
+          "p50": 0.033,
+          "p95": 0.052,
+          "p99": 0.103,
+          "max": 0.396
+        }
+      }
+    },
+    "B1": {
+      "description": "BullMQ round trip, noop processor, priority 1 (pass 1)",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "noop",
+        "cacheTtl": 3600,
+        "url": "https://example.com/",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.001,
+        "rttMs": 0.052,
+        "samples": 50
+      },
+      "workerImportMs": {},
+      "coldFirstJob": {
+        "enqueue": 5.227,
+        "pickup": 1.388,
+        "process": 0.005,
+        "finalize": 2.682,
+        "notify": 0.029,
+        "afterProcess": 2.711,
+        "overhead": 9.325,
+        "total": 9.331
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 500,
+          "wallMs": 862,
+          "throughputPerSec": 580.2,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.252,
+              "mean": 0.515,
+              "p50": 0.441,
+              "p95": 0.766,
+              "p99": 1.485,
+              "max": 8.533
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.562,
+              "mean": 0.572,
+              "p50": 0.493,
+              "p95": 1.192,
+              "p99": 2.511,
+              "max": 3.698
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0.001,
+              "p95": 0.001,
+              "p99": 0.003,
+              "max": 0.022
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.202,
+              "mean": 0.446,
+              "p50": 0.369,
+              "p95": 0.792,
+              "p99": 2.372,
+              "max": 3.676
+            },
+            "notify": {
+              "n": 500,
+              "min": -3.014,
+              "mean": 0.144,
+              "p50": 0.125,
+              "p95": 0.309,
+              "p99": 0.985,
+              "max": 2.778
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.277,
+              "mean": 0.59,
+              "p50": 0.526,
+              "p95": 0.925,
+              "p99": 2.478,
+              "max": 3.692
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.764,
+              "mean": 1.677,
+              "p50": 1.477,
+              "p95": 2.847,
+              "p99": 4.661,
+              "max": 10.005
+            },
+            "total": {
+              "n": 500,
+              "min": 0.764,
+              "mean": 1.678,
+              "p50": 1.478,
+              "p95": 2.849,
+              "p99": 4.662,
+              "max": 10.007
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 500,
+          "wallMs": 216,
+          "throughputPerSec": 2319.8,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.121,
+              "mean": 0.516,
+              "p50": 0.413,
+              "p95": 0.936,
+              "p99": 1.704,
+              "max": 5.134
+            },
+            "pickup": {
+              "n": 500,
+              "min": -3.025,
+              "mean": 0.786,
+              "p50": 0.615,
+              "p95": 2.722,
+              "p99": 4.129,
+              "max": 4.475
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0,
+              "p95": 0.001,
+              "p99": 0.001,
+              "max": 0.103
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.158,
+              "mean": 0.635,
+              "p50": 0.466,
+              "p95": 1.386,
+              "p99": 4.396,
+              "max": 5.577
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.246,
+              "mean": 0.167,
+              "p50": 0.15,
+              "p95": 0.513,
+              "p99": 2.772,
+              "max": 4.94
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.223,
+              "mean": 0.802,
+              "p50": 0.64,
+              "p95": 1.68,
+              "p99": 4.996,
+              "max": 5.879
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.764,
+              "mean": 2.105,
+              "p50": 1.665,
+              "p95": 4.679,
+              "p99": 9.072,
+              "max": 12.821
+            },
+            "total": {
+              "n": 500,
+              "min": 0.764,
+              "mean": 2.106,
+              "p50": 1.666,
+              "p95": 4.68,
+              "p99": 9.073,
+              "max": 12.822
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 500,
+          "wallMs": 103,
+          "throughputPerSec": 4863,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.218,
+              "mean": 1.156,
+              "p50": 1.005,
+              "p95": 1.974,
+              "p99": 7.988,
+              "max": 8.021
+            },
+            "pickup": {
+              "n": 500,
+              "min": -1.371,
+              "mean": 1.552,
+              "p50": 1.142,
+              "p95": 4.566,
+              "p99": 5.114,
+              "max": 8.313
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0.001,
+              "max": 0.013
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.184,
+              "mean": 0.821,
+              "p50": 0.61,
+              "p95": 1.824,
+              "p99": 4.057,
+              "max": 6.482
+            },
+            "notify": {
+              "n": 500,
+              "min": -3.12,
+              "mean": 0.448,
+              "p50": 0.345,
+              "p95": 2.175,
+              "p99": 3.457,
+              "max": 3.834
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.334,
+              "mean": 1.268,
+              "p50": 1.036,
+              "p95": 3.34,
+              "p99": 4.036,
+              "max": 6.963
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.345,
+              "mean": 3.976,
+              "p50": 3.328,
+              "p95": 7.185,
+              "p99": 11.401,
+              "max": 13.711
+            },
+            "total": {
+              "n": 500,
+              "min": 1.345,
+              "mean": 3.976,
+              "p50": 3.328,
+              "p95": 7.185,
+              "p99": 11.401,
+              "max": 13.711
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 3953080,
+        "jobsProcessed": 1651,
+        "bytesPerJob": 2394,
+        "eventsStreamLength": 7241,
+        "eventsStreamBytes": 702424,
+        "jobHashBytes": 1512,
+        "resultKeyBytes": null
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 3,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "hmget": 6,
+          "xadd": 5,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "exists": 3,
+          "zrange": 3,
+          "incr": 2,
+          "hget": 2,
+          "hmset": 2,
+          "hincrby": 2,
+          "zscore": 2,
+          "zcard": 2,
+          "llen": 2,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "hset": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 11,
+        "luaTotal": 61
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "D1": {
+      "description": "BullMQ round trip, noop processor, NO priority (pass 1)",
+      "queueOptions": {
+        "add": {
+          "priority": "none",
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "noop",
+        "cacheTtl": 3600,
+        "url": "https://example.com/",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.002,
+        "rttMs": 0.05,
+        "samples": 50
+      },
+      "workerImportMs": {},
+      "coldFirstJob": {
+        "enqueue": 2.585,
+        "pickup": 1.774,
+        "process": 0.005,
+        "finalize": 2.008,
+        "notify": 0.108,
+        "afterProcess": 2.115,
+        "overhead": 6.475,
+        "total": 6.48
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 500,
+          "wallMs": 755,
+          "throughputPerSec": 662.1,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.211,
+              "mean": 0.435,
+              "p50": 0.371,
+              "p95": 0.683,
+              "p99": 1.184,
+              "max": 7.085
+            },
+            "pickup": {
+              "n": 500,
+              "min": -3.523,
+              "mean": 0.504,
+              "p50": 0.451,
+              "p95": 0.917,
+              "p99": 2.128,
+              "max": 5.254
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0.001,
+              "p95": 0.001,
+              "p99": 0.004,
+              "max": 0.025
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.206,
+              "mean": 0.386,
+              "p50": 0.337,
+              "p95": 0.611,
+              "p99": 1.392,
+              "max": 3.325
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.861,
+              "mean": 0.142,
+              "p50": 0.134,
+              "p95": 0.29,
+              "p99": 0.869,
+              "max": 3.506
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.236,
+              "mean": 0.528,
+              "p50": 0.487,
+              "p95": 0.765,
+              "p99": 1.874,
+              "max": 3.892
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.682,
+              "mean": 1.466,
+              "p50": 1.321,
+              "p95": 2.339,
+              "p99": 4.472,
+              "max": 8.364
+            },
+            "total": {
+              "n": 500,
+              "min": 0.682,
+              "mean": 1.467,
+              "p50": 1.322,
+              "p95": 2.34,
+              "p99": 4.473,
+              "max": 8.365
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 500,
+          "wallMs": 218,
+          "throughputPerSec": 2292.2,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.109,
+              "mean": 0.466,
+              "p50": 0.423,
+              "p95": 0.887,
+              "p99": 1.263,
+              "max": 3.389
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.298,
+              "mean": 0.861,
+              "p50": 0.597,
+              "p95": 2.981,
+              "p99": 4.219,
+              "max": 8.979
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0,
+              "p50": 0,
+              "p95": 0.001,
+              "p99": 0.001,
+              "max": 0.004
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.138,
+              "mean": 0.567,
+              "p50": 0.478,
+              "p95": 1.205,
+              "p99": 3.041,
+              "max": 3.114
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.447,
+              "mean": 0.235,
+              "p50": 0.169,
+              "p95": 0.68,
+              "p99": 2.761,
+              "max": 3.818
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.22,
+              "mean": 0.802,
+              "p50": 0.708,
+              "p95": 1.669,
+              "p99": 3.317,
+              "max": 4.142
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.561,
+              "mean": 2.13,
+              "p50": 1.796,
+              "p95": 4.606,
+              "p99": 5.321,
+              "max": 12.526
+            },
+            "total": {
+              "n": 500,
+              "min": 0.562,
+              "mean": 2.13,
+              "p50": 1.796,
+              "p95": 4.607,
+              "p99": 5.322,
+              "max": 12.527
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 500,
+          "wallMs": 129,
+          "throughputPerSec": 3877.9,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.172,
+              "mean": 1.436,
+              "p50": 1.06,
+              "p95": 4.354,
+              "p99": 5.262,
+              "max": 5.324
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.307,
+              "mean": 2.057,
+              "p50": 1.494,
+              "p95": 5.412,
+              "p99": 7.132,
+              "max": 7.581
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0.001,
+              "max": 0.043
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.196,
+              "mean": 1.055,
+              "p50": 0.786,
+              "p95": 3.18,
+              "p99": 5.083,
+              "max": 5.798
+            },
+            "notify": {
+              "n": 500,
+              "min": -4.25,
+              "mean": 0.438,
+              "p50": 0.354,
+              "p95": 1.87,
+              "p99": 3.041,
+              "max": 5.805
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.397,
+              "mean": 1.493,
+              "p50": 1.225,
+              "p95": 3.877,
+              "p99": 6.065,
+              "max": 6.56
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.674,
+              "mean": 4.986,
+              "p50": 4.319,
+              "p95": 9.505,
+              "p99": 11.378,
+              "max": 12.209
+            },
+            "total": {
+              "n": 500,
+              "min": 1.674,
+              "mean": 4.987,
+              "p50": 4.319,
+              "p95": 9.505,
+              "p99": 11.379,
+              "max": 12.21
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 3409368,
+        "jobsProcessed": 1651,
+        "bytesPerJob": 2065,
+        "eventsStreamLength": 7244,
+        "eventsStreamBytes": 678092,
+        "jobHashBytes": 1480,
+        "resultKeyBytes": null
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 3,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "evalsha addStandardJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "hmget": 6,
+          "xadd": 5,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "del": 4,
+          "exists": 3,
+          "zadd": 3,
+          "zpopmin": 3,
+          "zrange": 3,
+          "hget": 2,
+          "hmset": 2,
+          "hincrby": 2,
+          "zscore": 2,
+          "zcard": 2,
+          "llen": 2,
+          "incr": 1,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "hset": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 11,
+        "luaTotal": 58
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "B2": {
+      "description": "BullMQ round trip, noop processor, priority 1 (pass 2)",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "noop",
+        "cacheTtl": 3600,
+        "url": "https://example.com/",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.002,
+        "rttMs": 0.05,
+        "samples": 50
+      },
+      "workerImportMs": {},
+      "coldFirstJob": {
+        "enqueue": 0.963,
+        "pickup": 1.433,
+        "process": 0.005,
+        "finalize": 1.509,
+        "notify": -0.009,
+        "afterProcess": 1.499,
+        "overhead": 3.895,
+        "total": 3.9
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 500,
+          "wallMs": 696,
+          "throughputPerSec": 717.9,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.193,
+              "mean": 0.384,
+              "p50": 0.328,
+              "p95": 0.591,
+              "p99": 1.493,
+              "max": 8.455
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.262,
+              "mean": 0.498,
+              "p50": 0.429,
+              "p95": 0.912,
+              "p99": 2.935,
+              "max": 6.216
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0.001,
+              "p95": 0.001,
+              "p99": 0.003,
+              "max": 0.009
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.175,
+              "mean": 0.372,
+              "p50": 0.337,
+              "p95": 0.565,
+              "p99": 1.189,
+              "max": 2.765
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.424,
+              "mean": 0.105,
+              "p50": 0.092,
+              "p95": 0.253,
+              "p99": 0.473,
+              "max": 3.573
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.237,
+              "mean": 0.477,
+              "p50": 0.443,
+              "p95": 0.666,
+              "p99": 1.036,
+              "max": 4.016
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.652,
+              "mean": 1.358,
+              "p50": 1.24,
+              "p95": 2.008,
+              "p99": 3.892,
+              "max": 11.171
+            },
+            "total": {
+              "n": 500,
+              "min": 0.653,
+              "mean": 1.359,
+              "p50": 1.241,
+              "p95": 2.009,
+              "p99": 3.893,
+              "max": 11.172
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 500,
+          "wallMs": 182,
+          "throughputPerSec": 2745.3,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.112,
+              "mean": 0.483,
+              "p50": 0.403,
+              "p95": 0.903,
+              "p99": 1.809,
+              "max": 3.322
+            },
+            "pickup": {
+              "n": 500,
+              "min": -0.766,
+              "mean": 0.616,
+              "p50": 0.486,
+              "p95": 1.689,
+              "p99": 6,
+              "max": 6.551
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0,
+              "p95": 0.001,
+              "p99": 0.001,
+              "max": 0.004
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.136,
+              "mean": 0.504,
+              "p50": 0.383,
+              "p95": 0.89,
+              "p99": 3.117,
+              "max": 6.546
+            },
+            "notify": {
+              "n": 500,
+              "min": -1.452,
+              "mean": 0.183,
+              "p50": 0.16,
+              "p95": 0.577,
+              "p99": 0.983,
+              "max": 2.176
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.184,
+              "mean": 0.686,
+              "p50": 0.588,
+              "p95": 1.344,
+              "p99": 3.347,
+              "max": 5.605
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.557,
+              "mean": 1.785,
+              "p50": 1.449,
+              "p95": 3.601,
+              "p99": 7.668,
+              "max": 8.092
+            },
+            "total": {
+              "n": 500,
+              "min": 0.558,
+              "mean": 1.786,
+              "p50": 1.449,
+              "p95": 3.602,
+              "p99": 7.668,
+              "max": 8.092
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 500,
+          "wallMs": 123,
+          "throughputPerSec": 4078.3,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.197,
+              "mean": 1.324,
+              "p50": 1.06,
+              "p95": 3.158,
+              "p99": 3.859,
+              "max": 4.165
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.433,
+              "mean": 1.993,
+              "p50": 1.742,
+              "p95": 4.464,
+              "p99": 6.789,
+              "max": 7.997
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0.001,
+              "max": 0.001
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.187,
+              "mean": 1.01,
+              "p50": 0.932,
+              "p95": 1.819,
+              "p99": 3.75,
+              "max": 7.44
+            },
+            "notify": {
+              "n": 500,
+              "min": -3.876,
+              "mean": 0.475,
+              "p50": 0.305,
+              "p95": 1.852,
+              "p99": 2.585,
+              "max": 3.799
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.311,
+              "mean": 1.485,
+              "p50": 1.347,
+              "p95": 2.856,
+              "p99": 4.231,
+              "max": 6.601
+            },
+            "overhead": {
+              "n": 500,
+              "min": 2.28,
+              "mean": 4.803,
+              "p50": 4.366,
+              "p95": 8.437,
+              "p99": 10.378,
+              "max": 11.412
+            },
+            "total": {
+              "n": 500,
+              "min": 2.281,
+              "mean": 4.803,
+              "p50": 4.366,
+              "p95": 8.437,
+              "p99": 10.379,
+              "max": 11.413
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 3450328,
+        "jobsProcessed": 1651,
+        "bytesPerJob": 2090,
+        "eventsStreamLength": 7248,
+        "eventsStreamBytes": 678872,
+        "jobHashBytes": 1512,
+        "resultKeyBytes": null
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 3,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "hmget": 6,
+          "xadd": 5,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "exists": 3,
+          "zrange": 3,
+          "incr": 2,
+          "hget": 2,
+          "hmset": 2,
+          "zscore": 2,
+          "hincrby": 2,
+          "zcard": 2,
+          "llen": 2,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "hset": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 11,
+        "luaTotal": 61
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "D2": {
+      "description": "BullMQ round trip, noop processor, NO priority (pass 2)",
+      "queueOptions": {
+        "add": {
+          "priority": "none",
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "noop",
+        "cacheTtl": 3600,
+        "url": "https://example.com/",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.004,
+        "rttMs": 0.056,
+        "samples": 50
+      },
+      "workerImportMs": {},
+      "coldFirstJob": {
+        "enqueue": 1.104,
+        "pickup": 2.021,
+        "process": 0.009,
+        "finalize": 2.057,
+        "notify": -0.062,
+        "afterProcess": 1.995,
+        "overhead": 5.12,
+        "total": 5.129
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 500,
+          "wallMs": 645,
+          "throughputPerSec": 775.5,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.178,
+              "mean": 0.35,
+              "p50": 0.307,
+              "p95": 0.663,
+              "p99": 1.056,
+              "max": 1.448
+            },
+            "pickup": {
+              "n": 500,
+              "min": -0.62,
+              "mean": 0.396,
+              "p50": 0.329,
+              "p95": 0.812,
+              "p99": 2.319,
+              "max": 4.014
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0.001,
+              "p95": 0.001,
+              "p99": 0.001,
+              "max": 0.004
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.178,
+              "mean": 0.399,
+              "p50": 0.308,
+              "p95": 0.744,
+              "p99": 2.374,
+              "max": 5.104
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.058,
+              "mean": 0.114,
+              "p50": 0.078,
+              "p95": 0.271,
+              "p99": 0.945,
+              "max": 7.742
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.232,
+              "mean": 0.513,
+              "p50": 0.435,
+              "p95": 0.739,
+              "p99": 4.015,
+              "max": 8.016
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.619,
+              "mean": 1.258,
+              "p50": 1.102,
+              "p95": 2.049,
+              "p99": 5.026,
+              "max": 8.752
+            },
+            "total": {
+              "n": 500,
+              "min": 0.62,
+              "mean": 1.259,
+              "p50": 1.103,
+              "p95": 2.049,
+              "p99": 5.027,
+              "max": 8.753
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 500,
+          "wallMs": 191,
+          "throughputPerSec": 2624.3,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.084,
+              "mean": 0.387,
+              "p50": 0.326,
+              "p95": 0.718,
+              "p99": 1.678,
+              "max": 2.47
+            },
+            "pickup": {
+              "n": 500,
+              "min": -1.841,
+              "mean": 0.841,
+              "p50": 0.62,
+              "p95": 2.727,
+              "p99": 7.228,
+              "max": 10.394
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0.001,
+              "p50": 0,
+              "p95": 0.001,
+              "p99": 0.001,
+              "max": 0.009
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.114,
+              "mean": 0.464,
+              "p50": 0.39,
+              "p95": 0.872,
+              "p99": 2.156,
+              "max": 2.832
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.347,
+              "mean": 0.174,
+              "p50": 0.122,
+              "p95": 0.635,
+              "p99": 1.844,
+              "max": 2.632
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.19,
+              "mean": 0.638,
+              "p50": 0.542,
+              "p95": 1.365,
+              "p99": 2.311,
+              "max": 3.128
+            },
+            "overhead": {
+              "n": 500,
+              "min": 0.539,
+              "mean": 1.867,
+              "p50": 1.505,
+              "p95": 3.735,
+              "p99": 8.46,
+              "max": 12.549
+            },
+            "total": {
+              "n": 500,
+              "min": 0.54,
+              "mean": 1.867,
+              "p50": 1.505,
+              "p95": 3.736,
+              "p99": 8.46,
+              "max": 12.549
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 500,
+          "wallMs": 102,
+          "throughputPerSec": 4906.4,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.186,
+              "mean": 0.924,
+              "p50": 0.735,
+              "p95": 2.464,
+              "p99": 3.504,
+              "max": 3.518
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.025,
+              "mean": 1.923,
+              "p50": 1.385,
+              "p95": 4.73,
+              "p99": 9.181,
+              "max": 10.776
+            },
+            "process": {
+              "n": 500,
+              "min": 0,
+              "mean": 0,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0.001,
+              "max": 0.032
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.19,
+              "mean": 0.803,
+              "p50": 0.661,
+              "p95": 1.538,
+              "p99": 3.649,
+              "max": 4.218
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.577,
+              "mean": 0.318,
+              "p50": 0.181,
+              "p95": 1.882,
+              "p99": 2.68,
+              "max": 2.881
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.193,
+              "mean": 1.121,
+              "p50": 0.915,
+              "p95": 2.64,
+              "p99": 4.551,
+              "max": 4.663
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.525,
+              "mean": 3.968,
+              "p50": 3.452,
+              "p95": 8.307,
+              "p99": 13.44,
+              "max": 14.679
+            },
+            "total": {
+              "n": 500,
+              "min": 1.526,
+              "mean": 3.969,
+              "p50": 3.453,
+              "p95": 8.308,
+              "p99": 13.441,
+              "max": 14.68
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 3392616,
+        "jobsProcessed": 1651,
+        "bytesPerJob": 2055,
+        "eventsStreamLength": 7254,
+        "eventsStreamBytes": 686040,
+        "jobHashBytes": 1480,
+        "resultKeyBytes": null
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 2.95,
+          "evalsha moveToActive": 2.95,
+          "bzpopmin": 1.95,
+          "evalsha addStandardJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "hmget": 5.95,
+          "xadd": 5,
+          "zrangebyscore": 3.95,
+          "rpoplpush": 3.95,
+          "del": 3.95,
+          "exists": 3,
+          "zadd": 3,
+          "zpopmin": 2.95,
+          "zrange": 2.95,
+          "hget": 2.05,
+          "hmset": 2,
+          "hincrby": 2,
+          "zcard": 2,
+          "llen": 2,
+          "zscore": 1.95,
+          "incr": 1,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "hset": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 10.85,
+        "luaTotal": 57.7
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "C": {
+      "description": "BullMQ round trip, processor does worker.ts's Redis traffic (5x updateProgress, 4 SSE publishes, router domain GET/GET/SET, ~50 KB cache + result SETs, ~50 KB return value)",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "redis-sim",
+        "cacheTtl": 3600,
+        "url": "https://example.com/",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.004,
+        "rttMs": 0.073,
+        "samples": 50
+      },
+      "workerImportMs": {},
+      "coldFirstJob": {
+        "enqueue": 1.51,
+        "pickup": 2.119,
+        "process": 6.532,
+        "finalize": 2.61,
+        "notify": 0.179,
+        "afterProcess": 2.789,
+        "overhead": 6.419,
+        "total": 12.951
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 500,
+          "wallMs": 2391,
+          "throughputPerSec": 209.1,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.255,
+              "mean": 0.535,
+              "p50": 0.466,
+              "p95": 0.874,
+              "p99": 2.024,
+              "max": 3.773
+            },
+            "pickup": {
+              "n": 500,
+              "min": -2.848,
+              "mean": 0.336,
+              "p50": 0.329,
+              "p95": 0.656,
+              "p99": 1.052,
+              "max": 3.742
+            },
+            "process": {
+              "n": 500,
+              "min": 1.553,
+              "mean": 2.701,
+              "p50": 2.435,
+              "p95": 4.515,
+              "p99": 6.058,
+              "max": 14.543
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.644,
+              "mean": 0.977,
+              "p50": 0.925,
+              "p95": 1.358,
+              "p99": 2.119,
+              "max": 3.729
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.633,
+              "mean": 0.194,
+              "p50": 0.195,
+              "p95": 0.361,
+              "p99": 1.513,
+              "max": 2.664
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.771,
+              "mean": 1.172,
+              "p50": 1.121,
+              "p95": 1.509,
+              "p99": 2.541,
+              "max": 3.687
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.337,
+              "mean": 2.042,
+              "p50": 1.938,
+              "p95": 2.875,
+              "p99": 3.771,
+              "max": 10.235
+            },
+            "total": {
+              "n": 500,
+              "min": 3.031,
+              "mean": 4.743,
+              "p50": 4.428,
+              "p95": 6.85,
+              "p99": 9.524,
+              "max": 22.111
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 500,
+          "wallMs": 992,
+          "throughputPerSec": 504,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.111,
+              "mean": 0.468,
+              "p50": 0.34,
+              "p95": 1.141,
+              "p99": 2.514,
+              "max": 4.82
+            },
+            "pickup": {
+              "n": 500,
+              "min": -1.436,
+              "mean": 0.983,
+              "p50": 0.768,
+              "p95": 2.563,
+              "p99": 3.819,
+              "max": 6.151
+            },
+            "process": {
+              "n": 500,
+              "min": 3.052,
+              "mean": 6.853,
+              "p50": 6.766,
+              "p95": 9.704,
+              "p99": 12.41,
+              "max": 14.843
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.524,
+              "mean": 1.271,
+              "p50": 1.071,
+              "p95": 2.457,
+              "p99": 3.668,
+              "max": 7.849
+            },
+            "notify": {
+              "n": 500,
+              "min": -2.945,
+              "mean": 0.282,
+              "p50": 0.175,
+              "p95": 0.988,
+              "p99": 5.43,
+              "max": 11.227
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.718,
+              "mean": 1.553,
+              "p50": 1.257,
+              "p95": 2.779,
+              "p99": 6.6,
+              "max": 11.949
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.217,
+              "mean": 3.005,
+              "p50": 2.646,
+              "p95": 5.489,
+              "p99": 8.177,
+              "max": 13.876
+            },
+            "total": {
+              "n": 500,
+              "min": 4.981,
+              "mean": 9.858,
+              "p50": 9.572,
+              "p95": 13.832,
+              "p99": 17.724,
+              "max": 20.32
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 500,
+          "wallMs": 852,
+          "throughputPerSec": 586.8,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 500,
+              "min": 0.109,
+              "mean": 0.533,
+              "p50": 0.348,
+              "p95": 1.197,
+              "p99": 2.406,
+              "max": 6.025
+            },
+            "pickup": {
+              "n": 500,
+              "min": -0.384,
+              "mean": 24.168,
+              "p50": 24.475,
+              "p95": 29.946,
+              "p99": 31.724,
+              "max": 33.086
+            },
+            "process": {
+              "n": 500,
+              "min": 4.103,
+              "mean": 7.038,
+              "p50": 7.033,
+              "p95": 9.137,
+              "p99": 10.781,
+              "max": 11.481
+            },
+            "finalize": {
+              "n": 500,
+              "min": 0.594,
+              "mean": 1.324,
+              "p50": 1.127,
+              "p95": 2.492,
+              "p99": 4.432,
+              "max": 5.47
+            },
+            "notify": {
+              "n": 500,
+              "min": -1.383,
+              "mean": 0.287,
+              "p50": 0.193,
+              "p95": 1.37,
+              "p99": 3.186,
+              "max": 5.387
+            },
+            "afterProcess": {
+              "n": 500,
+              "min": 0.771,
+              "mean": 1.612,
+              "p50": 1.327,
+              "p95": 3.157,
+              "p99": 5.068,
+              "max": 6.357
+            },
+            "overhead": {
+              "n": 500,
+              "min": 1.609,
+              "mean": 26.312,
+              "p50": 26.661,
+              "p95": 32.283,
+              "p99": 33.92,
+              "max": 34.887
+            },
+            "total": {
+              "n": 500,
+              "min": 6.137,
+              "mean": 33.35,
+              "p50": 33.513,
+              "p95": 39.487,
+              "p99": 42.341,
+              "max": 43.101
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 256770592,
+        "jobsProcessed": 1651,
+        "bytesPerJob": 155524,
+        "eventsStreamLength": 10007,
+        "eventsStreamBytes": 65262716,
+        "jobHashBytes": 58744,
+        "resultKeyBytes": 57416
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 7.4,
+          "evalsha updateProgress": 5,
+          "publish": 4,
+          "evalsha moveToActive": 3,
+          "set": 3,
+          "bzpopmin": 2,
+          "get": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "xadd": 10,
+          "exists": 8,
+          "hget": 7,
+          "hmget": 6,
+          "hset": 6,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "zrange": 3,
+          "incr": 2,
+          "hmset": 2,
+          "hincrby": 2,
+          "zscore": 2,
+          "zcard": 2,
+          "llen": 2,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 29.4,
+        "luaTotal": 81
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "E": {
+      "description": "Worker (drainDelay 5 s BZPOPMIN) and QueueEvents (XREAD BLOCK 10 s) idle before each job; noop processor, priority 1.",
+      "idleMsTarget": 10000,
+      "samples": [
+        {
+          "idleMs": 9872,
+          "enqueue": 1.002,
+          "pickup": 1.624,
+          "process": 0.002,
+          "finalize": 1.365,
+          "notify": -0.104,
+          "afterProcess": 1.26,
+          "overhead": 3.886,
+          "total": 3.888
+        },
+        {
+          "idleMs": 10061,
+          "enqueue": 1.996,
+          "pickup": 1.05,
+          "process": 0.002,
+          "finalize": 0.69,
+          "notify": 0.756,
+          "afterProcess": 1.445,
+          "overhead": 4.491,
+          "total": 4.493
+        },
+        {
+          "idleMs": 10121,
+          "enqueue": 1.478,
+          "pickup": 1.312,
+          "process": 0.002,
+          "finalize": 1.464,
+          "notify": 0.015,
+          "afterProcess": 1.479,
+          "overhead": 4.268,
+          "total": 4.27
+        },
+        {
+          "idleMs": 10141,
+          "enqueue": 1.441,
+          "pickup": 1.236,
+          "process": 0.002,
+          "finalize": 0.86,
+          "notify": 0.277,
+          "afterProcess": 1.137,
+          "overhead": 3.814,
+          "total": 3.817
+        },
+        {
+          "idleMs": 9862,
+          "enqueue": 1.187,
+          "pickup": 0.672,
+          "process": 0.001,
+          "finalize": 0.689,
+          "notify": 0.286,
+          "afterProcess": 0.975,
+          "overhead": 2.834,
+          "total": 2.835
+        },
+        {
+          "idleMs": 9885,
+          "enqueue": 1.043,
+          "pickup": 0.553,
+          "process": 0.002,
+          "finalize": 0.542,
+          "notify": 0.071,
+          "afterProcess": 0.613,
+          "overhead": 2.21,
+          "total": 2.211
+        },
+        {
+          "idleMs": 9899,
+          "enqueue": 1.351,
+          "pickup": 1.354,
+          "process": 0.001,
+          "finalize": 0.56,
+          "notify": 0.285,
+          "afterProcess": 0.845,
+          "overhead": 3.551,
+          "total": 3.552
+        },
+        {
+          "idleMs": 10091,
+          "enqueue": 1.471,
+          "pickup": 1.227,
+          "process": 0.001,
+          "finalize": 0.852,
+          "notify": 0.313,
+          "afterProcess": 1.165,
+          "overhead": 3.863,
+          "total": 3.865
+        }
+      ],
+      "phases": {
+        "enqueue": {
+          "n": 8,
+          "min": 1.002,
+          "mean": 1.371,
+          "p50": 1.351,
+          "p95": 1.996,
+          "p99": 1.996,
+          "max": 1.996
+        },
+        "pickup": {
+          "n": 8,
+          "min": 0.553,
+          "mean": 1.129,
+          "p50": 1.227,
+          "p95": 1.624,
+          "p99": 1.624,
+          "max": 1.624
+        },
+        "process": {
+          "n": 8,
+          "min": 0.001,
+          "mean": 0.002,
+          "p50": 0.002,
+          "p95": 0.002,
+          "p99": 0.002,
+          "max": 0.002
+        },
+        "finalize": {
+          "n": 8,
+          "min": 0.542,
+          "mean": 0.878,
+          "p50": 0.69,
+          "p95": 1.464,
+          "p99": 1.464,
+          "max": 1.464
+        },
+        "notify": {
+          "n": 8,
+          "min": -0.104,
+          "mean": 0.237,
+          "p50": 0.277,
+          "p95": 0.756,
+          "p99": 0.756,
+          "max": 0.756
+        },
+        "afterProcess": {
+          "n": 8,
+          "min": 0.613,
+          "mean": 1.115,
+          "p50": 1.137,
+          "p95": 1.479,
+          "p99": 1.479,
+          "max": 1.479
+        },
+        "overhead": {
+          "n": 8,
+          "min": 2.21,
+          "mean": 3.615,
+          "p50": 3.814,
+          "p95": 4.491,
+          "p99": 4.491,
+          "max": 4.491
+        },
+        "total": {
+          "n": 8,
+          "min": 2.211,
+          "mean": 3.616,
+          "p50": 3.817,
+          "p95": 4.493,
+          "p99": 4.493,
+          "max": 4.493
+        }
+      }
+    },
+    "F": {
+      "description": "extractContent via the Piscina pool (markdown), small ~1 KB example.com-like page and ~500 KB content page; plus the same implementation on the main thread and its main components.",
+      "pageBytes": {
+        "small": 1256,
+        "large": 512593
+      },
+      "startup": {
+        "importMs": 66.9,
+        "firstCallMs": 1164.5,
+        "burstAfterFirstMs": 164.2,
+        "threads": 3,
+        "mode": "bundled",
+        "implModuleImportMs": 813.8
+      },
+      "extractionMethod": {
+        "small": "largest-block",
+        "large": "readability"
+      },
+      "markdownBytes": {
+        "small": 231,
+        "large": 410654
+      },
+      "processRssMB": {
+        "start": 98,
+        "afterSmallRuns": 1197,
+        "afterLargeRuns": 5061,
+        "afterGatedLargeRuns": 6409,
+        "afterPoolShutdown": 170
+      },
+      "pooled": [
+        {
+          "label": "pool small sequential",
+          "concurrency": 1,
+          "n": 300,
+          "wallMs": 4536,
+          "throughputPerSec": 66.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 9.761,
+            "mean": 15.115,
+            "p50": 14.667,
+            "p95": 22.61,
+            "p99": 29.604,
+            "max": 34.456
+          }
+        },
+        {
+          "label": "pool small concurrency 5",
+          "concurrency": 5,
+          "n": 300,
+          "wallMs": 2157,
+          "throughputPerSec": 139.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 10.492,
+            "mean": 35.727,
+            "p50": 32.606,
+            "p95": 63.448,
+            "p99": 76.833,
+            "max": 88.387
+          }
+        },
+        {
+          "label": "pool small concurrency 20",
+          "concurrency": 20,
+          "n": 300,
+          "wallMs": 1702,
+          "throughputPerSec": 176.2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 11.958,
+            "mean": 110.541,
+            "p50": 68.281,
+            "p95": 211.572,
+            "p99": 1217.952,
+            "max": 1683.988
+          }
+        },
+        {
+          "label": "pool large sequential",
+          "concurrency": 1,
+          "n": 50,
+          "wallMs": 55577,
+          "throughputPerSec": 0.9,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 50,
+            "min": 870.396,
+            "mean": 1111.512,
+            "p50": 1071.659,
+            "p95": 1519.708,
+            "p99": 1719.174,
+            "max": 1719.174
+          }
+        },
+        {
+          "label": "pool large concurrency 5",
+          "concurrency": 5,
+          "n": 50,
+          "wallMs": 24629,
+          "throughputPerSec": 2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 50,
+            "min": 1487.883,
+            "mean": 2371.058,
+            "p50": 2336.792,
+            "p95": 3139.031,
+            "p99": 3514.459,
+            "max": 3514.459
+          }
+        }
+      ],
+      "fifoGated": [
+        {
+          "label": "pool small via FIFO gate concurrency 20",
+          "concurrency": 20,
+          "n": 300,
+          "wallMs": 1693,
+          "throughputPerSec": 177.2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 16.837,
+            "mean": 109.611,
+            "p50": 111.405,
+            "p95": 128.747,
+            "p99": 136.409,
+            "max": 142.937
+          }
+        },
+        {
+          "label": "pool large via FIFO gate concurrency 5",
+          "concurrency": 5,
+          "n": 50,
+          "wallMs": 23346,
+          "throughputPerSec": 2.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 50,
+            "min": 1145.953,
+            "mean": 2269.976,
+            "p50": 2259.205,
+            "p95": 3126.391,
+            "p99": 3417.388,
+            "max": 3417.388
+          }
+        }
+      ],
+      "inThread": [
+        {
+          "label": "in-thread small sequential",
+          "concurrency": 1,
+          "n": 200,
+          "wallMs": 3072,
+          "throughputPerSec": 65.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 200,
+            "min": 9.693,
+            "mean": 15.337,
+            "p50": 14.615,
+            "p95": 23.137,
+            "p99": 27.53,
+            "max": 35.282
+          }
+        },
+        {
+          "label": "in-thread large sequential",
+          "concurrency": 1,
+          "n": 30,
+          "wallMs": 28185,
+          "throughputPerSec": 1.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 30,
+            "min": 829.799,
+            "mean": 939.484,
+            "p50": 919.672,
+            "p95": 1075.672,
+            "p99": 1232.39,
+            "max": 1232.39
+          }
+        }
+      ],
+      "components": {
+        "small": {
+          "cheerioLoad": {
+            "n": 100,
+            "min": 0.054,
+            "mean": 0.073,
+            "p50": 0.062,
+            "p95": 0.124,
+            "p99": 0.166,
+            "max": 0.187
+          },
+          "jsdomConstruct": {
+            "n": 100,
+            "min": 3.534,
+            "mean": 4.891,
+            "p50": 3.902,
+            "p95": 11.282,
+            "p99": 12.273,
+            "max": 14.824
+          },
+          "readabilityParse": {
+            "n": 100,
+            "min": 3.996,
+            "mean": 6.172,
+            "p50": 4.859,
+            "p95": 13.898,
+            "p99": 16.06,
+            "max": 16.917
+          },
+          "turndownOfArticle": {
+            "n": 100,
+            "min": 0.099,
+            "mean": 0.13,
+            "p50": 0.119,
+            "p95": 0.225,
+            "p99": 0.244,
+            "max": 0.255
+          }
+        },
+        "large": {
+          "cheerioLoad": {
+            "n": 20,
+            "min": 35.949,
+            "mean": 45.062,
+            "p50": 39.474,
+            "p95": 56.599,
+            "p99": 64.333,
+            "max": 64.333
+          },
+          "jsdomConstruct": {
+            "n": 20,
+            "min": 194.383,
+            "mean": 232.609,
+            "p50": 213.12,
+            "p95": 295.206,
+            "p99": 346.76,
+            "max": 346.76
+          },
+          "readabilityParse": {
+            "n": 20,
+            "min": 156.274,
+            "mean": 177.137,
+            "p50": 175.44,
+            "p95": 205.071,
+            "p99": 209.635,
+            "max": 209.635
+          },
+          "turndownOfArticle": {
+            "n": 20,
+            "min": 368.864,
+            "mean": 450.555,
+            "p50": 441.723,
+            "p95": 516.303,
+            "p99": 562.1,
+            "max": 562.1
+          }
+        }
+      }
+    },
+    "G": {
+      "description": "tier1Fetch (Impit + fetchWithSafeRedirects) of the local fixture over plain HTTP on loopback. No DNS, no TLS, no internet RTT.",
+      "importMs": 41.3,
+      "coldFirstRequestMs": 75.16,
+      "tier1": [
+        {
+          "label": "tier1Fetch small sequential",
+          "concurrency": 1,
+          "n": 300,
+          "wallMs": 514,
+          "throughputPerSec": 583.1,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 0.887,
+            "mean": 1.712,
+            "p50": 1.57,
+            "p95": 2.549,
+            "p99": 4.177,
+            "max": 8.793
+          }
+        },
+        {
+          "label": "tier1Fetch small concurrency 5",
+          "concurrency": 5,
+          "n": 300,
+          "wallMs": 124,
+          "throughputPerSec": 2413.6,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 0.751,
+            "mean": 2.064,
+            "p50": 1.828,
+            "p95": 3.613,
+            "p99": 7.523,
+            "max": 9.329
+          }
+        },
+        {
+          "label": "tier1Fetch small concurrency 20",
+          "concurrency": 20,
+          "n": 300,
+          "wallMs": 73,
+          "throughputPerSec": 4130.2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 1.586,
+            "mean": 4.754,
+            "p50": 4.139,
+            "p95": 10.348,
+            "p99": 13.896,
+            "max": 14.007
+          }
+        },
+        {
+          "label": "tier1Fetch large sequential",
+          "concurrency": 1,
+          "n": 300,
+          "wallMs": 958,
+          "throughputPerSec": 313.3,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 2.017,
+            "mean": 3.189,
+            "p50": 2.861,
+            "p95": 5.729,
+            "p99": 8.208,
+            "max": 14.227
+          }
+        },
+        {
+          "label": "tier1Fetch large concurrency 5",
+          "concurrency": 5,
+          "n": 300,
+          "wallMs": 595,
+          "throughputPerSec": 503.8,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 3.897,
+            "mean": 9.848,
+            "p50": 8.436,
+            "p95": 15.629,
+            "p99": 19.451,
+            "max": 24.11
+          }
+        },
+        {
+          "label": "tier1Fetch large concurrency 20",
+          "concurrency": 20,
+          "n": 300,
+          "wallMs": 527,
+          "throughputPerSec": 569.8,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 3.406,
+            "mean": 33.78,
+            "p50": 33.688,
+            "p95": 46.48,
+            "p99": 57.543,
+            "max": 61.912
+          }
+        }
+      ],
+      "baselines": [
+        {
+          "label": "raw impit small sequential",
+          "concurrency": 1,
+          "n": 300,
+          "wallMs": 315,
+          "throughputPerSec": 952.5,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 0.563,
+            "mean": 1.047,
+            "p50": 0.949,
+            "p95": 1.641,
+            "p99": 2.899,
+            "max": 3.569
+          }
+        },
+        {
+          "label": "node fetch (undici) small sequential",
+          "concurrency": 1,
+          "n": 300,
+          "wallMs": 256,
+          "throughputPerSec": 1171.2,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 300,
+            "min": 0.425,
+            "mean": 0.852,
+            "p50": 0.723,
+            "p95": 1.175,
+            "p99": 2.796,
+            "max": 13.765
+          }
+        }
+      ],
+      "guard": {
+        "cacheHit": {
+          "label": "assertPublicUrl (cache hit) sequential",
+          "concurrency": 1,
+          "n": 5000,
+          "wallMs": 21,
+          "throughputPerSec": 234164.9,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 5000,
+            "min": 0.001,
+            "mean": 0.004,
+            "p50": 0.002,
+            "p95": 0.004,
+            "p99": 0.01,
+            "max": 5.034
+          }
+        },
+        "perCallLookup": {
+          "label": "assertPublicUrl (lookup, no cache) sequential",
+          "concurrency": 1,
+          "n": 5000,
+          "wallMs": 47,
+          "throughputPerSec": 107285.5,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 5000,
+            "min": 0.004,
+            "mean": 0.009,
+            "p50": 0.006,
+            "p95": 0.012,
+            "p99": 0.036,
+            "max": 3.602
+          }
+        },
+        "note": "DNS latency itself is not measurable offline; verdicts are cached 30 s per hostname (packages/shared/src/net.ts)."
+      }
+    },
+    "Q": {
+      "description": "T1/T2 acceptance decision for each fixture page (threshold 0.55).",
+      "threshold": 0.55,
+      "pages": {
+        "classic example.com (small)": {
+          "bytes": 1256,
+          "isValidContent": true,
+          "score": 0.5,
+          "signals": [
+            "Very low visible text (202 chars — likely stub / block page)"
+          ],
+          "acceptedAtT1": false
+        },
+        "compact example.com": {
+          "bytes": 512,
+          "isValidContent": true,
+          "score": 0.8,
+          "signals": [
+            "Very short content (possible block page)",
+            "Content appears valid"
+          ],
+          "acceptedAtT1": true
+        },
+        "large": {
+          "bytes": 512593,
+          "isValidContent": true,
+          "score": 1,
+          "signals": [
+            "Content appears valid"
+          ],
+          "acceptedAtT1": true
+        }
+      }
+    },
+    "I": {
+      "description": "Browser tiers with the worker BrowserPool (Chromium from the local Playwright cache, may differ from the revision patchright pins). Local HTTP fixture: no network RTT, no third-party sub-resources.",
+      "chromium": "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+      "poolInitMs": 421,
+      "bareNavigation": [
+        {
+          "label": "bare goto+content compact sequential",
+          "concurrency": 1,
+          "n": 20,
+          "wallMs": 2252,
+          "throughputPerSec": 8.9,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20,
+            "min": 96.497,
+            "mean": 112.608,
+            "p50": 108.067,
+            "p95": 136.465,
+            "p99": 142.024,
+            "max": 142.024
+          }
+        }
+      ],
+      "runs": [
+        {
+          "label": "tier4Fetch compact sequential",
+          "concurrency": 1,
+          "n": 20,
+          "wallMs": 21506,
+          "throughputPerSec": 0.9,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20,
+            "min": 1054.007,
+            "mean": 1075.279,
+            "p50": 1071.95,
+            "p95": 1097.304,
+            "p99": 1106.04,
+            "max": 1106.04
+          }
+        },
+        {
+          "label": "tier4Fetch compact concurrency 5",
+          "concurrency": 5,
+          "n": 20,
+          "wallMs": 5617,
+          "throughputPerSec": 3.6,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20,
+            "min": 1143.889,
+            "mean": 1355.952,
+            "p50": 1335.477,
+            "p95": 1576.242,
+            "p99": 1637.86,
+            "max": 1637.86
+          }
+        },
+        {
+          "label": "tier4Fetch classic sequential",
+          "concurrency": 1,
+          "n": 20,
+          "wallMs": 21495,
+          "throughputPerSec": 0.9,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20,
+            "min": 1058.313,
+            "mean": 1074.76,
+            "p50": 1075.131,
+            "p95": 1097.636,
+            "p99": 1097.802,
+            "max": 1097.802
+          }
+        },
+        {
+          "label": "tier4Fetch large sequential",
+          "concurrency": 1,
+          "n": 20,
+          "wallMs": 27995,
+          "throughputPerSec": 0.7,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 20,
+            "min": 1382.309,
+            "mean": 1399.72,
+            "p50": 1398.842,
+            "p95": 1414.242,
+            "p99": 1422.433,
+            "max": 1422.433
+          }
+        },
+        {
+          "label": "tier4StealthFetch compact sequential",
+          "concurrency": 1,
+          "n": 10,
+          "wallMs": 7525,
+          "throughputPerSec": 1.3,
+          "errors": 0,
+          "errorSamples": [],
+          "latency": {
+            "n": 10,
+            "min": 654.421,
+            "mean": 752.5,
+            "p50": 692.525,
+            "p95": 952.461,
+            "p99": 952.461,
+            "max": 952.461
+          }
+        }
+      ]
+    },
+    "H-compact": {
+      "description": "Full worker path, compact page from the local fixture: real SmartRouter (browser tiers disabled), real Piscina extraction, worker.ts Redis traffic; cacheTtl 0 like the tests/perf tier1-example scenario",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "full",
+        "cacheTtl": 0,
+        "url": "http://127.0.0.1:39865/compact",
+        "browserTiers": false,
+        "warmupPerLevel": 50
+      },
+      "clock": {
+        "offsetMs": 0.004,
+        "rttMs": 0.036,
+        "samples": 50
+      },
+      "workerImportMs": {
+        "router": 350.288,
+        "pipeline": 62.85,
+        "qualityScorer": 1.287,
+        "tracing": 1.661
+      },
+      "coldFirstJob": {
+        "enqueue": 0.871,
+        "pickup": 3.055,
+        "process": 1215.966,
+        "finalize": 2.203,
+        "notify": -0.068,
+        "afterProcess": 2.135,
+        "overhead": 6.061,
+        "total": 1222.027
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 200,
+          "wallMs": 5235,
+          "throughputPerSec": 38.2,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 200,
+              "min": 0.459,
+              "mean": 0.861,
+              "p50": 0.791,
+              "p95": 1.371,
+              "p99": 2.077,
+              "max": 3.997
+            },
+            "pickup": {
+              "n": 200,
+              "min": -2.907,
+              "mean": 0.528,
+              "p50": 0.499,
+              "p95": 1.115,
+              "p99": 1.523,
+              "max": 2.097
+            },
+            "process": {
+              "n": 200,
+              "min": 15.112,
+              "mean": 23.732,
+              "p50": 22.814,
+              "p95": 34.181,
+              "p99": 40.949,
+              "max": 52.185
+            },
+            "finalize": {
+              "n": 200,
+              "min": 0.317,
+              "mean": 0.694,
+              "p50": 0.636,
+              "p95": 1.08,
+              "p99": 1.612,
+              "max": 3.715
+            },
+            "notify": {
+              "n": 200,
+              "min": -2.78,
+              "mean": 0.259,
+              "p50": 0.179,
+              "p95": 0.483,
+              "p99": 4.204,
+              "max": 5.297
+            },
+            "afterProcess": {
+              "n": 200,
+              "min": 0.451,
+              "mean": 0.953,
+              "p50": 0.819,
+              "p95": 1.414,
+              "p99": 4.566,
+              "max": 5.797
+            },
+            "overhead": {
+              "n": 200,
+              "min": 1.453,
+              "mean": 2.342,
+              "p50": 2.194,
+              "p95": 3.297,
+              "p99": 5.637,
+              "max": 7.773
+            },
+            "total": {
+              "n": 200,
+              "min": 16.565,
+              "mean": 26.074,
+              "p50": 25.033,
+              "p95": 36.687,
+              "p99": 46.892,
+              "max": 54.122
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 200,
+              "min": 1.842,
+              "mean": 3.383,
+              "p50": 3.086,
+              "p95": 5.463,
+              "p99": 9.526,
+              "max": 12.249
+            },
+            "extractMs": {
+              "n": 200,
+              "min": 11.082,
+              "mean": 16.423,
+              "p50": 15.693,
+              "p95": 24.751,
+              "p99": 30.793,
+              "max": 44.039
+            },
+            "tierUsed": {
+              "1": 200
+            },
+            "attemptsPerJob": 1,
+            "attemptMs": {
+              "T1 accepted": {
+                "n": 200,
+                "min": 1.4,
+                "mean": 2.427,
+                "p50": 2.2,
+                "p95": 3.8,
+                "p99": 6.4,
+                "max": 11.7
+              }
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 200,
+          "wallMs": 2160,
+          "throughputPerSec": 92.6,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 200,
+              "min": 0.274,
+              "mean": 1.249,
+              "p50": 0.789,
+              "p95": 4.032,
+              "p99": 5.83,
+              "max": 7.138
+            },
+            "pickup": {
+              "n": 200,
+              "min": -4.991,
+              "mean": 0.949,
+              "p50": 0.667,
+              "p95": 4.608,
+              "p99": 6.603,
+              "max": 15.09
+            },
+            "process": {
+              "n": 200,
+              "min": 21.357,
+              "mean": 49.572,
+              "p50": 48.014,
+              "p95": 76.597,
+              "p99": 90.891,
+              "max": 109.752
+            },
+            "finalize": {
+              "n": 200,
+              "min": 0.216,
+              "mean": 0.738,
+              "p50": 0.53,
+              "p95": 1.845,
+              "p99": 2.716,
+              "max": 2.926
+            },
+            "notify": {
+              "n": 200,
+              "min": -2.04,
+              "mean": 0.991,
+              "p50": 0.318,
+              "p95": 4.693,
+              "p99": 7.269,
+              "max": 7.714
+            },
+            "afterProcess": {
+              "n": 200,
+              "min": 0.325,
+              "mean": 1.729,
+              "p50": 1.089,
+              "p95": 5.159,
+              "p99": 7.538,
+              "max": 8.258
+            },
+            "overhead": {
+              "n": 200,
+              "min": 1.121,
+              "mean": 3.928,
+              "p50": 3.169,
+              "p95": 8.473,
+              "p99": 12.222,
+              "max": 18.858
+            },
+            "total": {
+              "n": 200,
+              "min": 24.897,
+              "mean": 53.499,
+              "p50": 51.06,
+              "p95": 81.508,
+              "p99": 94.1,
+              "max": 111.763
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 200,
+              "min": 1.205,
+              "mean": 6.056,
+              "p50": 4.833,
+              "p95": 14.682,
+              "p99": 18.427,
+              "max": 33.015
+            },
+            "extractMs": {
+              "n": 200,
+              "min": 11.632,
+              "mean": 39.172,
+              "p50": 37.751,
+              "p95": 62.616,
+              "p99": 74.412,
+              "max": 100.977
+            },
+            "tierUsed": {
+              "1": 200
+            },
+            "attemptsPerJob": 1,
+            "attemptMs": {
+              "T1 accepted": {
+                "n": 200,
+                "min": 0.9,
+                "mean": 4.817,
+                "p50": 3.3,
+                "p95": 12.7,
+                "p99": 16.2,
+                "max": 29.3
+              }
+            }
+          }
+        },
+        {
+          "label": "concurrency 20",
+          "concurrency": 20,
+          "n": 200,
+          "wallMs": 1603,
+          "throughputPerSec": 124.8,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 200,
+              "min": 0.225,
+              "mean": 1.205,
+              "p50": 0.692,
+              "p95": 4.047,
+              "p99": 4.293,
+              "max": 4.491
+            },
+            "pickup": {
+              "n": 200,
+              "min": -2.008,
+              "mean": 112.73,
+              "p50": 117.538,
+              "p95": 138.883,
+              "p99": 145.919,
+              "max": 153.345
+            },
+            "process": {
+              "n": 200,
+              "min": 18.194,
+              "mean": 38.614,
+              "p50": 37.925,
+              "p95": 56.892,
+              "p99": 63.953,
+              "max": 66.751
+            },
+            "finalize": {
+              "n": 200,
+              "min": 0.248,
+              "mean": 0.935,
+              "p50": 0.634,
+              "p95": 2.569,
+              "p99": 5.207,
+              "max": 5.966
+            },
+            "notify": {
+              "n": 200,
+              "min": -5.105,
+              "mean": 0.646,
+              "p50": 0.201,
+              "p95": 3.776,
+              "p99": 6.399,
+              "max": 7.122
+            },
+            "afterProcess": {
+              "n": 200,
+              "min": 0.366,
+              "mean": 1.581,
+              "p50": 1.058,
+              "p95": 4.839,
+              "p99": 7.275,
+              "max": 8.299
+            },
+            "overhead": {
+              "n": 200,
+              "min": 2.957,
+              "mean": 115.517,
+              "p50": 119.668,
+              "p95": 141.609,
+              "p99": 148.306,
+              "max": 158.43
+            },
+            "total": {
+              "n": 200,
+              "min": 24.647,
+              "mean": 154.131,
+              "p50": 158.22,
+              "p95": 185.549,
+              "p99": 197.306,
+              "max": 199.484
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 200,
+              "min": 1.152,
+              "mean": 4.745,
+              "p50": 3.802,
+              "p95": 10.403,
+              "p99": 13.92,
+              "max": 17.418
+            },
+            "extractMs": {
+              "n": 200,
+              "min": 10.959,
+              "mean": 29.625,
+              "p50": 29.05,
+              "p95": 48.057,
+              "p99": 56.976,
+              "max": 59.27
+            },
+            "tierUsed": {
+              "1": 200
+            },
+            "attemptsPerJob": 1,
+            "attemptMs": {
+              "T1 accepted": {
+                "n": 200,
+                "min": 0.9,
+                "mean": 3.723,
+                "p50": 2.7,
+                "p95": 9.8,
+                "p99": 13.5,
+                "max": 17
+              }
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 3390832,
+        "jobsProcessed": 751,
+        "bytesPerJob": 4515,
+        "eventsStreamLength": 7014,
+        "eventsStreamBytes": 1168496,
+        "jobHashBytes": 2184,
+        "resultKeyBytes": 712
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 8,
+          "evalsha updateProgress": 5,
+          "publish": 4,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "get": 2,
+          "set": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "xadd": 10,
+          "exists": 8,
+          "hget": 7,
+          "hmget": 6,
+          "hset": 6,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "zrange": 3,
+          "incr": 2,
+          "hmset": 2,
+          "zscore": 2,
+          "hincrby": 2,
+          "zcard": 2,
+          "llen": 2,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 29,
+        "luaTotal": 81
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "H-large": {
+      "description": "Full worker path, large page from the local fixture: real SmartRouter (browser tiers disabled), real Piscina extraction, worker.ts Redis traffic; cacheTtl 0 like the tests/perf tier1-example scenario",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "full",
+        "cacheTtl": 0,
+        "url": "http://127.0.0.1:39865/large",
+        "browserTiers": false,
+        "warmupPerLevel": 10
+      },
+      "clock": {
+        "offsetMs": 0.002,
+        "rttMs": 0.034,
+        "samples": 50
+      },
+      "workerImportMs": {
+        "router": 486.679,
+        "pipeline": 57.241,
+        "qualityScorer": 1.015,
+        "tracing": 10.413
+      },
+      "coldFirstJob": {
+        "enqueue": 4.709,
+        "pickup": -2.26,
+        "process": 2291.597,
+        "finalize": 7.938,
+        "notify": 1.709,
+        "afterProcess": 9.647,
+        "overhead": 12.096,
+        "total": 2303.693
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 50,
+          "wallMs": 54419,
+          "throughputPerSec": 0.9,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 50,
+              "min": 0.573,
+              "mean": 1.334,
+              "p50": 0.947,
+              "p95": 3.902,
+              "p99": 6.358,
+              "max": 6.358
+            },
+            "pickup": {
+              "n": 50,
+              "min": -0.508,
+              "mean": 0.874,
+              "p50": 0.582,
+              "p95": 1.982,
+              "p99": 9.704,
+              "max": 9.704
+            },
+            "process": {
+              "n": 50,
+              "min": 848.079,
+              "mean": 1077.645,
+              "p50": 1060.75,
+              "p95": 1258.32,
+              "p99": 1436.848,
+              "max": 1436.848
+            },
+            "finalize": {
+              "n": 50,
+              "min": 4.666,
+              "mean": 6.004,
+              "p50": 5.517,
+              "p95": 8.98,
+              "p99": 14.121,
+              "max": 14.121
+            },
+            "notify": {
+              "n": 50,
+              "min": 1.075,
+              "mean": 2.424,
+              "p50": 2.167,
+              "p95": 4.066,
+              "p99": 6.219,
+              "max": 6.219
+            },
+            "afterProcess": {
+              "n": 50,
+              "min": 5.823,
+              "mean": 8.428,
+              "p50": 7.784,
+              "p95": 11.827,
+              "p99": 20.339,
+              "max": 20.339
+            },
+            "overhead": {
+              "n": 50,
+              "min": 7.991,
+              "mean": 10.636,
+              "p50": 9.954,
+              "p95": 18.087,
+              "p99": 21.726,
+              "max": 21.726
+            },
+            "total": {
+              "n": 50,
+              "min": 856.808,
+              "mean": 1088.281,
+              "p50": 1070.103,
+              "p95": 1266.776,
+              "p99": 1458.573,
+              "max": 1458.573
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 50,
+              "min": 14.549,
+              "mean": 21.347,
+              "p50": 18.647,
+              "p95": 34.406,
+              "p99": 40.142,
+              "max": 40.142
+            },
+            "extractMs": {
+              "n": 50,
+              "min": 812.639,
+              "mean": 1031.984,
+              "p50": 1016.908,
+              "p95": 1216.911,
+              "p99": 1345.95,
+              "max": 1345.95
+            },
+            "tierUsed": {
+              "1": 50
+            },
+            "attemptsPerJob": 1,
+            "attemptMs": {
+              "T1 accepted": {
+                "n": 50,
+                "min": 13.5,
+                "mean": 18.514,
+                "p50": 17.2,
+                "p95": 28.2,
+                "p99": 29.2,
+                "max": 29.2
+              }
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 50,
+          "wallMs": 22041,
+          "throughputPerSec": 2.3,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 50,
+              "min": 0.525,
+              "mean": 2.081,
+              "p50": 1.485,
+              "p95": 5.821,
+              "p99": 6.544,
+              "max": 6.544
+            },
+            "pickup": {
+              "n": 50,
+              "min": -5.006,
+              "mean": 1.673,
+              "p50": 1.018,
+              "p95": 9.283,
+              "p99": 23.316,
+              "max": 23.316
+            },
+            "process": {
+              "n": 50,
+              "min": 1115.234,
+              "mean": 2073.256,
+              "p50": 2069.804,
+              "p95": 2716.504,
+              "p99": 2841.416,
+              "max": 2841.416
+            },
+            "finalize": {
+              "n": 50,
+              "min": 5.454,
+              "mean": 11.749,
+              "p50": 8.981,
+              "p95": 26.098,
+              "p99": 28.469,
+              "max": 28.469
+            },
+            "notify": {
+              "n": 50,
+              "min": -6.181,
+              "mean": 0.281,
+              "p50": -0.041,
+              "p95": 6.69,
+              "p99": 7.56,
+              "max": 7.56
+            },
+            "afterProcess": {
+              "n": 50,
+              "min": 5.894,
+              "mean": 12.029,
+              "p50": 9.911,
+              "p95": 22.023,
+              "p99": 31.981,
+              "max": 31.981
+            },
+            "overhead": {
+              "n": 50,
+              "min": 7.982,
+              "mean": 15.783,
+              "p50": 14.188,
+              "p95": 32.449,
+              "p99": 37.156,
+              "max": 37.156
+            },
+            "total": {
+              "n": 50,
+              "min": 1125.125,
+              "mean": 2089.039,
+              "p50": 2090.333,
+              "p95": 2727.479,
+              "p99": 2852.094,
+              "max": 2852.094
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 50,
+              "min": 14.682,
+              "mean": 30.974,
+              "p50": 24.982,
+              "p95": 64.516,
+              "p99": 78.885,
+              "max": 78.885
+            },
+            "extractMs": {
+              "n": 50,
+              "min": 1027.445,
+              "mean": 2006.877,
+              "p50": 2025.507,
+              "p95": 2664.785,
+              "p99": 2755.962,
+              "max": 2755.962
+            },
+            "tierUsed": {
+              "1": 50
+            },
+            "attemptsPerJob": 1,
+            "attemptMs": {
+              "T1 accepted": {
+                "n": 50,
+                "min": 13.4,
+                "mean": 26.05,
+                "p50": 21,
+                "p95": 54.3,
+                "p99": 78.1,
+                "max": 78.1
+              }
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 167627144,
+        "jobsProcessed": 121,
+        "bytesPerJob": 1385348,
+        "eventsStreamLength": 1152,
+        "eventsStreamBytes": 55729424,
+        "jobHashBytes": 460168,
+        "resultKeyBytes": 458824
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 7.6,
+          "evalsha updateProgress": 5,
+          "publish": 4,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "get": 2,
+          "set": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1,
+          "evalsha moveStalledJobsToWait": 0.1
+        },
+        "lua": {
+          "xadd": 10,
+          "exists": 8.1,
+          "hget": 7.1,
+          "hmget": 6,
+          "hset": 6,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "zrange": 3,
+          "incr": 2,
+          "hmset": 2,
+          "hincrby": 2,
+          "zscore": 2,
+          "zcard": 2,
+          "llen": 2,
+          "set": 1.1,
+          "xtrim": 1.1,
+          "lpush": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "zrevrangebyscore": 1,
+          "smembers": 0.1,
+          "lrange": 0.1,
+          "sadd": 0.1
+        },
+        "clientTotal": 28.7,
+        "luaTotal": 81.7
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    },
+    "H-classic": {
+      "description": "Full worker path, small page from the local fixture: real SmartRouter (browser tiers enabled), real Piscina extraction, worker.ts Redis traffic; cacheTtl 0 like the tests/perf tier1-example scenario",
+      "queueOptions": {
+        "add": {
+          "priority": 1,
+          "attempts": 3,
+          "backoff": {
+            "type": "exponential",
+            "delay": 1000
+          },
+          "removeOnComplete": {
+            "age": 3600
+          },
+          "removeOnFail": {
+            "age": 86400
+          }
+        },
+        "worker": {
+          "concurrency": 5,
+          "stalledInterval": 15000,
+          "maxStalledCount": 2,
+          "drainDelay": "5 s (BullMQ default)"
+        },
+        "waitUntilFinishedTimeoutMs": 60000,
+        "processor": "full",
+        "cacheTtl": 0,
+        "url": "http://127.0.0.1:39865/small",
+        "browserTiers": true,
+        "warmupPerLevel": 5
+      },
+      "clock": {
+        "offsetMs": 0.002,
+        "rttMs": 0.034,
+        "samples": 50
+      },
+      "workerImportMs": {
+        "router": 457.969,
+        "pipeline": 54.08,
+        "qualityScorer": 1.659,
+        "tracing": 1.932,
+        "browserPoolInit": 314.683
+      },
+      "coldFirstJob": {
+        "enqueue": 0.672,
+        "pickup": 3.181,
+        "process": 2269.28,
+        "finalize": 2.092,
+        "notify": 0.01,
+        "afterProcess": 2.101,
+        "overhead": 5.955,
+        "total": 2275.235
+      },
+      "runs": [
+        {
+          "label": "sequential",
+          "concurrency": 1,
+          "n": 20,
+          "wallMs": 37738,
+          "throughputPerSec": 0.5,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 20,
+              "min": 0.544,
+              "mean": 1.037,
+              "p50": 0.9,
+              "p95": 1.759,
+              "p99": 2.135,
+              "max": 2.135
+            },
+            "pickup": {
+              "n": 20,
+              "min": -0.189,
+              "mean": 0.932,
+              "p50": 0.572,
+              "p95": 2.76,
+              "p99": 4.144,
+              "max": 4.144
+            },
+            "process": {
+              "n": 20,
+              "min": 1691.289,
+              "mean": 1883.621,
+              "p50": 1842.214,
+              "p95": 2052.204,
+              "p99": 2192.418,
+              "max": 2192.418
+            },
+            "finalize": {
+              "n": 20,
+              "min": 0.411,
+              "mean": 1.04,
+              "p50": 0.758,
+              "p95": 1.585,
+              "p99": 5.688,
+              "max": 5.688
+            },
+            "notify": {
+              "n": 20,
+              "min": -0.109,
+              "mean": 0.182,
+              "p50": 0.199,
+              "p95": 0.359,
+              "p99": 0.377,
+              "max": 0.377
+            },
+            "afterProcess": {
+              "n": 20,
+              "min": 0.678,
+              "mean": 1.221,
+              "p50": 0.994,
+              "p95": 1.574,
+              "p99": 5.58,
+              "max": 5.58
+            },
+            "overhead": {
+              "n": 20,
+              "min": 1.616,
+              "mean": 3.19,
+              "p50": 2.577,
+              "p95": 6.07,
+              "p99": 7.044,
+              "max": 7.044
+            },
+            "total": {
+              "n": 20,
+              "min": 1693.696,
+              "mean": 1886.811,
+              "p50": 1843.83,
+              "p95": 2055.544,
+              "p99": 2194.772,
+              "max": 2194.772
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 20,
+              "min": 1652.335,
+              "mean": 1851.934,
+              "p50": 1817.597,
+              "p95": 2021.394,
+              "p99": 2159.458,
+              "max": 2159.458
+            },
+            "extractMs": {
+              "n": 20,
+              "min": 16.068,
+              "mean": 27.251,
+              "p50": 24.718,
+              "p95": 35.867,
+              "p99": 59.779,
+              "max": 59.779
+            },
+            "tierUsed": {
+              "5": 20
+            },
+            "attemptsPerJob": 4,
+            "attemptMs": {
+              "T1 rejected": {
+                "n": 20,
+                "min": 1.6,
+                "mean": 2.315,
+                "p50": 2.2,
+                "p95": 3.6,
+                "p99": 4.2,
+                "max": 4.2
+              },
+              "T2 rejected": {
+                "n": 20,
+                "min": 1.5,
+                "mean": 2.37,
+                "p50": 2.1,
+                "p95": 3.4,
+                "p99": 3.9,
+                "max": 3.9
+              },
+              "T4 rejected": {
+                "n": 20,
+                "min": 1047.1,
+                "mean": 1063.02,
+                "p50": 1064.1,
+                "p95": 1074.1,
+                "p99": 1074.3,
+                "max": 1074.3
+              },
+              "T5 accepted": {
+                "n": 20,
+                "min": 589.8,
+                "mean": 779.905,
+                "p50": 762.7,
+                "p95": 946,
+                "p99": 1092.6,
+                "max": 1092.6
+              }
+            }
+          }
+        },
+        {
+          "label": "concurrency 5",
+          "concurrency": 5,
+          "n": 20,
+          "wallMs": 9009,
+          "throughputPerSec": 2.2,
+          "errors": 0,
+          "errorSamples": [],
+          "phases": {
+            "enqueue": {
+              "n": 20,
+              "min": 0.37,
+              "mean": 1.032,
+              "p50": 0.658,
+              "p95": 2.024,
+              "p99": 4.132,
+              "max": 4.132
+            },
+            "pickup": {
+              "n": 20,
+              "min": -3.056,
+              "mean": 1.449,
+              "p50": 1.121,
+              "p95": 4.904,
+              "p99": 4.92,
+              "max": 4.92
+            },
+            "process": {
+              "n": 20,
+              "min": 1762.172,
+              "mean": 2189.304,
+              "p50": 2044.782,
+              "p95": 2785.922,
+              "p99": 2881.808,
+              "max": 2881.808
+            },
+            "finalize": {
+              "n": 20,
+              "min": 0.388,
+              "mean": 1.011,
+              "p50": 0.744,
+              "p95": 2.596,
+              "p99": 2.893,
+              "max": 2.893
+            },
+            "notify": {
+              "n": 20,
+              "min": -1.859,
+              "mean": 0.049,
+              "p50": 0.058,
+              "p95": 1.099,
+              "p99": 1.759,
+              "max": 1.759
+            },
+            "afterProcess": {
+              "n": 20,
+              "min": 0.532,
+              "mean": 1.059,
+              "p50": 0.861,
+              "p95": 1.917,
+              "p99": 2.609,
+              "max": 2.609
+            },
+            "overhead": {
+              "n": 20,
+              "min": 1.19,
+              "mean": 3.54,
+              "p50": 2.844,
+              "p95": 6.465,
+              "p99": 6.976,
+              "max": 6.976
+            },
+            "total": {
+              "n": 20,
+              "min": 1763.714,
+              "mean": 2192.844,
+              "p50": 2046.552,
+              "p95": 2792.34,
+              "p99": 2888.273,
+              "max": 2888.273
+            }
+          },
+          "extra": {
+            "routeMs": {
+              "n": 20,
+              "min": 1741.736,
+              "mean": 2155.306,
+              "p50": 2024.629,
+              "p95": 2766.291,
+              "p99": 2849.945,
+              "max": 2849.945
+            },
+            "extractMs": {
+              "n": 20,
+              "min": 14.253,
+              "mean": 28.59,
+              "p50": 19.15,
+              "p95": 36.241,
+              "p99": 161.231,
+              "max": 161.231
+            },
+            "tierUsed": {
+              "5": 20
+            },
+            "attemptsPerJob": 4,
+            "attemptMs": {
+              "T1 rejected": {
+                "n": 20,
+                "min": 1.6,
+                "mean": 2.93,
+                "p50": 2.3,
+                "p95": 4.5,
+                "p99": 11.9,
+                "max": 11.9
+              },
+              "T2 rejected": {
+                "n": 20,
+                "min": 1.1,
+                "mean": 2.88,
+                "p50": 2.6,
+                "p95": 3.6,
+                "p99": 11.8,
+                "max": 11.8
+              },
+              "T4 rejected": {
+                "n": 20,
+                "min": 1076.6,
+                "mean": 1233.495,
+                "p50": 1135.9,
+                "p95": 1590.4,
+                "p99": 1661,
+                "max": 1661
+              },
+              "T5 accepted": {
+                "n": 20,
+                "min": 634,
+                "mean": 912.02,
+                "p50": 935.8,
+                "p95": 1250.4,
+                "p99": 1306.3,
+                "max": 1306.3
+              }
+            }
+          }
+        }
+      ],
+      "redisFootprint": {
+        "usedMemoryDeltaBytes": 201104,
+        "jobsProcessed": 51,
+        "bytesPerJob": 3943,
+        "eventsStreamLength": 487,
+        "eventsStreamBytes": 102336,
+        "jobHashBytes": 2440,
+        "resultKeyBytes": 712
+      },
+      "redisCommandsPerJob": {
+        "client": {
+          "xread": 7.8,
+          "evalsha updateProgress": 5,
+          "get": 5,
+          "set": 5,
+          "publish": 4,
+          "evalsha moveToActive": 3,
+          "bzpopmin": 2,
+          "evalsha addPrioritizedJob": 1,
+          "evalsha isFinished": 1,
+          "evalsha moveToFinished": 1
+        },
+        "lua": {
+          "xadd": 10,
+          "exists": 8,
+          "hget": 7,
+          "hmget": 6,
+          "hset": 6,
+          "zadd": 4,
+          "zrangebyscore": 4,
+          "rpoplpush": 4,
+          "zpopmin": 4,
+          "del": 4,
+          "zrange": 3,
+          "incr": 2,
+          "hmset": 2,
+          "hincrby": 2,
+          "zscore": 2,
+          "zcard": 2,
+          "llen": 2,
+          "lpush": 1,
+          "set": 1,
+          "hgetall": 1,
+          "scard": 1,
+          "get": 1,
+          "srem": 1,
+          "lrem": 1,
+          "xtrim": 1,
+          "zrevrangebyscore": 1
+        },
+        "clientTotal": 34.8,
+        "luaTotal": 81
+      },
+      "workerFailures": [],
+      "workerErrors": []
+    }
+  },
+  "scenarioErrors": {}
+}

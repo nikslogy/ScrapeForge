@@ -1,4 +1,6 @@
-import { chromium, type BrowserContext } from 'patchright';
+import { chromium } from 'patchright';
+import { assertPublicUrl, isOutboundBlockedError } from '@scrapeforge/shared';
+import { assertNavigationAllowed } from '../browser/outbound-guard.js';
 
 const LIGHTPANDA_URL = process.env.LIGHTPANDA_URL; // e.g. wss://euwest.cloud.lightpanda.io or ws://localhost:9222
 
@@ -22,6 +24,12 @@ export async function tier3Fetch(
   if (!LIGHTPANDA_URL) return null;
 
   const start = performance.now();
+  // Checked before connecting, so a refused URL never reaches the browser.
+  // No request guard runs inside Lightpanda (its CDP request interception is
+  // not relied on), so only the navigation chain and the final URL are
+  // checked afterwards. Sub-requests are not: a self-hosted Lightpanda
+  // inside our network should sit behind an egress policy of its own.
+  const target = await assertPublicUrl(url);
 
   let browser;
   try {
@@ -33,10 +41,11 @@ export async function tier3Fetch(
     const page = await context.newPage();
 
     try {
-      const response = await page.goto(url, {
+      const response = await page.goto(target.href, {
         waitUntil: 'domcontentloaded',
         timeout: options.timeout || 20_000,
       });
+      await assertNavigationAllowed(response, page.url());
 
       if (options.waitFor) {
         await page.waitForSelector(options.waitFor, {
@@ -46,6 +55,8 @@ export async function tier3Fetch(
         await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
       }
 
+      // Page scripts may have navigated since the initial load.
+      await assertNavigationAllowed(null, page.url());
       const html = await page.content();
       const statusCode = response?.status() || 200;
 
@@ -58,6 +69,9 @@ export async function tier3Fetch(
       await page.close();
     }
   } catch (err) {
+    // A refused destination is a verdict, not a Lightpanda failure: let the
+    // router record it instead of treating it as "no result".
+    if (isOutboundBlockedError(err)) throw err;
     console.warn(`[Tier3] Lightpanda failed for ${url}:`, (err as Error).message);
     return null;
   } finally {

@@ -1,0 +1,25 @@
+{
+  "id": "job-posting",
+  "url": "https://www.hireharbor.com/jobs/senior-data-engineer-brightloom-analytics-austin-tx-4f8a21c9",
+  "category": "job-posting",
+  "description": "Job board posting with JobPosting JSON-LD (baseSalary min/max USD per YEAR, FULL_TIME, Austin TX address) and the same facts in visible text, plus a company rating, benefits with dollar amounts, a salary-guide widget and a 'Similar jobs' rail including a remote role at the same company.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string" },
+      "company": { "type": "string", "description": "Hiring company (not the job board)" },
+      "salaryMin": { "type": ["number", "null"], "description": "Lower bound of the base salary range" },
+      "salaryMax": { "type": ["number", "null"], "description": "Upper bound of the base salary range" },
+      "salaryPeriod": { "enum": ["HOUR", "DAY", "WEEK", "MONTH", "YEAR", null], "description": "Pay period of the salary range" },
+      "location": { "type": "string", "description": "City and state of the job, e.g. 'Denver, CO'" },
+      "employmentType": { "type": "string", "enum": ["FULL_TIME", "PART_TIME", "CONTRACTOR", "TEMPORARY", "INTERN"] },
+      "remote": { "type": "boolean", "description": "True only when the role can be done fully remotely" }
+    },
+    "required": ["title", "company", "employmentType", "remote"]
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "employmentType gold FULL_TIME is the enum form of the visible 'Full-time' (also verbatim in JSON-LD). salaryPeriod YEAR is shown as 'a year' / 'per year'. remote is false: 'On-site', 'In person', 'not eligible for fully remote work' (the 'Remote' similar jobs are decoys). Decoys: company rating 4.1 (212 reviews), salary guide $158,412, relocation $10,000, stipend $1,500, similar-job salaries, bonus 10%.",
+  "tags": ["job", "json-ld", "enum", "booleans", "decoys"],
+  "nonVisibleFields": ["employmentType"]
+}

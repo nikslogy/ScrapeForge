@@ -1,0 +1,24 @@
+{
+  "id": "saas-pricing",
+  "url": "https://www.fieldnote.app/pricing",
+  "category": "saas-pricing",
+  "description": "SaaS pricing page with a monthly/annual toggle where both price sets are in the DOM (one hidden by a stylesheet rule, not inline), three priced tiers plus a 'Custom pricing / Contact sales' Enterprise tier, an add-ons paragraph, a comparison table and an embedded JSON pricing config in cents.",
+  "schema": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "properties": {
+        "plan": { "type": "string", "description": "Plan name" },
+        "monthlyPrice": { "type": ["number", "null"], "description": "Price per month in USD when billed monthly" },
+        "annualPricePerMonth": { "type": ["number", "null"], "description": "Effective price per month in USD when billed annually" },
+        "seatsIncluded": { "type": ["integer", "null"], "description": "Seats included in the plan; null when unlimited or custom" }
+      },
+      "required": ["plan", "monthlyPrice", "annualPricePerMonth", "seatsIncluded"]
+    }
+  },
+  "expectedShape": "array",
+  "recordKey": "plan",
+  "expectStatus": "complete",
+  "notes": "Annual billing is selected by default; the monthly prices are hidden only by a <style> rule keyed on data-billing, so both sets are in the snapshot and a reader can toggle to see either. annualPricePerMonth is the per-month figure ($15), not the yearly total ($180/yr). Enterprise is a real plan with all numbers null ('Custom pricing', 'Unlimited seats' is not an integer). Decoys: extra seats $8/seat/mo, storage $5 per 100 GB, nonprofit 50% off, embedded pricing-config JSON in cents (1900 = $19).",
+  "tags": ["pricing", "toggle", "nulls", "embedded-json", "decoys"]
+}

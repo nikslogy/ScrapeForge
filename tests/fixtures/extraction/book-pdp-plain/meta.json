@@ -1,0 +1,24 @@
+{
+  "id": "book-pdp-plain",
+  "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+  "category": "ecommerce-pdp",
+  "description": "Bookstore product page on the same template as book-pdp-jsonld but with no structured data: everything comes from the DOM, including a product information table and a rating encoded only as a CSS class.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string" },
+      "price": { "type": "number", "description": "Price including tax, in GBP" },
+      "availability": { "type": "string", "description": "Stock status without the count, e.g. 'In stock'" },
+      "stock_count": { "type": "integer", "description": "Number of copies available" },
+      "rating": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Star rating" },
+      "upc": { "type": "string" },
+      "reviews": { "type": "integer", "description": "Number of reviews" }
+    },
+    "required": ["title", "price", "upc"]
+  },
+  "expectedShape": "object",
+  "expectStatus": "complete",
+  "notes": "No JSON-LD, so this exercises the DOM/LLM path. Rating 3 exists only as class 'star-rating Three'. stock_count 22 comes from 'In stock (22 available)'; availability is the status without the count. reviews is 0 (a present, falsy value: must not be reported as missing). The 'recently viewed' strip (Tipping the Velvet £53.74, The Black Maria £52.15, Shakespeare's Sonnets £20.66) and the window.__BASKET__ upsell are decoys.",
+  "tags": ["pdp", "dom-only", "table", "decoys", "books", "falsy-values"],
+  "nonVisibleFields": ["rating"]
+}

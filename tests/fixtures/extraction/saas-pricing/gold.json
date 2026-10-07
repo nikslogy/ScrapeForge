@@ -1,0 +1,6 @@
+[
+  { "plan": "Starter", "monthlyPrice": 19, "annualPricePerMonth": 15, "seatsIncluded": 3 },
+  { "plan": "Pro", "monthlyPrice": 49, "annualPricePerMonth": 39, "seatsIncluded": 10 },
+  { "plan": "Business", "monthlyPrice": 99, "annualPricePerMonth": 79, "seatsIncluded": 25 },
+  { "plan": "Enterprise", "monthlyPrice": null, "annualPricePerMonth": null, "seatsIncluded": null }
+]

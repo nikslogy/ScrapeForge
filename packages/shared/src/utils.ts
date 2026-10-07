@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { isIP } from 'node:net';
+import { isBlockedAddress, isBlockedHostname } from './net.js';
 import { API_KEY_PREFIX } from './types.js';
 
 export function generateApiKey(): { raw: string; hash: string; prefix: string } {
@@ -17,27 +19,22 @@ export function createCacheKey(url: string, options: Record<string, unknown>): s
   return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
 }
 
-const BLOCKED_HOST_PATTERNS = [
-  /^localhost$/i,
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^0\./,
-  /^169\.254\./,
-  /^::1$/,
-  /^fc00:/i,
-  /^fe80:/i,
-];
-
+/**
+ * Cheap synchronous pre-check only. It reads the URL text and never resolves
+ * DNS, so a public name that resolves to a private address passes. Use
+ * assertPublicUrl (net.ts) before making any outbound request.
+ */
 export function isUrlSafe(urlString: string): boolean {
+  let url: URL;
   try {
-    const url = new URL(urlString);
-    const hostname = url.hostname;
-    if (BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(hostname))) return false;
-    if (!['http:', 'https:'].includes(url.protocol)) return false;
-    return true;
+    url = new URL(urlString);
   } catch {
     return false;
   }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  // WHATWG URL keeps IPv6 hosts bracketed ("[::1]") and has already
+  // normalized legacy IPv4 spellings ("0x7f.1" → "127.0.0.1").
+  const host = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname;
+  if (isIP(host)) return !isBlockedAddress(host);
+  return !isBlockedHostname(host);
 }

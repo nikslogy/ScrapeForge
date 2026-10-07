@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-07",
+  "node": "v22.22.0",
+  "note": "heapUsed growth after forced full GC (gc() twice before and after)",
+  "cases": [
+    {
+      "name": "pipeline-impl extractContent, small page",
+      "iterations": 300,
+      "retainedHeapMB": 192.2,
+      "retainedPerCallKB": 656,
+      "callMs": {
+        "n": 300,
+        "min": 9.744,
+        "mean": 15.373,
+        "p50": 15.099,
+        "p95": 23.775,
+        "p99": 32.208,
+        "max": 45.082
+      }
+    },
+    {
+      "name": "pipeline-impl extractContent, 500 KB page",
+      "iterations": 15,
+      "retainedHeapMB": 200.3,
+      "retainedPerCallKB": 13671,
+      "callMs": {
+        "n": 15,
+        "min": 911.851,
+        "mean": 1089.393,
+        "p50": 999.434,
+        "p95": 1437.509,
+        "p99": 1437.509,
+        "max": 1437.509
+      }
+    },
+    {
+      "name": "new JSDOM(small) without close()",
+      "iterations": 300,
+      "retainedHeapMB": 154.3,
+      "retainedPerCallKB": 527,
+      "callMs": {
+        "n": 300,
+        "min": 3.471,
+        "mean": 5.222,
+        "p50": 4.014,
+        "p95": 12.476,
+        "p99": 15.167,
+        "max": 20.121
+      }
+    },
+    {
+      "name": "new JSDOM(small) + window.close()",
+      "iterations": 300,
+      "retainedHeapMB": 147.3,
+      "retainedPerCallKB": 503,
+      "callMs": {
+        "n": 300,
+        "min": 3.58,
+        "mean": 5.37,
+        "p50": 4.242,
+        "p95": 12.126,
+        "p99": 16.096,
+        "max": 35.718
+      }
+    },
+    {
+      "name": "JSDOM + Readability, 500 KB page",
+      "iterations": 15,
+      "retainedHeapMB": 193.7,
+      "retainedPerCallKB": 13223,
+      "callMs": {
+        "n": 15,
+        "min": 352.451,
+        "mean": 406.696,
+        "p50": 384.77,
+        "p95": 579.451,
+        "p99": 579.451,
+        "max": 579.451
+      }
+    },
+    {
+      "name": "linkedom parseHTML + Readability, 500 KB page",
+      "iterations": 15,
+      "retainedHeapMB": 1.6,
+      "retainedPerCallKB": 110,
+      "callMs": {
+        "n": 15,
+        "min": 65.655,
+        "mean": 83.881,
+        "p50": 73.755,
+        "p95": 209.555,
+        "p99": 209.555,
+        "max": 209.555
+      }
+    }
+  ]
+}

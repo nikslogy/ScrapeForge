@@ -1,0 +1,3602 @@
+[
+ {
+  "name": "Saltmarsh Ripstop Trail Short",
+  "sku": "HP-204729",
+  "price": 309.5,
+  "rating": 4
+ },
+ {
+  "name": "Saltmarsh Insulated Rain Shell",
+  "sku": "HP-309458",
+  "price": 187.5,
+  "rating": 4.8
+ },
+ {
+  "name": "Timber Down Vest",
+  "sku": "HP-414187",
+  "price": 158.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Alpine Titanium Seat Pad",
+  "sku": "HP-518916",
+  "price": 186,
+  "rating": 4.3
+ },
+ {
+  "name": "Driftwood Recycled Nylon Belt",
+  "sku": "HP-623645",
+  "price": 146.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Redwood Leather Duffel",
+  "sku": "HP-728374",
+  "price": 132.99,
+  "rating": 4
+ },
+ {
+  "name": "Meadow Fleece Field Shirt",
+  "sku": "HP-833103",
+  "price": 68.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Wildfern Cork Gaiter",
+  "sku": "HP-937832",
+  "price": 151.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Canyon Recycled Nylon Pack Cover",
+  "sku": "HP-142561",
+  "price": 272.5,
+  "rating": 4.9
+ },
+ {
+  "name": "Ridge Bamboo Beanie",
+  "sku": "HP-247290",
+  "price": 37.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Canyon Bamboo Camp Blanket",
+  "sku": "HP-352019",
+  "price": 239,
+  "rating": 4.7
+ },
+ {
+  "name": "Prairie Cork Camp Blanket",
+  "sku": "HP-456748",
+  "price": 39.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Driftwood Leather Camp Blanket",
+  "sku": "HP-561477",
+  "price": 246.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Driftwood Fleece Hiking Sock",
+  "sku": "HP-666206",
+  "price": 301.5,
+  "rating": 3.6
+ },
+ {
+  "name": "Highland Leather Trail Short",
+  "sku": "HP-770935",
+  "price": 280.99,
+  "rating": 3
+ },
+ {
+  "name": "Glacier Waxed Cotton Belt",
+  "sku": "HP-875664",
+  "price": 126.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Wildfern Canvas Wallet",
+  "sku": "HP-980393",
+  "price": 278.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Bamboo Hammock",
+  "sku": "HP-185122",
+  "price": 279.5,
+  "rating": null
+ },
+ {
+  "name": "Highland Canvas Pullover",
+  "sku": "HP-289851",
+  "price": 247.95,
+  "rating": 3.7
+ },
+ {
+  "name": "Canyon Titanium Camp Blanket",
+  "sku": "HP-394580",
+  "price": 43.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Ridge Ripstop Vest",
+  "sku": "HP-499309",
+  "price": 206.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Summit Canvas Beanie",
+  "sku": "HP-604038",
+  "price": 18,
+  "rating": null
+ },
+ {
+  "name": "Juniper Down Vest",
+  "sku": "HP-708767",
+  "price": 165.5,
+  "rating": 4.8
+ },
+ {
+  "name": "Canyon Down Hammock",
+  "sku": "HP-813496",
+  "price": 46.99,
+  "rating": 5
+ },
+ {
+  "name": "Highland Leather Camp Blanket",
+  "sku": "HP-918225",
+  "price": 71.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Prairie Merino Tote",
+  "sku": "HP-122954",
+  "price": 81.5,
+  "rating": 4.7
+ },
+ {
+  "name": "Highland Insulated Camp Blanket",
+  "sku": "HP-227683",
+  "price": 74.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Meadow Ripstop Water Bottle",
+  "sku": "HP-332412",
+  "price": 268.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Harbor Fleece Headlamp Strap",
+  "sku": "HP-437141",
+  "price": 182.5,
+  "rating": 5
+ },
+ {
+  "name": "Wildfern Ripstop Stuff Sack",
+  "sku": "HP-541870",
+  "price": 211.95,
+  "rating": 5
+ },
+ {
+  "name": "Highland Cork Tarp",
+  "sku": "HP-646599",
+  "price": 217.99,
+  "rating": null
+ },
+ {
+  "name": "Harbor Ripstop Pullover",
+  "sku": "HP-751328",
+  "price": 38.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Trailhead Canvas Camp Blanket",
+  "sku": "HP-856057",
+  "price": 171.95,
+  "rating": 4
+ },
+ {
+  "name": "Granite Insulated Field Shirt",
+  "sku": "HP-960786",
+  "price": 329.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Trailhead Fleece Pullover",
+  "sku": "HP-165515",
+  "price": 137.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Coastal Cork Neck Gaiter",
+  "sku": "HP-270244",
+  "price": 290.95,
+  "rating": 4.9
+ },
+ {
+  "name": "Glacier Waxed Cotton Sleeping Bag",
+  "sku": "HP-374973",
+  "price": 140.95,
+  "rating": null
+ },
+ {
+  "name": "Alpine Merino Hammock",
+  "sku": "HP-479702",
+  "price": 110.95,
+  "rating": 4.4
+ },
+ {
+  "name": "Alpine Leather Jacket",
+  "sku": "HP-584431",
+  "price": 191.5,
+  "rating": null
+ },
+ {
+  "name": "Basecamp Ripstop Camp Mug",
+  "sku": "HP-689160",
+  "price": 339.5,
+  "rating": 5
+ },
+ {
+  "name": "Timber Bamboo Glove",
+  "sku": "HP-793889",
+  "price": 299,
+  "rating": null
+ },
+ {
+  "name": "Alpine Cork Beanie",
+  "sku": "HP-898618",
+  "price": 254.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Driftwood Bamboo Wallet",
+  "sku": "HP-103347",
+  "price": 202,
+  "rating": 3.9
+ },
+ {
+  "name": "Driftwood Leather Glove",
+  "sku": "HP-208076",
+  "price": 52.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Tundra Merino Seat Pad",
+  "sku": "HP-312805",
+  "price": 111,
+  "rating": null
+ },
+ {
+  "name": "Sierra Ripstop Daypack",
+  "sku": "HP-417534",
+  "price": 207,
+  "rating": 3.5
+ },
+ {
+  "name": "Summit Canvas Pack Cover",
+  "sku": "HP-522263",
+  "price": 205.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Prairie Ripstop Daypack",
+  "sku": "HP-626992",
+  "price": 214.99,
+  "rating": 5
+ },
+ {
+  "name": "Meadow Leather Base Layer Top",
+  "sku": "HP-731721",
+  "price": 84.95,
+  "rating": null
+ },
+ {
+  "name": "Meadow Bamboo Camp Blanket",
+  "sku": "HP-836450",
+  "price": 52.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Northwind Cork Belt",
+  "sku": "HP-941179",
+  "price": 145,
+  "rating": 3.3
+ },
+ {
+  "name": "Coastal Insulated Camp Mug",
+  "sku": "HP-145908",
+  "price": 166.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Driftwood Down Base Layer Top",
+  "sku": "HP-250637",
+  "price": 20.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Ridge Cork Sleeping Bag",
+  "sku": "HP-355366",
+  "price": 54.5,
+  "rating": null
+ },
+ {
+  "name": "Summit Titanium Neck Gaiter",
+  "sku": "HP-460095",
+  "price": 341.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Lakeshore Titanium Hammock",
+  "sku": "HP-564824",
+  "price": 260.99,
+  "rating": null
+ },
+ {
+  "name": "Basecamp Recycled Nylon Glove",
+  "sku": "HP-669553",
+  "price": 180.5,
+  "rating": null
+ },
+ {
+  "name": "Sierra Bamboo Seat Pad",
+  "sku": "HP-774282",
+  "price": 158,
+  "rating": 3.5
+ },
+ {
+  "name": "Juniper Recycled Nylon Field Shirt",
+  "sku": "HP-879011",
+  "price": 15.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Summit Bamboo Trail Short",
+  "sku": "HP-983740",
+  "price": 159.95,
+  "rating": null
+ },
+ {
+  "name": "Glacier Merino Camp Blanket",
+  "sku": "HP-188469",
+  "price": 235.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Prairie Down Gaiter",
+  "sku": "HP-293198",
+  "price": 64.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Lakeshore Leather Sleeping Bag",
+  "sku": "HP-397927",
+  "price": 71,
+  "rating": null
+ },
+ {
+  "name": "Basecamp Merino Beanie",
+  "sku": "HP-502656",
+  "price": 118.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Coastal Down Water Bottle",
+  "sku": "HP-607385",
+  "price": 176,
+  "rating": 4.7
+ },
+ {
+  "name": "Juniper Titanium Vest",
+  "sku": "HP-712114",
+  "price": 126.99,
+  "rating": null
+ },
+ {
+  "name": "Driftwood Waxed Cotton Anorak",
+  "sku": "HP-816843",
+  "price": 236.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Saltmarsh Waxed Cotton Rain Shell",
+  "sku": "HP-921572",
+  "price": 295,
+  "rating": 3.6
+ },
+ {
+  "name": "Ridge Canvas Camp Mug",
+  "sku": "HP-126301",
+  "price": 148.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Tundra Insulated Tarp",
+  "sku": "HP-231030",
+  "price": 105.5,
+  "rating": 3.5
+ },
+ {
+  "name": "Prairie Titanium Trail Short",
+  "sku": "HP-335759",
+  "price": 344.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Driftwood Titanium Hammock",
+  "sku": "HP-440488",
+  "price": 86.5,
+  "rating": 4.8
+ },
+ {
+  "name": "Alpine Canvas Seat Pad",
+  "sku": "HP-545217",
+  "price": 133,
+  "rating": 3.9
+ },
+ {
+  "name": "Sierra Fleece Water Bottle",
+  "sku": "HP-649946",
+  "price": 65.95,
+  "rating": 4.2
+ },
+ {
+  "name": "Granite Recycled Nylon Base Layer Top",
+  "sku": "HP-754675",
+  "price": 72,
+  "rating": 3.9
+ },
+ {
+  "name": "Glacier Ripstop Base Layer Top",
+  "sku": "HP-859404",
+  "price": 262,
+  "rating": null
+ },
+ {
+  "name": "Highland Ripstop Duffel",
+  "sku": "HP-964133",
+  "price": 84.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Prairie Merino Base Layer Top",
+  "sku": "HP-168862",
+  "price": 263.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Coastal Ripstop Beanie",
+  "sku": "HP-273591",
+  "price": 220.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Insulated Hiking Sock",
+  "sku": "HP-378320",
+  "price": 155.95,
+  "rating": 4.3
+ },
+ {
+  "name": "Timber Titanium Chalk Bag",
+  "sku": "HP-483049",
+  "price": 274,
+  "rating": 4.9
+ },
+ {
+  "name": "Glacier Bamboo Jacket",
+  "sku": "HP-587778",
+  "price": 46,
+  "rating": 3.9
+ },
+ {
+  "name": "Northwind Bamboo Beanie",
+  "sku": "HP-692507",
+  "price": 304.5,
+  "rating": null
+ },
+ {
+  "name": "Trailhead Waxed Cotton Daypack",
+  "sku": "HP-797236",
+  "price": 79.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Redwood Fleece Base Layer Top",
+  "sku": "HP-901965",
+  "price": 329,
+  "rating": 4.3
+ },
+ {
+  "name": "Redwood Fleece Pack Cover",
+  "sku": "HP-106694",
+  "price": 64.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Lakeshore Bamboo Glove",
+  "sku": "HP-211423",
+  "price": 261.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Cork Pack Cover",
+  "sku": "HP-316152",
+  "price": 216.95,
+  "rating": 3.9
+ },
+ {
+  "name": "Driftwood Insulated Field Shirt",
+  "sku": "HP-420881",
+  "price": 92.5,
+  "rating": 3.9
+ },
+ {
+  "name": "Cedar Recycled Nylon Trail Short",
+  "sku": "HP-525610",
+  "price": 64.99,
+  "rating": null
+ },
+ {
+  "name": "Highland Canvas Camp Mug",
+  "sku": "HP-630339",
+  "price": 103.99,
+  "rating": 5
+ },
+ {
+  "name": "Glacier Cork Wallet",
+  "sku": "HP-735068",
+  "price": 208.99,
+  "rating": 4
+ },
+ {
+  "name": "Saltmarsh Leather Tote",
+  "sku": "HP-839797",
+  "price": 10.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Summit Insulated Wallet",
+  "sku": "HP-944526",
+  "price": 288.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Ridge Recycled Nylon Hiking Sock",
+  "sku": "HP-149255",
+  "price": 162.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Lakeshore Merino Wallet",
+  "sku": "HP-253984",
+  "price": 164,
+  "rating": 4.3
+ },
+ {
+  "name": "Sierra Fleece Base Layer Top",
+  "sku": "HP-358713",
+  "price": 29.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Redwood Leather Rain Shell",
+  "sku": "HP-463442",
+  "price": 305.99,
+  "rating": null
+ },
+ {
+  "name": "Cedar Leather Trail Short",
+  "sku": "HP-568171",
+  "price": 116,
+  "rating": 3.2
+ },
+ {
+  "name": "Alpine Titanium Anorak",
+  "sku": "HP-672900",
+  "price": 180.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Meadow Ripstop Anorak",
+  "sku": "HP-777629",
+  "price": 101.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Sierra Merino Hammock",
+  "sku": "HP-882358",
+  "price": 40.5,
+  "rating": 3.6
+ },
+ {
+  "name": "Glacier Leather Daypack",
+  "sku": "HP-987087",
+  "price": 42.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Lakeshore Recycled Nylon Anorak",
+  "sku": "HP-191816",
+  "price": 173.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Harbor Down Base Layer Top",
+  "sku": "HP-296545",
+  "price": 243.95,
+  "rating": null
+ },
+ {
+  "name": "Granite Down Tarp",
+  "sku": "HP-401274",
+  "price": 189.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Ridge Cork Stuff Sack",
+  "sku": "HP-506003",
+  "price": 305.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Tundra Bamboo Tarp",
+  "sku": "HP-610732",
+  "price": 297.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Wildfern Ripstop Pullover",
+  "sku": "HP-715461",
+  "price": 324.95,
+  "rating": 5
+ },
+ {
+  "name": "Harbor Leather Belt",
+  "sku": "HP-820190",
+  "price": 198.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Granite Leather Rain Shell",
+  "sku": "HP-924919",
+  "price": 307,
+  "rating": 4.3
+ },
+ {
+  "name": "Harbor Merino Sleeping Bag",
+  "sku": "HP-129648",
+  "price": 177.95,
+  "rating": null
+ },
+ {
+  "name": "Summit Leather Camp Mug",
+  "sku": "HP-234377",
+  "price": 206.99,
+  "rating": null
+ },
+ {
+  "name": "Driftwood Leather Water Bottle",
+  "sku": "HP-339106",
+  "price": 115.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Summit Cork Field Shirt",
+  "sku": "HP-443835",
+  "price": 163.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Ridge Bamboo Field Shirt",
+  "sku": "HP-548564",
+  "price": 92.95,
+  "rating": 3
+ },
+ {
+  "name": "Cedar Down Camp Blanket",
+  "sku": "HP-653293",
+  "price": 15.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Cedar Recycled Nylon Trucker Hat",
+  "sku": "HP-758022",
+  "price": 208.5,
+  "rating": null
+ },
+ {
+  "name": "Summit Titanium Beanie",
+  "sku": "HP-862751",
+  "price": 195.99,
+  "rating": null
+ },
+ {
+  "name": "Highland Canvas Anorak",
+  "sku": "HP-967480",
+  "price": 89.5,
+  "rating": null
+ },
+ {
+  "name": "Driftwood Canvas Tote",
+  "sku": "HP-172209",
+  "price": 123.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Cedar Waxed Cotton Jacket",
+  "sku": "HP-276938",
+  "price": 323,
+  "rating": 4.4
+ },
+ {
+  "name": "Lakeshore Insulated Anorak",
+  "sku": "HP-381667",
+  "price": 172,
+  "rating": 3.4
+ },
+ {
+  "name": "Glacier Bamboo Belt",
+  "sku": "HP-486396",
+  "price": 56.99,
+  "rating": 3
+ },
+ {
+  "name": "Driftwood Cork Vest",
+  "sku": "HP-591125",
+  "price": 15.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Lakeshore Cork Beanie",
+  "sku": "HP-695854",
+  "price": 250.5,
+  "rating": 3.9
+ },
+ {
+  "name": "Highland Canvas Chalk Bag",
+  "sku": "HP-800583",
+  "price": 331.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Granite Bamboo Pullover",
+  "sku": "HP-905312",
+  "price": 148.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Lakeshore Down Water Bottle",
+  "sku": "HP-110041",
+  "price": 347,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Merino Daypack",
+  "sku": "HP-214770",
+  "price": 176.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Canyon Canvas Pullover",
+  "sku": "HP-319499",
+  "price": 68.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Saltmarsh Recycled Nylon Base Layer Top",
+  "sku": "HP-424228",
+  "price": 226.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Highland Cork Pullover",
+  "sku": "HP-528957",
+  "price": 143.99,
+  "rating": null
+ },
+ {
+  "name": "Meadow Ripstop Tarp",
+  "sku": "HP-633686",
+  "price": 266.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Highland Recycled Nylon Headlamp Strap",
+  "sku": "HP-738415",
+  "price": 319,
+  "rating": 3.5
+ },
+ {
+  "name": "Wildfern Waxed Cotton Daypack",
+  "sku": "HP-843144",
+  "price": 114.5,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Down Belt",
+  "sku": "HP-947873",
+  "price": 165.95,
+  "rating": 3.9
+ },
+ {
+  "name": "Coastal Canvas Glove",
+  "sku": "HP-152602",
+  "price": 325.99,
+  "rating": 4
+ },
+ {
+  "name": "Granite Fleece Camp Blanket",
+  "sku": "HP-257331",
+  "price": 82.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Redwood Ripstop Base Layer Top",
+  "sku": "HP-362060",
+  "price": 55.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Timber Ripstop Duffel",
+  "sku": "HP-466789",
+  "price": 194,
+  "rating": 3.9
+ },
+ {
+  "name": "Glacier Canvas Chalk Bag",
+  "sku": "HP-571518",
+  "price": 26.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Ridge Waxed Cotton Beanie",
+  "sku": "HP-676247",
+  "price": 114.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Ridge Insulated Anorak",
+  "sku": "HP-780976",
+  "price": 333.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Driftwood Insulated Headlamp Strap",
+  "sku": "HP-885705",
+  "price": 226.5,
+  "rating": 3
+ },
+ {
+  "name": "Alpine Leather Anorak",
+  "sku": "HP-990434",
+  "price": 26.95,
+  "rating": 4
+ },
+ {
+  "name": "Lakeshore Down Belt",
+  "sku": "HP-195163",
+  "price": 286,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Bamboo Tote",
+  "sku": "HP-299892",
+  "price": 83.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Basecamp Fleece Camp Blanket",
+  "sku": "HP-404621",
+  "price": 249,
+  "rating": 3.4
+ },
+ {
+  "name": "Prairie Canvas Hiking Sock",
+  "sku": "HP-509350",
+  "price": 12.5,
+  "rating": 3
+ },
+ {
+  "name": "Tundra Merino Vest",
+  "sku": "HP-614079",
+  "price": 9.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Coastal Titanium Belt",
+  "sku": "HP-718808",
+  "price": 65.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Timber Ripstop Gaiter",
+  "sku": "HP-823537",
+  "price": 274,
+  "rating": 3.7
+ },
+ {
+  "name": "Summit Bamboo Daypack",
+  "sku": "HP-928266",
+  "price": 242.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Meadow Cork Camp Mug",
+  "sku": "HP-132995",
+  "price": 328.5,
+  "rating": 3.1
+ },
+ {
+  "name": "Meadow Down Wallet",
+  "sku": "HP-237724",
+  "price": 96.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Saltmarsh Canvas Trail Short",
+  "sku": "HP-342453",
+  "price": 66.99,
+  "rating": 3.2
+ },
+ {
+  "name": "Juniper Merino Anorak",
+  "sku": "HP-447182",
+  "price": 150,
+  "rating": 3
+ },
+ {
+  "name": "Sierra Cork Tarp",
+  "sku": "HP-551911",
+  "price": 13.99,
+  "rating": 4.8
+ },
+ {
+  "name": "Coastal Leather Headlamp Strap",
+  "sku": "HP-656640",
+  "price": 146.5,
+  "rating": null
+ },
+ {
+  "name": "Trailhead Recycled Nylon Daypack",
+  "sku": "HP-761369",
+  "price": 182.5,
+  "rating": 3.7
+ },
+ {
+  "name": "Canyon Fleece Glove",
+  "sku": "HP-866098",
+  "price": 132.95,
+  "rating": 3.9
+ },
+ {
+  "name": "Timber Canvas Stuff Sack",
+  "sku": "HP-970827",
+  "price": 343.5,
+  "rating": 4
+ },
+ {
+  "name": "Ridge Bamboo Hiking Sock",
+  "sku": "HP-175556",
+  "price": 69.99,
+  "rating": 3
+ },
+ {
+  "name": "Basecamp Fleece Pullover",
+  "sku": "HP-280285",
+  "price": 101.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Harbor Ripstop Sleeping Bag",
+  "sku": "HP-385014",
+  "price": 143.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Trailhead Leather Hammock",
+  "sku": "HP-489743",
+  "price": 242.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Redwood Canvas Sleeping Bag",
+  "sku": "HP-594472",
+  "price": 233.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Cedar Bamboo Pack Cover",
+  "sku": "HP-699201",
+  "price": 163,
+  "rating": 4.5
+ },
+ {
+  "name": "Alpine Titanium Base Layer Top",
+  "sku": "HP-803930",
+  "price": 69.95,
+  "rating": 3.7
+ },
+ {
+  "name": "Northwind Titanium Gaiter",
+  "sku": "HP-908659",
+  "price": 205.5,
+  "rating": 4.9
+ },
+ {
+  "name": "Canyon Cork Glove",
+  "sku": "HP-113388",
+  "price": 298.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Highland Waxed Cotton Trucker Hat",
+  "sku": "HP-218117",
+  "price": 23.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Prairie Recycled Nylon Stuff Sack",
+  "sku": "HP-322846",
+  "price": 176.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Timber Waxed Cotton Tote",
+  "sku": "HP-427575",
+  "price": 120.95,
+  "rating": 3.1
+ },
+ {
+  "name": "Coastal Merino Duffel",
+  "sku": "HP-532304",
+  "price": 66,
+  "rating": null
+ },
+ {
+  "name": "Meadow Insulated Anorak",
+  "sku": "HP-637033",
+  "price": 84,
+  "rating": null
+ },
+ {
+  "name": "Sierra Canvas Gaiter",
+  "sku": "HP-741762",
+  "price": 138.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Redwood Recycled Nylon Stuff Sack",
+  "sku": "HP-846491",
+  "price": 240.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Meadow Down Chalk Bag",
+  "sku": "HP-951220",
+  "price": 183.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Summit Canvas Chalk Bag",
+  "sku": "HP-155949",
+  "price": 135.5,
+  "rating": null
+ },
+ {
+  "name": "Highland Fleece Seat Pad",
+  "sku": "HP-260678",
+  "price": 272,
+  "rating": null
+ },
+ {
+  "name": "Timber Ripstop Daypack",
+  "sku": "HP-365407",
+  "price": 18.95,
+  "rating": 4.9
+ },
+ {
+  "name": "Saltmarsh Fleece Sleeping Bag",
+  "sku": "HP-470136",
+  "price": 30.99,
+  "rating": null
+ },
+ {
+  "name": "Highland Waxed Cotton Belt",
+  "sku": "HP-574865",
+  "price": 40.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Juniper Cork Gaiter",
+  "sku": "HP-679594",
+  "price": 121.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Tundra Canvas Tote",
+  "sku": "HP-784323",
+  "price": 270.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Juniper Ripstop Field Shirt",
+  "sku": "HP-889052",
+  "price": 126.99,
+  "rating": 4
+ },
+ {
+  "name": "Sierra Recycled Nylon Sleeping Bag",
+  "sku": "HP-993781",
+  "price": 222.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Timber Fleece Base Layer Top",
+  "sku": "HP-198510",
+  "price": 26.95,
+  "rating": 4.2
+ },
+ {
+  "name": "Canyon Cork Camp Mug",
+  "sku": "HP-303239",
+  "price": 160.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Coastal Bamboo Belt",
+  "sku": "HP-407968",
+  "price": 265,
+  "rating": 3.7
+ },
+ {
+  "name": "Sierra Canvas Glove",
+  "sku": "HP-512697",
+  "price": 342.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Coastal Leather Base Layer Top",
+  "sku": "HP-617426",
+  "price": 106.99,
+  "rating": null
+ },
+ {
+  "name": "Coastal Merino Pack Cover",
+  "sku": "HP-722155",
+  "price": 69.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Granite Insulated Sleeping Bag",
+  "sku": "HP-826884",
+  "price": 40.5,
+  "rating": null
+ },
+ {
+  "name": "Timber Waxed Cotton Pack Cover",
+  "sku": "HP-931613",
+  "price": 63.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Tundra Fleece Field Shirt",
+  "sku": "HP-136342",
+  "price": 271,
+  "rating": 3.8
+ },
+ {
+  "name": "Glacier Fleece Neck Gaiter",
+  "sku": "HP-241071",
+  "price": 144.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Northwind Waxed Cotton Neck Gaiter",
+  "sku": "HP-345800",
+  "price": 144,
+  "rating": null
+ },
+ {
+  "name": "Timber Bamboo Seat Pad",
+  "sku": "HP-450529",
+  "price": 282.95,
+  "rating": 3
+ },
+ {
+  "name": "Wildfern Titanium Beanie",
+  "sku": "HP-555258",
+  "price": 147.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Basecamp Titanium Hammock",
+  "sku": "HP-659987",
+  "price": 255.95,
+  "rating": 3.8
+ },
+ {
+  "name": "Northwind Down Beanie",
+  "sku": "HP-764716",
+  "price": 258,
+  "rating": 4.1
+ },
+ {
+  "name": "Prairie Waxed Cotton Duffel",
+  "sku": "HP-869445",
+  "price": 34.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Cedar Fleece Anorak",
+  "sku": "HP-974174",
+  "price": 235,
+  "rating": 4
+ },
+ {
+  "name": "Granite Leather Neck Gaiter",
+  "sku": "HP-178903",
+  "price": 67.99,
+  "rating": null
+ },
+ {
+  "name": "Cedar Ripstop Chalk Bag",
+  "sku": "HP-283632",
+  "price": 238.95,
+  "rating": 3.7
+ },
+ {
+  "name": "Tundra Titanium Stuff Sack",
+  "sku": "HP-388361",
+  "price": 104,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Insulated Trucker Hat",
+  "sku": "HP-493090",
+  "price": 202.99,
+  "rating": 3
+ },
+ {
+  "name": "Basecamp Waxed Cotton Gaiter",
+  "sku": "HP-597819",
+  "price": 281.5,
+  "rating": 3.4
+ },
+ {
+  "name": "Granite Bamboo Duffel",
+  "sku": "HP-702548",
+  "price": 303.95,
+  "rating": 4
+ },
+ {
+  "name": "Ridge Cork Camp Blanket",
+  "sku": "HP-807277",
+  "price": 51.99,
+  "rating": null
+ },
+ {
+  "name": "Canyon Insulated Base Layer Top",
+  "sku": "HP-912006",
+  "price": 331.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Sierra Bamboo Tote",
+  "sku": "HP-116735",
+  "price": 17,
+  "rating": 4.9
+ },
+ {
+  "name": "Summit Cork Daypack",
+  "sku": "HP-221464",
+  "price": 151.95,
+  "rating": 4.3
+ },
+ {
+  "name": "Granite Bamboo Tarp",
+  "sku": "HP-326193",
+  "price": 249.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Prairie Fleece Base Layer Top",
+  "sku": "HP-430922",
+  "price": 335,
+  "rating": 3.8
+ },
+ {
+  "name": "Basecamp Waxed Cotton Trail Short",
+  "sku": "HP-535651",
+  "price": 76.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Summit Canvas Hiking Sock",
+  "sku": "HP-640380",
+  "price": 170.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Summit Merino Trail Short",
+  "sku": "HP-745109",
+  "price": 17.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Saltmarsh Ripstop Tote",
+  "sku": "HP-849838",
+  "price": 226.5,
+  "rating": 5
+ },
+ {
+  "name": "Alpine Down Vest",
+  "sku": "HP-954567",
+  "price": 214.5,
+  "rating": 3.7
+ },
+ {
+  "name": "Wildfern Leather Field Shirt",
+  "sku": "HP-159296",
+  "price": 180,
+  "rating": null
+ },
+ {
+  "name": "Canyon Recycled Nylon Camp Mug",
+  "sku": "HP-264025",
+  "price": 51.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Granite Titanium Camp Blanket",
+  "sku": "HP-368754",
+  "price": 94.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Prairie Titanium Neck Gaiter",
+  "sku": "HP-473483",
+  "price": 319,
+  "rating": 4.1
+ },
+ {
+  "name": "Canyon Bamboo Glove",
+  "sku": "HP-578212",
+  "price": 339.95,
+  "rating": 3.8
+ },
+ {
+  "name": "Northwind Recycled Nylon Seat Pad",
+  "sku": "HP-682941",
+  "price": 51.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Northwind Insulated Chalk Bag",
+  "sku": "HP-787670",
+  "price": 191.5,
+  "rating": null
+ },
+ {
+  "name": "Saltmarsh Leather Water Bottle",
+  "sku": "HP-892399",
+  "price": 22.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Timber Waxed Cotton Jacket",
+  "sku": "HP-997128",
+  "price": 44,
+  "rating": 4.5
+ },
+ {
+  "name": "Basecamp Fleece Headlamp Strap",
+  "sku": "HP-201857",
+  "price": 57,
+  "rating": 3.1
+ },
+ {
+  "name": "Lakeshore Leather Rain Shell",
+  "sku": "HP-306586",
+  "price": 168.5,
+  "rating": 5
+ },
+ {
+  "name": "Prairie Recycled Nylon Sleeping Bag",
+  "sku": "HP-411315",
+  "price": 345,
+  "rating": 4
+ },
+ {
+  "name": "Alpine Merino Water Bottle",
+  "sku": "HP-516044",
+  "price": 37.99,
+  "rating": null
+ },
+ {
+  "name": "Coastal Fleece Beanie",
+  "sku": "HP-620773",
+  "price": 48,
+  "rating": 4.2
+ },
+ {
+  "name": "Granite Leather Wallet",
+  "sku": "HP-725502",
+  "price": 246.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Timber Cork Duffel",
+  "sku": "HP-830231",
+  "price": 76,
+  "rating": 4.5
+ },
+ {
+  "name": "Trailhead Recycled Nylon Hammock",
+  "sku": "HP-934960",
+  "price": 127.99,
+  "rating": 3
+ },
+ {
+  "name": "Summit Bamboo Sleeping Bag",
+  "sku": "HP-139689",
+  "price": 236,
+  "rating": 4.2
+ },
+ {
+  "name": "Canyon Titanium Duffel",
+  "sku": "HP-244418",
+  "price": 179.95,
+  "rating": 3.1
+ },
+ {
+  "name": "Cedar Merino Headlamp Strap",
+  "sku": "HP-349147",
+  "price": 327.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Leather Base Layer Top",
+  "sku": "HP-453876",
+  "price": 279.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Sierra Canvas Duffel",
+  "sku": "HP-558605",
+  "price": 27.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Timber Recycled Nylon Seat Pad",
+  "sku": "HP-663334",
+  "price": 9,
+  "rating": 3.1
+ },
+ {
+  "name": "Driftwood Titanium Glove",
+  "sku": "HP-768063",
+  "price": 315.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Tundra Titanium Hiking Sock",
+  "sku": "HP-872792",
+  "price": 145.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Summit Cork Beanie",
+  "sku": "HP-977521",
+  "price": 125,
+  "rating": 3.4
+ },
+ {
+  "name": "Wildfern Merino Duffel",
+  "sku": "HP-182250",
+  "price": 138.5,
+  "rating": 4
+ },
+ {
+  "name": "Timber Insulated Vest",
+  "sku": "HP-286979",
+  "price": 139.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Trailhead Titanium Camp Blanket",
+  "sku": "HP-391708",
+  "price": 143.99,
+  "rating": 3.2
+ },
+ {
+  "name": "Basecamp Merino Gaiter",
+  "sku": "HP-496437",
+  "price": 41.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Basecamp Canvas Camp Blanket",
+  "sku": "HP-601166",
+  "price": 102.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Harbor Leather Trucker Hat",
+  "sku": "HP-705895",
+  "price": 68.99,
+  "rating": 4
+ },
+ {
+  "name": "Trailhead Bamboo Beanie",
+  "sku": "HP-810624",
+  "price": 75,
+  "rating": 4
+ },
+ {
+  "name": "Driftwood Cork Tote",
+  "sku": "HP-915353",
+  "price": 75.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Glacier Insulated Chalk Bag",
+  "sku": "HP-120082",
+  "price": 48.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Summit Bamboo Gaiter",
+  "sku": "HP-224811",
+  "price": 259,
+  "rating": null
+ },
+ {
+  "name": "Granite Waxed Cotton Base Layer Top",
+  "sku": "HP-329540",
+  "price": 64.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Tundra Fleece Headlamp Strap",
+  "sku": "HP-434269",
+  "price": 157,
+  "rating": 4.2
+ },
+ {
+  "name": "Glacier Cork Jacket",
+  "sku": "HP-538998",
+  "price": 93.95,
+  "rating": 3.8
+ },
+ {
+  "name": "Saltmarsh Bamboo Trucker Hat",
+  "sku": "HP-643727",
+  "price": 275,
+  "rating": 3.3
+ },
+ {
+  "name": "Cedar Recycled Nylon Gaiter",
+  "sku": "HP-748456",
+  "price": 106.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Summit Insulated Belt",
+  "sku": "HP-853185",
+  "price": 194.5,
+  "rating": 3.6
+ },
+ {
+  "name": "Harbor Canvas Field Shirt",
+  "sku": "HP-957914",
+  "price": 183.95,
+  "rating": 4.7
+ },
+ {
+  "name": "Coastal Insulated Headlamp Strap",
+  "sku": "HP-162643",
+  "price": 332,
+  "rating": 3
+ },
+ {
+  "name": "Basecamp Merino Duffel",
+  "sku": "HP-267372",
+  "price": 184.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Alpine Titanium Hiking Sock",
+  "sku": "HP-372101",
+  "price": 79.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Alpine Merino Gaiter",
+  "sku": "HP-476830",
+  "price": 33.99,
+  "rating": 5
+ },
+ {
+  "name": "Northwind Waxed Cotton Hiking Sock",
+  "sku": "HP-581559",
+  "price": 250.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Tundra Titanium Sleeping Bag",
+  "sku": "HP-686288",
+  "price": 279.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Granite Recycled Nylon Hammock",
+  "sku": "HP-791017",
+  "price": 106.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Basecamp Leather Neck Gaiter",
+  "sku": "HP-895746",
+  "price": 42,
+  "rating": null
+ },
+ {
+  "name": "Saltmarsh Ripstop Daypack",
+  "sku": "HP-100475",
+  "price": 330.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Prairie Canvas Camp Mug",
+  "sku": "HP-205204",
+  "price": 179,
+  "rating": 3.2
+ },
+ {
+  "name": "Timber Fleece Field Shirt",
+  "sku": "HP-309933",
+  "price": 328,
+  "rating": 4.5
+ },
+ {
+  "name": "Canyon Titanium Water Bottle",
+  "sku": "HP-414662",
+  "price": 210.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Highland Ripstop Field Shirt",
+  "sku": "HP-519391",
+  "price": 247.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Ridge Fleece Daypack",
+  "sku": "HP-624120",
+  "price": 174.5,
+  "rating": null
+ },
+ {
+  "name": "Granite Merino Duffel",
+  "sku": "HP-728849",
+  "price": 327,
+  "rating": 5
+ },
+ {
+  "name": "Trailhead Down Field Shirt",
+  "sku": "HP-833578",
+  "price": 72.99,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Merino Hammock",
+  "sku": "HP-938307",
+  "price": 326.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Highland Insulated Hammock",
+  "sku": "HP-143036",
+  "price": 250.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Ridge Down Anorak",
+  "sku": "HP-247765",
+  "price": 94.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Prairie Merino Camp Mug",
+  "sku": "HP-352494",
+  "price": 239.5,
+  "rating": null
+ },
+ {
+  "name": "Basecamp Merino Sleeping Bag",
+  "sku": "HP-457223",
+  "price": 219.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Trailhead Bamboo Neck Gaiter",
+  "sku": "HP-561952",
+  "price": 192.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Driftwood Merino Sleeping Bag",
+  "sku": "HP-666681",
+  "price": 215.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Canyon Canvas Tote",
+  "sku": "HP-771410",
+  "price": 315.95,
+  "rating": 4.4
+ },
+ {
+  "name": "Sierra Ripstop Chalk Bag",
+  "sku": "HP-876139",
+  "price": 67,
+  "rating": 4.7
+ },
+ {
+  "name": "Juniper Insulated Wallet",
+  "sku": "HP-980868",
+  "price": 228.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Canyon Recycled Nylon Seat Pad",
+  "sku": "HP-185597",
+  "price": 98.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Basecamp Ripstop Chalk Bag",
+  "sku": "HP-290326",
+  "price": 28.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Prairie Recycled Nylon Daypack",
+  "sku": "HP-395055",
+  "price": 45.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Alpine Merino Trucker Hat",
+  "sku": "HP-499784",
+  "price": 231.5,
+  "rating": 3.4
+ },
+ {
+  "name": "Canyon Cork Rain Shell",
+  "sku": "HP-604513",
+  "price": 245.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Ridge Down Trucker Hat",
+  "sku": "HP-709242",
+  "price": 278.5,
+  "rating": 4.7
+ },
+ {
+  "name": "Driftwood Down Daypack",
+  "sku": "HP-813971",
+  "price": 222.5,
+  "rating": 3.7
+ },
+ {
+  "name": "Canyon Canvas Hammock",
+  "sku": "HP-918700",
+  "price": 32.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Harbor Insulated Chalk Bag",
+  "sku": "HP-123429",
+  "price": 105.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Tundra Titanium Chalk Bag",
+  "sku": "HP-228158",
+  "price": 250.5,
+  "rating": 3.1
+ },
+ {
+  "name": "Saltmarsh Insulated Trail Short",
+  "sku": "HP-332887",
+  "price": 124,
+  "rating": 4.9
+ },
+ {
+  "name": "Harbor Down Daypack",
+  "sku": "HP-437616",
+  "price": 165.99,
+  "rating": 4
+ },
+ {
+  "name": "Alpine Down Rain Shell",
+  "sku": "HP-542345",
+  "price": 28.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Granite Waxed Cotton Vest",
+  "sku": "HP-647074",
+  "price": 65,
+  "rating": 4
+ },
+ {
+  "name": "Harbor Canvas Duffel",
+  "sku": "HP-751803",
+  "price": 199,
+  "rating": 5
+ },
+ {
+  "name": "Cedar Bamboo Seat Pad",
+  "sku": "HP-856532",
+  "price": 23.99,
+  "rating": 4
+ },
+ {
+  "name": "Saltmarsh Canvas Tarp",
+  "sku": "HP-961261",
+  "price": 105.5,
+  "rating": 3
+ },
+ {
+  "name": "Glacier Insulated Wallet",
+  "sku": "HP-165990",
+  "price": 61,
+  "rating": 4.7
+ },
+ {
+  "name": "Glacier Canvas Gaiter",
+  "sku": "HP-270719",
+  "price": 174,
+  "rating": 4.6
+ },
+ {
+  "name": "Canyon Recycled Nylon Tote",
+  "sku": "HP-375448",
+  "price": 85.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Ridge Bamboo Trucker Hat",
+  "sku": "HP-480177",
+  "price": 108.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Coastal Cork Sleeping Bag",
+  "sku": "HP-584906",
+  "price": 104,
+  "rating": 4.1
+ },
+ {
+  "name": "Trailhead Down Trucker Hat",
+  "sku": "HP-689635",
+  "price": 312.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Driftwood Waxed Cotton Water Bottle",
+  "sku": "HP-794364",
+  "price": 196.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Timber Cork Trail Short",
+  "sku": "HP-899093",
+  "price": 33.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Meadow Bamboo Base Layer Top",
+  "sku": "HP-103822",
+  "price": 43.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Timber Canvas Water Bottle",
+  "sku": "HP-208551",
+  "price": 168.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Timber Bamboo Beanie",
+  "sku": "HP-313280",
+  "price": 75.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Wildfern Down Tote",
+  "sku": "HP-418009",
+  "price": 69.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Saltmarsh Recycled Nylon Trucker Hat",
+  "sku": "HP-522738",
+  "price": 252.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Redwood Titanium Tarp",
+  "sku": "HP-627467",
+  "price": 221.5,
+  "rating": 3
+ },
+ {
+  "name": "Summit Down Sleeping Bag",
+  "sku": "HP-732196",
+  "price": 329.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Juniper Ripstop Chalk Bag",
+  "sku": "HP-836925",
+  "price": 309.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Timber Insulated Water Bottle",
+  "sku": "HP-941654",
+  "price": 129.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Cedar Down Pullover",
+  "sku": "HP-146383",
+  "price": 62.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Granite Recycled Nylon Vest",
+  "sku": "HP-251112",
+  "price": 322.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Tundra Insulated Vest",
+  "sku": "HP-355841",
+  "price": 262,
+  "rating": 4.6
+ },
+ {
+  "name": "Juniper Ripstop Pullover",
+  "sku": "HP-460570",
+  "price": 295.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Redwood Ripstop Vest",
+  "sku": "HP-565299",
+  "price": 200.5,
+  "rating": 5
+ },
+ {
+  "name": "Alpine Ripstop Beanie",
+  "sku": "HP-670028",
+  "price": 136.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Lakeshore Insulated Pullover",
+  "sku": "HP-774757",
+  "price": 201,
+  "rating": 3.3
+ },
+ {
+  "name": "Ridge Bamboo Tote",
+  "sku": "HP-879486",
+  "price": 172.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Saltmarsh Cork Water Bottle",
+  "sku": "HP-984215",
+  "price": 282.99,
+  "rating": 3
+ },
+ {
+  "name": "Alpine Down Belt",
+  "sku": "HP-188944",
+  "price": 341,
+  "rating": 3.6
+ },
+ {
+  "name": "Timber Insulated Rain Shell",
+  "sku": "HP-293673",
+  "price": 156.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Juniper Fleece Trucker Hat",
+  "sku": "HP-398402",
+  "price": 230.5,
+  "rating": 4.8
+ },
+ {
+  "name": "Basecamp Ripstop Headlamp Strap",
+  "sku": "HP-503131",
+  "price": 247.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Timber Canvas Camp Blanket",
+  "sku": "HP-607860",
+  "price": 39.99,
+  "rating": null
+ },
+ {
+  "name": "Alpine Canvas Pack Cover",
+  "sku": "HP-712589",
+  "price": 199.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Prairie Recycled Nylon Pullover",
+  "sku": "HP-817318",
+  "price": 10.99,
+  "rating": null
+ },
+ {
+  "name": "Highland Leather Neck Gaiter",
+  "sku": "HP-922047",
+  "price": 338.5,
+  "rating": 3.8
+ },
+ {
+  "name": "Canyon Leather Chalk Bag",
+  "sku": "HP-126776",
+  "price": 200.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Sierra Recycled Nylon Beanie",
+  "sku": "HP-231505",
+  "price": 253.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Prairie Titanium Pullover",
+  "sku": "HP-336234",
+  "price": 112,
+  "rating": 3.7
+ },
+ {
+  "name": "Highland Titanium Vest",
+  "sku": "HP-440963",
+  "price": 153.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Basecamp Titanium Tote",
+  "sku": "HP-545692",
+  "price": 153.5,
+  "rating": 4.1
+ },
+ {
+  "name": "Sierra Canvas Trail Short",
+  "sku": "HP-650421",
+  "price": 63.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Highland Ripstop Trail Short",
+  "sku": "HP-755150",
+  "price": 12.5,
+  "rating": null
+ },
+ {
+  "name": "Granite Cork Pullover",
+  "sku": "HP-859879",
+  "price": 173.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Timber Waxed Cotton Glove",
+  "sku": "HP-964608",
+  "price": 35,
+  "rating": 3
+ },
+ {
+  "name": "Highland Merino Beanie",
+  "sku": "HP-169337",
+  "price": 272.95,
+  "rating": 4.2
+ },
+ {
+  "name": "Saltmarsh Bamboo Sleeping Bag",
+  "sku": "HP-274066",
+  "price": 184.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Timber Bamboo Hammock",
+  "sku": "HP-378795",
+  "price": 220,
+  "rating": 3.3
+ },
+ {
+  "name": "Sierra Insulated Chalk Bag",
+  "sku": "HP-483524",
+  "price": 117.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Timber Fleece Belt",
+  "sku": "HP-588253",
+  "price": 251.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Tundra Titanium Glove",
+  "sku": "HP-692982",
+  "price": 121.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Juniper Canvas Base Layer Top",
+  "sku": "HP-797711",
+  "price": 64.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Lakeshore Canvas Trail Short",
+  "sku": "HP-902440",
+  "price": 167,
+  "rating": 3.6
+ },
+ {
+  "name": "Tundra Merino Tarp",
+  "sku": "HP-107169",
+  "price": 59.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Alpine Recycled Nylon Daypack",
+  "sku": "HP-211898",
+  "price": 323.95,
+  "rating": 4.3
+ },
+ {
+  "name": "Highland Bamboo Beanie",
+  "sku": "HP-316627",
+  "price": 291,
+  "rating": 5
+ },
+ {
+  "name": "Saltmarsh Canvas Sleeping Bag",
+  "sku": "HP-421356",
+  "price": 20,
+  "rating": 5
+ },
+ {
+  "name": "Trailhead Ripstop Tote",
+  "sku": "HP-526085",
+  "price": 125.95,
+  "rating": 3.6
+ },
+ {
+  "name": "Sierra Titanium Duffel",
+  "sku": "HP-630814",
+  "price": 99.99,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Down Hammock",
+  "sku": "HP-735543",
+  "price": 10.95,
+  "rating": 4.3
+ },
+ {
+  "name": "Trailhead Leather Camp Blanket",
+  "sku": "HP-840272",
+  "price": 81.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Saltmarsh Canvas Camp Blanket",
+  "sku": "HP-945001",
+  "price": 216.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Glacier Insulated Jacket",
+  "sku": "HP-149730",
+  "price": 263.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Tundra Insulated Pack Cover",
+  "sku": "HP-254459",
+  "price": 223.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Timber Merino Camp Mug",
+  "sku": "HP-359188",
+  "price": 139.99,
+  "rating": 3
+ },
+ {
+  "name": "Basecamp Recycled Nylon Headlamp Strap",
+  "sku": "HP-463917",
+  "price": 155.99,
+  "rating": null
+ },
+ {
+  "name": "Tundra Titanium Tarp",
+  "sku": "HP-568646",
+  "price": 125.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Highland Bamboo Neck Gaiter",
+  "sku": "HP-673375",
+  "price": 245.99,
+  "rating": null
+ },
+ {
+  "name": "Trailhead Ripstop Stuff Sack",
+  "sku": "HP-778104",
+  "price": 26.99,
+  "rating": null
+ },
+ {
+  "name": "Lakeshore Waxed Cotton Chalk Bag",
+  "sku": "HP-882833",
+  "price": 226.99,
+  "rating": null
+ },
+ {
+  "name": "Granite Fleece Water Bottle",
+  "sku": "HP-987562",
+  "price": 127.95,
+  "rating": 3.1
+ },
+ {
+  "name": "Tundra Merino Field Shirt",
+  "sku": "HP-192291",
+  "price": 15.95,
+  "rating": 3.7
+ },
+ {
+  "name": "Saltmarsh Bamboo Stuff Sack",
+  "sku": "HP-297020",
+  "price": 253.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Tundra Insulated Stuff Sack",
+  "sku": "HP-401749",
+  "price": 229.5,
+  "rating": 3.1
+ },
+ {
+  "name": "Driftwood Merino Tarp",
+  "sku": "HP-506478",
+  "price": 119.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Trailhead Merino Pack Cover",
+  "sku": "HP-611207",
+  "price": 301.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Juniper Bamboo Daypack",
+  "sku": "HP-715936",
+  "price": 112,
+  "rating": 3.1
+ },
+ {
+  "name": "Timber Down Anorak",
+  "sku": "HP-820665",
+  "price": 60,
+  "rating": 4.1
+ },
+ {
+  "name": "Sierra Recycled Nylon Water Bottle",
+  "sku": "HP-925394",
+  "price": 336,
+  "rating": 4.7
+ },
+ {
+  "name": "Alpine Merino Daypack",
+  "sku": "HP-130123",
+  "price": 98.95,
+  "rating": 4.9
+ },
+ {
+  "name": "Wildfern Recycled Nylon Trucker Hat",
+  "sku": "HP-234852",
+  "price": 135,
+  "rating": 3.6
+ },
+ {
+  "name": "Granite Ripstop Trail Short",
+  "sku": "HP-339581",
+  "price": 162.95,
+  "rating": 4.8
+ },
+ {
+  "name": "Prairie Down Stuff Sack",
+  "sku": "HP-444310",
+  "price": 21,
+  "rating": 4
+ },
+ {
+  "name": "Timber Waxed Cotton Camp Mug",
+  "sku": "HP-549039",
+  "price": 265,
+  "rating": 4.1
+ },
+ {
+  "name": "Sierra Cork Sleeping Bag",
+  "sku": "HP-653768",
+  "price": 291.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Basecamp Down Water Bottle",
+  "sku": "HP-758497",
+  "price": 41.5,
+  "rating": 4
+ },
+ {
+  "name": "Meadow Leather Rain Shell",
+  "sku": "HP-863226",
+  "price": 288.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Driftwood Bamboo Jacket",
+  "sku": "HP-967955",
+  "price": 285.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Alpine Cork Duffel",
+  "sku": "HP-172684",
+  "price": 70,
+  "rating": 4.5
+ },
+ {
+  "name": "Wildfern Fleece Sleeping Bag",
+  "sku": "HP-277413",
+  "price": 319.5,
+  "rating": 4.1
+ },
+ {
+  "name": "Harbor Ripstop Hammock",
+  "sku": "HP-382142",
+  "price": 87.99,
+  "rating": 5
+ },
+ {
+  "name": "Summit Merino Base Layer Top",
+  "sku": "HP-486871",
+  "price": 25.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Granite Bamboo Headlamp Strap",
+  "sku": "HP-591600",
+  "price": 332,
+  "rating": 3.5
+ },
+ {
+  "name": "Tundra Canvas Jacket",
+  "sku": "HP-696329",
+  "price": 102.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Highland Canvas Water Bottle",
+  "sku": "HP-801058",
+  "price": 322.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Trailhead Cork Belt",
+  "sku": "HP-905787",
+  "price": 50.99,
+  "rating": null
+ },
+ {
+  "name": "Meadow Recycled Nylon Seat Pad",
+  "sku": "HP-110516",
+  "price": 339.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Coastal Titanium Hammock",
+  "sku": "HP-215245",
+  "price": 299.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Prairie Canvas Stuff Sack",
+  "sku": "HP-319974",
+  "price": 155.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Driftwood Merino Seat Pad",
+  "sku": "HP-424703",
+  "price": 331.99,
+  "rating": 3
+ },
+ {
+  "name": "Lakeshore Leather Camp Blanket",
+  "sku": "HP-529432",
+  "price": 107.5,
+  "rating": null
+ },
+ {
+  "name": "Summit Merino Field Shirt",
+  "sku": "HP-634161",
+  "price": 188.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Sierra Waxed Cotton Headlamp Strap",
+  "sku": "HP-738890",
+  "price": 123.5,
+  "rating": 3.5
+ },
+ {
+  "name": "Ridge Fleece Pullover",
+  "sku": "HP-843619",
+  "price": 324.95,
+  "rating": 4
+ },
+ {
+  "name": "Driftwood Merino Chalk Bag",
+  "sku": "HP-948348",
+  "price": 236.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Timber Ripstop Glove",
+  "sku": "HP-153077",
+  "price": 165.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Timber Fleece Wallet",
+  "sku": "HP-257806",
+  "price": 285.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Glacier Canvas Tote",
+  "sku": "HP-362535",
+  "price": 171.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Summit Bamboo Hammock",
+  "sku": "HP-467264",
+  "price": 131.99,
+  "rating": 4
+ },
+ {
+  "name": "Highland Leather Glove",
+  "sku": "HP-571993",
+  "price": 343.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Glacier Recycled Nylon Wallet",
+  "sku": "HP-676722",
+  "price": 250.99,
+  "rating": 5
+ },
+ {
+  "name": "Tundra Bamboo Trail Short",
+  "sku": "HP-781451",
+  "price": 323,
+  "rating": 3.9
+ },
+ {
+  "name": "Granite Recycled Nylon Daypack",
+  "sku": "HP-886180",
+  "price": 161.99,
+  "rating": null
+ },
+ {
+  "name": "Summit Ripstop Hiking Sock",
+  "sku": "HP-990909",
+  "price": 81.5,
+  "rating": 4
+ },
+ {
+  "name": "Trailhead Titanium Trail Short",
+  "sku": "HP-195638",
+  "price": 209,
+  "rating": 3.7
+ },
+ {
+  "name": "Trailhead Leather Seat Pad",
+  "sku": "HP-300367",
+  "price": 286.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Coastal Down Gaiter",
+  "sku": "HP-405096",
+  "price": 61,
+  "rating": 4.3
+ },
+ {
+  "name": "Meadow Canvas Rain Shell",
+  "sku": "HP-509825",
+  "price": 71,
+  "rating": null
+ },
+ {
+  "name": "Prairie Fleece Seat Pad",
+  "sku": "HP-614554",
+  "price": 248.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Juniper Merino Rain Shell",
+  "sku": "HP-719283",
+  "price": 120.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Sierra Ripstop Headlamp Strap",
+  "sku": "HP-824012",
+  "price": 183.99,
+  "rating": 5
+ },
+ {
+  "name": "Wildfern Merino Trucker Hat",
+  "sku": "HP-928741",
+  "price": 55,
+  "rating": 3.6
+ },
+ {
+  "name": "Prairie Cork Hiking Sock",
+  "sku": "HP-133470",
+  "price": 179.5,
+  "rating": 4.1
+ },
+ {
+  "name": "Wildfern Bamboo Stuff Sack",
+  "sku": "HP-238199",
+  "price": 119.99,
+  "rating": 3
+ },
+ {
+  "name": "Sierra Waxed Cotton Duffel",
+  "sku": "HP-342928",
+  "price": 246.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Lakeshore Fleece Anorak",
+  "sku": "HP-447657",
+  "price": 213.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Cedar Cork Tote",
+  "sku": "HP-552386",
+  "price": 251.95,
+  "rating": 4
+ },
+ {
+  "name": "Ridge Cork Hiking Sock",
+  "sku": "HP-657115",
+  "price": 243.95,
+  "rating": 3
+ },
+ {
+  "name": "Basecamp Down Daypack",
+  "sku": "HP-761844",
+  "price": 316.95,
+  "rating": 4.9
+ },
+ {
+  "name": "Highland Down Pack Cover",
+  "sku": "HP-866573",
+  "price": 18.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Alpine Recycled Nylon Belt",
+  "sku": "HP-971302",
+  "price": 158.5,
+  "rating": null
+ },
+ {
+  "name": "Granite Waxed Cotton Stuff Sack",
+  "sku": "HP-176031",
+  "price": 22.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Redwood Waxed Cotton Sleeping Bag",
+  "sku": "HP-280760",
+  "price": 323.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Canyon Recycled Nylon Rain Shell",
+  "sku": "HP-385489",
+  "price": 246.95,
+  "rating": 4.7
+ },
+ {
+  "name": "Trailhead Cork Chalk Bag",
+  "sku": "HP-490218",
+  "price": 118.5,
+  "rating": 3.6
+ },
+ {
+  "name": "Juniper Recycled Nylon Camp Mug",
+  "sku": "HP-594947",
+  "price": 230.5,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Insulated Chalk Bag",
+  "sku": "HP-699676",
+  "price": 251.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Harbor Leather Seat Pad",
+  "sku": "HP-804405",
+  "price": 74.95,
+  "rating": 3.1
+ },
+ {
+  "name": "Granite Recycled Nylon Tote",
+  "sku": "HP-909134",
+  "price": 148,
+  "rating": 3.2
+ },
+ {
+  "name": "Summit Waxed Cotton Glove",
+  "sku": "HP-113863",
+  "price": 93.5,
+  "rating": null
+ },
+ {
+  "name": "Driftwood Recycled Nylon Field Shirt",
+  "sku": "HP-218592",
+  "price": 70.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Meadow Fleece Anorak",
+  "sku": "HP-323321",
+  "price": 23.5,
+  "rating": 4.1
+ },
+ {
+  "name": "Cedar Insulated Trail Short",
+  "sku": "HP-428050",
+  "price": 125.99,
+  "rating": null
+ },
+ {
+  "name": "Harbor Fleece Trail Short",
+  "sku": "HP-532779",
+  "price": 147,
+  "rating": 4.2
+ },
+ {
+  "name": "Northwind Insulated Seat Pad",
+  "sku": "HP-637508",
+  "price": 17.95,
+  "rating": 4.7
+ },
+ {
+  "name": "Northwind Recycled Nylon Tarp",
+  "sku": "HP-742237",
+  "price": 313.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Sierra Insulated Pullover",
+  "sku": "HP-846966",
+  "price": 16,
+  "rating": 3.8
+ },
+ {
+  "name": "Canyon Down Beanie",
+  "sku": "HP-951695",
+  "price": 245.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Cork Duffel",
+  "sku": "HP-156424",
+  "price": 275.5,
+  "rating": null
+ },
+ {
+  "name": "Redwood Bamboo Neck Gaiter",
+  "sku": "HP-261153",
+  "price": 81.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Coastal Waxed Cotton Gaiter",
+  "sku": "HP-365882",
+  "price": 20.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Granite Ripstop Gaiter",
+  "sku": "HP-470611",
+  "price": 312.99,
+  "rating": null
+ },
+ {
+  "name": "Prairie Fleece Tarp",
+  "sku": "HP-575340",
+  "price": 43.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Driftwood Bamboo Sleeping Bag",
+  "sku": "HP-680069",
+  "price": 33.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Alpine Canvas Trucker Hat",
+  "sku": "HP-784798",
+  "price": 16,
+  "rating": 4.8
+ },
+ {
+  "name": "Summit Titanium Base Layer Top",
+  "sku": "HP-889527",
+  "price": 303,
+  "rating": 4.7
+ },
+ {
+  "name": "Lakeshore Canvas Neck Gaiter",
+  "sku": "HP-994256",
+  "price": 270.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Prairie Leather Vest",
+  "sku": "HP-198985",
+  "price": 319,
+  "rating": 4.3
+ },
+ {
+  "name": "Juniper Canvas Jacket",
+  "sku": "HP-303714",
+  "price": 160.5,
+  "rating": 4.9
+ },
+ {
+  "name": "Meadow Down Duffel",
+  "sku": "HP-408443",
+  "price": 208.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Driftwood Fleece Anorak",
+  "sku": "HP-513172",
+  "price": 140.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Juniper Recycled Nylon Trail Short",
+  "sku": "HP-617901",
+  "price": 81.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Highland Merino Camp Mug",
+  "sku": "HP-722630",
+  "price": 290.5,
+  "rating": 3.4
+ },
+ {
+  "name": "Granite Cork Trail Short",
+  "sku": "HP-827359",
+  "price": 56.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Titanium Pullover",
+  "sku": "HP-932088",
+  "price": 53,
+  "rating": 3
+ },
+ {
+  "name": "Northwind Waxed Cotton Base Layer Top",
+  "sku": "HP-136817",
+  "price": 180,
+  "rating": 3.2
+ },
+ {
+  "name": "Redwood Down Duffel",
+  "sku": "HP-241546",
+  "price": 106.5,
+  "rating": 5
+ },
+ {
+  "name": "Sierra Ripstop Tote",
+  "sku": "HP-346275",
+  "price": 313.5,
+  "rating": 3.5
+ },
+ {
+  "name": "Juniper Cork Sleeping Bag",
+  "sku": "HP-451004",
+  "price": 101.5,
+  "rating": 4
+ },
+ {
+  "name": "Meadow Insulated Chalk Bag",
+  "sku": "HP-555733",
+  "price": 92.99,
+  "rating": 3
+ },
+ {
+  "name": "Prairie Ripstop Neck Gaiter",
+  "sku": "HP-660462",
+  "price": 87.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Meadow Fleece Pack Cover",
+  "sku": "HP-765191",
+  "price": 126.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Meadow Ripstop Duffel",
+  "sku": "HP-869920",
+  "price": 152.95,
+  "rating": 4
+ },
+ {
+  "name": "Lakeshore Cork Jacket",
+  "sku": "HP-974649",
+  "price": 8.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Redwood Merino Sleeping Bag",
+  "sku": "HP-179378",
+  "price": 224.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Coastal Cork Beanie",
+  "sku": "HP-284107",
+  "price": 85.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Meadow Insulated Trail Short",
+  "sku": "HP-388836",
+  "price": 62,
+  "rating": 4.9
+ },
+ {
+  "name": "Sierra Recycled Nylon Wallet",
+  "sku": "HP-493565",
+  "price": 306.99,
+  "rating": null
+ },
+ {
+  "name": "Harbor Ripstop Trail Short",
+  "sku": "HP-598294",
+  "price": 9.95,
+  "rating": null
+ },
+ {
+  "name": "Coastal Fleece Seat Pad",
+  "sku": "HP-703023",
+  "price": 106.99,
+  "rating": 3
+ },
+ {
+  "name": "Alpine Canvas Jacket",
+  "sku": "HP-807752",
+  "price": 48.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Summit Insulated Seat Pad",
+  "sku": "HP-912481",
+  "price": 171.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Harbor Fleece Trucker Hat",
+  "sku": "HP-117210",
+  "price": 188.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Wildfern Titanium Tarp",
+  "sku": "HP-221939",
+  "price": 59,
+  "rating": 3.1
+ },
+ {
+  "name": "Alpine Bamboo Trucker Hat",
+  "sku": "HP-326668",
+  "price": 298.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Northwind Down Stuff Sack",
+  "sku": "HP-431397",
+  "price": 43,
+  "rating": null
+ },
+ {
+  "name": "Northwind Ripstop Water Bottle",
+  "sku": "HP-536126",
+  "price": 26.99,
+  "rating": 4.4
+ },
+ {
+  "name": "Northwind Fleece Anorak",
+  "sku": "HP-640855",
+  "price": 84.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Cedar Canvas Rain Shell",
+  "sku": "HP-745584",
+  "price": 205.95,
+  "rating": 3.9
+ },
+ {
+  "name": "Driftwood Canvas Trail Short",
+  "sku": "HP-850313",
+  "price": 179.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Summit Recycled Nylon Hammock",
+  "sku": "HP-955042",
+  "price": 243,
+  "rating": null
+ },
+ {
+  "name": "Trailhead Leather Pullover",
+  "sku": "HP-159771",
+  "price": 58.99,
+  "rating": 5
+ },
+ {
+  "name": "Cedar Titanium Field Shirt",
+  "sku": "HP-264500",
+  "price": 151.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Harbor Bamboo Camp Mug",
+  "sku": "HP-369229",
+  "price": 45.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Prairie Bamboo Pullover",
+  "sku": "HP-473958",
+  "price": 324.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Recycled Nylon Anorak",
+  "sku": "HP-578687",
+  "price": 321.5,
+  "rating": 4.4
+ },
+ {
+  "name": "Prairie Down Base Layer Top",
+  "sku": "HP-683416",
+  "price": 179.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Lakeshore Cork Pack Cover",
+  "sku": "HP-788145",
+  "price": 305.99,
+  "rating": 4.9
+ },
+ {
+  "name": "Prairie Fleece Field Shirt",
+  "sku": "HP-892874",
+  "price": 58.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Highland Fleece Tarp",
+  "sku": "HP-997603",
+  "price": 335.99,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Fleece Chalk Bag",
+  "sku": "HP-202332",
+  "price": 45.99,
+  "rating": null
+ },
+ {
+  "name": "Alpine Fleece Seat Pad",
+  "sku": "HP-307061",
+  "price": 127.99,
+  "rating": 3.2
+ },
+ {
+  "name": "Meadow Cork Trucker Hat",
+  "sku": "HP-411790",
+  "price": 159,
+  "rating": 4.4
+ },
+ {
+  "name": "Timber Leather Jacket",
+  "sku": "HP-516519",
+  "price": 10.95,
+  "rating": 3.3
+ },
+ {
+  "name": "Timber Titanium Hammock",
+  "sku": "HP-621248",
+  "price": 214.95,
+  "rating": null
+ },
+ {
+  "name": "Saltmarsh Recycled Nylon Field Shirt",
+  "sku": "HP-725977",
+  "price": 269.95,
+  "rating": 4.4
+ },
+ {
+  "name": "Saltmarsh Leather Trucker Hat",
+  "sku": "HP-830706",
+  "price": 112.95,
+  "rating": 3.2
+ },
+ {
+  "name": "Juniper Canvas Pack Cover",
+  "sku": "HP-935435",
+  "price": 276.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Northwind Ripstop Pullover",
+  "sku": "HP-140164",
+  "price": 229.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Meadow Fleece Wallet",
+  "sku": "HP-244893",
+  "price": 234.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Cedar Cork Field Shirt",
+  "sku": "HP-349622",
+  "price": 80,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Canvas Beanie",
+  "sku": "HP-454351",
+  "price": 15,
+  "rating": 4.4
+ },
+ {
+  "name": "Wildfern Merino Rain Shell",
+  "sku": "HP-559080",
+  "price": 189.5,
+  "rating": 4.2
+ },
+ {
+  "name": "Driftwood Cork Belt",
+  "sku": "HP-663809",
+  "price": 96,
+  "rating": 4.5
+ },
+ {
+  "name": "Prairie Cork Rain Shell",
+  "sku": "HP-768538",
+  "price": 155,
+  "rating": 3.2
+ },
+ {
+  "name": "Basecamp Fleece Neck Gaiter",
+  "sku": "HP-873267",
+  "price": 290.95,
+  "rating": 3.6
+ },
+ {
+  "name": "Prairie Titanium Belt",
+  "sku": "HP-977996",
+  "price": 221.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Summit Cork Camp Mug",
+  "sku": "HP-182725",
+  "price": 324.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Summit Insulated Vest",
+  "sku": "HP-287454",
+  "price": 255.99,
+  "rating": 4
+ },
+ {
+  "name": "Juniper Titanium Chalk Bag",
+  "sku": "HP-392183",
+  "price": 31.99,
+  "rating": 3.6
+ },
+ {
+  "name": "Glacier Recycled Nylon Duffel",
+  "sku": "HP-496912",
+  "price": 51,
+  "rating": 4.2
+ },
+ {
+  "name": "Harbor Recycled Nylon Daypack",
+  "sku": "HP-601641",
+  "price": 179.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Highland Recycled Nylon Wallet",
+  "sku": "HP-706370",
+  "price": 202.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Coastal Recycled Nylon Glove",
+  "sku": "HP-811099",
+  "price": 94.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Basecamp Waxed Cotton Camp Mug",
+  "sku": "HP-915828",
+  "price": 152,
+  "rating": 3.9
+ },
+ {
+  "name": "Driftwood Canvas Gaiter",
+  "sku": "HP-120557",
+  "price": 95.99,
+  "rating": 4.7
+ },
+ {
+  "name": "Redwood Waxed Cotton Seat Pad",
+  "sku": "HP-225286",
+  "price": 310.95,
+  "rating": 3.7
+ },
+ {
+  "name": "Tundra Insulated Headlamp Strap",
+  "sku": "HP-330015",
+  "price": 147.95,
+  "rating": 4.1
+ },
+ {
+  "name": "Highland Titanium Water Bottle",
+  "sku": "HP-434744",
+  "price": 80.95,
+  "rating": 3.1
+ },
+ {
+  "name": "Alpine Recycled Nylon Wallet",
+  "sku": "HP-539473",
+  "price": 267.99,
+  "rating": 3.2
+ },
+ {
+  "name": "Highland Fleece Stuff Sack",
+  "sku": "HP-644202",
+  "price": 44.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Canyon Waxed Cotton Water Bottle",
+  "sku": "HP-748931",
+  "price": 292.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Cedar Canvas Hammock",
+  "sku": "HP-853660",
+  "price": 159,
+  "rating": 3.2
+ },
+ {
+  "name": "Summit Cork Glove",
+  "sku": "HP-958389",
+  "price": 113.99,
+  "rating": 3.1
+ },
+ {
+  "name": "Harbor Down Sleeping Bag",
+  "sku": "HP-163118",
+  "price": 250.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Coastal Leather Wallet",
+  "sku": "HP-267847",
+  "price": 38.95,
+  "rating": null
+ },
+ {
+  "name": "Saltmarsh Down Sleeping Bag",
+  "sku": "HP-372576",
+  "price": 123.5,
+  "rating": 3.7
+ },
+ {
+  "name": "Lakeshore Leather Daypack",
+  "sku": "HP-477305",
+  "price": 113.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Harbor Fleece Duffel",
+  "sku": "HP-582034",
+  "price": 72.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Alpine Ripstop Tote",
+  "sku": "HP-686763",
+  "price": 155.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Glacier Down Hiking Sock",
+  "sku": "HP-791492",
+  "price": 39,
+  "rating": 3.1
+ },
+ {
+  "name": "Driftwood Canvas Pack Cover",
+  "sku": "HP-896221",
+  "price": 242.99,
+  "rating": 4.5
+ },
+ {
+  "name": "Basecamp Recycled Nylon Camp Mug",
+  "sku": "HP-100950",
+  "price": 247.5,
+  "rating": 4.3
+ },
+ {
+  "name": "Wildfern Bamboo Beanie",
+  "sku": "HP-205679",
+  "price": 324.5,
+  "rating": 3.5
+ },
+ {
+  "name": "Tundra Recycled Nylon Glove",
+  "sku": "HP-310408",
+  "price": 166.95,
+  "rating": 4.3
+ },
+ {
+  "name": "Saltmarsh Waxed Cotton Trucker Hat",
+  "sku": "HP-415137",
+  "price": 278.5,
+  "rating": 4.6
+ },
+ {
+  "name": "Alpine Leather Neck Gaiter",
+  "sku": "HP-519866",
+  "price": 165.5,
+  "rating": null
+ },
+ {
+  "name": "Wildfern Recycled Nylon Tarp",
+  "sku": "HP-624595",
+  "price": 126.95,
+  "rating": 3.5
+ },
+ {
+  "name": "Redwood Ripstop Water Bottle",
+  "sku": "HP-729324",
+  "price": 234,
+  "rating": 3
+ },
+ {
+  "name": "Prairie Canvas Chalk Bag",
+  "sku": "HP-834053",
+  "price": 293.5,
+  "rating": 3.2
+ },
+ {
+  "name": "Granite Merino Camp Mug",
+  "sku": "HP-938782",
+  "price": 252.5,
+  "rating": 4.3
+ },
+ {
+  "name": "Ridge Canvas Tarp",
+  "sku": "HP-143511",
+  "price": 69.95,
+  "rating": null
+ },
+ {
+  "name": "Redwood Titanium Neck Gaiter",
+  "sku": "HP-248240",
+  "price": 115.99,
+  "rating": 3.4
+ },
+ {
+  "name": "Tundra Leather Belt",
+  "sku": "HP-352969",
+  "price": 170.5,
+  "rating": 4
+ },
+ {
+  "name": "Saltmarsh Titanium Rain Shell",
+  "sku": "HP-457698",
+  "price": 72.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Lakeshore Merino Base Layer Top",
+  "sku": "HP-562427",
+  "price": 203.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Driftwood Waxed Cotton Tarp",
+  "sku": "HP-667156",
+  "price": 119.99,
+  "rating": 4.1
+ },
+ {
+  "name": "Trailhead Merino Trail Short",
+  "sku": "HP-771885",
+  "price": 324,
+  "rating": 4.2
+ },
+ {
+  "name": "Lakeshore Fleece Trucker Hat",
+  "sku": "HP-876614",
+  "price": 21.5,
+  "rating": 3.3
+ },
+ {
+  "name": "Wildfern Bamboo Glove",
+  "sku": "HP-981343",
+  "price": 229.5,
+  "rating": null
+ },
+ {
+  "name": "Highland Cork Neck Gaiter",
+  "sku": "HP-186072",
+  "price": 318.99,
+  "rating": 4.2
+ },
+ {
+  "name": "Sierra Down Jacket",
+  "sku": "HP-290801",
+  "price": 210.99,
+  "rating": 4.3
+ },
+ {
+  "name": "Basecamp Leather Water Bottle",
+  "sku": "HP-395530",
+  "price": 50,
+  "rating": 3.5
+ },
+ {
+  "name": "Meadow Insulated Neck Gaiter",
+  "sku": "HP-500259",
+  "price": 291.95,
+  "rating": 4.4
+ },
+ {
+  "name": "Tundra Ripstop Base Layer Top",
+  "sku": "HP-604988",
+  "price": 107.99,
+  "rating": 3.9
+ },
+ {
+  "name": "Sierra Merino Pack Cover",
+  "sku": "HP-709717",
+  "price": 27.99,
+  "rating": null
+ },
+ {
+  "name": "Timber Fleece Water Bottle",
+  "sku": "HP-814446",
+  "price": 201.99,
+  "rating": 3.3
+ },
+ {
+  "name": "Tundra Merino Trucker Hat",
+  "sku": "HP-919175",
+  "price": 257.99,
+  "rating": 4.8
+ },
+ {
+  "name": "Trailhead Titanium Stuff Sack",
+  "sku": "HP-123904",
+  "price": 176.95,
+  "rating": null
+ },
+ {
+  "name": "Glacier Merino Wallet",
+  "sku": "HP-228633",
+  "price": 86,
+  "rating": null
+ },
+ {
+  "name": "Prairie Down Hiking Sock",
+  "sku": "HP-333362",
+  "price": 116,
+  "rating": 4.9
+ },
+ {
+  "name": "Cedar Bamboo Gaiter",
+  "sku": "HP-438091",
+  "price": 323.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Alpine Cork Hammock",
+  "sku": "HP-542820",
+  "price": 258,
+  "rating": 3.3
+ },
+ {
+  "name": "Canyon Fleece Neck Gaiter",
+  "sku": "HP-647549",
+  "price": 14.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Highland Ripstop Sleeping Bag",
+  "sku": "HP-752278",
+  "price": 134.99,
+  "rating": null
+ },
+ {
+  "name": "Meadow Bamboo Rain Shell",
+  "sku": "HP-857007",
+  "price": 289,
+  "rating": 4.1
+ },
+ {
+  "name": "Trailhead Insulated Hiking Sock",
+  "sku": "HP-961736",
+  "price": 292.95,
+  "rating": 4.9
+ },
+ {
+  "name": "Juniper Leather Rain Shell",
+  "sku": "HP-166465",
+  "price": 212.95,
+  "rating": 3.8
+ },
+ {
+  "name": "Meadow Titanium Vest",
+  "sku": "HP-271194",
+  "price": 37.99,
+  "rating": 3.7
+ },
+ {
+  "name": "Wildfern Down Camp Mug",
+  "sku": "HP-375923",
+  "price": 104.5,
+  "rating": 3.7
+ },
+ {
+  "name": "Driftwood Insulated Glove",
+  "sku": "HP-480652",
+  "price": 337.95,
+  "rating": 4.5
+ },
+ {
+  "name": "Harbor Ripstop Stuff Sack",
+  "sku": "HP-585381",
+  "price": 91.95,
+  "rating": 4.6
+ },
+ {
+  "name": "Lakeshore Fleece Tarp",
+  "sku": "HP-690110",
+  "price": 69,
+  "rating": 3.1
+ },
+ {
+  "name": "Harbor Fleece Neck Gaiter",
+  "sku": "HP-794839",
+  "price": 48.5,
+  "rating": 3.6
+ },
+ {
+  "name": "Canyon Titanium Seat Pad",
+  "sku": "HP-899568",
+  "price": 205,
+  "rating": 4.8
+ },
+ {
+  "name": "Granite Insulated Hiking Sock",
+  "sku": "HP-104297",
+  "price": 183.95,
+  "rating": 3.4
+ },
+ {
+  "name": "Coastal Insulated Glove",
+  "sku": "HP-209026",
+  "price": 233.99,
+  "rating": 4.6
+ },
+ {
+  "name": "Harbor Down Hiking Sock",
+  "sku": "HP-313755",
+  "price": 130.95,
+  "rating": 4.7
+ },
+ {
+  "name": "Basecamp Canvas Glove",
+  "sku": "HP-418484",
+  "price": 224.99,
+  "rating": 3.5
+ },
+ {
+  "name": "Prairie Waxed Cotton Pack Cover",
+  "sku": "HP-523213",
+  "price": 81,
+  "rating": 3
+ },
+ {
+  "name": "Canyon Canvas Duffel",
+  "sku": "HP-627942",
+  "price": 51,
+  "rating": 3.7
+ },
+ {
+  "name": "Saltmarsh Cork Vest",
+  "sku": "HP-732671",
+  "price": 186.99,
+  "rating": 3.8
+ },
+ {
+  "name": "Northwind Fleece Hammock",
+  "sku": "HP-837400",
+  "price": 293.99,
+  "rating": 4.6
+ }
+]

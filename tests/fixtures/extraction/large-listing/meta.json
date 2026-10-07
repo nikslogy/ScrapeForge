@@ -1,0 +1,21 @@
+{
+  "id": "large-listing",
+  "url": "https://www.harborandpine.com/collections/all-gear",
+  "category": "ecommerce-listing",
+  "description": "Single collection page with 600 product cards (unique names and SKUs, ~1 in 6 on sale with a struck compare-at price, ~1 in 8 unrated), price/sale facets with counts, and a 'Recently viewed' rail of 3 cards built from the same card component. Generated deterministically by generate.ts (~600 KB of HTML).",
+  "schema": {
+    "products": [
+      {
+        "name": "string — product name",
+        "sku": "string — SKU code",
+        "price": "number — current price (the sale price when on sale)",
+        "rating": "number — average rating; null when the product has no reviews"
+      }
+    ]
+  },
+  "expectedShape": "array",
+  "recordKey": "sku",
+  "expectStatus": "partial",
+  "notes": "Phase 2 target: all 600 records (exhaustive, partitioned extraction merged by SKU) and status complete. Phase 1 cannot fit this page in one model call and must report it honestly: truncated: true, status partial, missing entries with reason not_processed, never a 'complete' answer with a silently shortened list. Sale cards show the sale price first and the compare-at price struck through; gold price is the sale price. Unrated cards say 'No reviews yet' (rating null). The Recently viewed cards (HP-000417, HP-000926, HP-000133) are not part of the listing. Facet counts ('Under $50 (n)') are decoys.",
+  "tags": ["listing", "large-input", "generated", "phase2", "nulls", "decoys"]
+}

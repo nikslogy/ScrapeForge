@@ -1,0 +1,137 @@
+[
+  {
+    "model": "Nova X1 Pro",
+    "price": 999,
+    "screenInches": 6.7,
+    "batteryMah": 5000,
+    "weightG": 221,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Nova X1",
+    "price": 799,
+    "screenInches": 6.1,
+    "batteryMah": 4300,
+    "weightG": 187,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Pixelite 9",
+    "price": 699,
+    "screenInches": 6.3,
+    "batteryMah": 4700,
+    "weightG": 198,
+    "has5g": true,
+    "releaseYear": 2025
+  },
+  {
+    "model": "Pixelite 9a",
+    "price": 499,
+    "screenInches": 6.1,
+    "batteryMah": 4500,
+    "weightG": 186,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Orbis S26 Ultra",
+    "price": 1299,
+    "screenInches": 6.8,
+    "batteryMah": 5000,
+    "weightG": 232,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Orbis S26",
+    "price": 849,
+    "screenInches": 6.2,
+    "batteryMah": 4000,
+    "weightG": 168,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Orbis A16",
+    "price": 199,
+    "screenInches": 6.5,
+    "batteryMah": 5000,
+    "weightG": 200,
+    "has5g": false,
+    "releaseYear": 2025
+  },
+  {
+    "model": "Kestrel Mini 3",
+    "price": 599,
+    "screenInches": 5.4,
+    "batteryMah": 3200,
+    "weightG": 141,
+    "has5g": true,
+    "releaseYear": 2024
+  },
+  {
+    "model": "Kestrel 3 Max",
+    "price": 1099,
+    "screenInches": 6.9,
+    "batteryMah": 5100,
+    "weightG": 227,
+    "has5g": true,
+    "releaseYear": 2025
+  },
+  {
+    "model": "Tano Edge 50",
+    "price": 549,
+    "screenInches": 6.6,
+    "batteryMah": 5500,
+    "weightG": 196,
+    "has5g": true,
+    "releaseYear": 2025
+  },
+  {
+    "model": "Tano G35",
+    "price": 179,
+    "screenInches": 6.5,
+    "batteryMah": 5000,
+    "weightG": 190,
+    "has5g": false,
+    "releaseYear": 2024
+  },
+  {
+    "model": "Fennec One",
+    "price": 649,
+    "screenInches": 6.4,
+    "batteryMah": 4800,
+    "weightG": 205,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Fennec Lite",
+    "price": 329,
+    "screenInches": 6.6,
+    "batteryMah": 6000,
+    "weightG": 212,
+    "has5g": false,
+    "releaseYear": 2025
+  },
+  {
+    "model": "Halcyon P8",
+    "price": null,
+    "screenInches": 6.3,
+    "batteryMah": 4600,
+    "weightG": 179,
+    "has5g": true,
+    "releaseYear": 2026
+  },
+  {
+    "model": "Halcyon P7",
+    "price": 399,
+    "screenInches": 6.1,
+    "batteryMah": 4400,
+    "weightG": 174,
+    "has5g": true,
+    "releaseYear": 2024
+  }
+]

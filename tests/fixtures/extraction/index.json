@@ -1,0 +1,20 @@
+{
+  "description": "Hand-labelled offline corpus for the structured-extraction engine. Each entry is a directory with page.html, meta.json and gold.json; see load.ts and tests/engine/scoring.ts.",
+  "fixtures": [
+    {"id": "book-pdp-jsonld", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "json-ld", "structured-data", "decoys", "books"]},
+    {"id": "book-pdp-plain", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "dom-only", "table", "decoys", "books", "falsy-values"]},
+    {"id": "books-listing", "category": "ecommerce-listing", "expectedShape": "array", "expectStatus": "complete", "tags": ["listing", "books", "decoys", "relative-urls", "class-encoded"]},
+    {"id": "electronics-pdp-sale", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "json-ld", "variants", "sale-price", "decoys", "table", "hashed-classes"]},
+    {"id": "saas-pricing", "category": "saas-pricing", "expectedShape": "array", "expectStatus": "complete", "tags": ["pricing", "toggle", "nulls", "embedded-json", "decoys"]},
+    {"id": "news-article", "category": "news-article", "expectedShape": "object", "expectStatus": "complete", "tags": ["article", "json-ld", "derived", "dates", "decoys"]},
+    {"id": "specs-comparison-table", "category": "comparison-table", "expectedShape": "array", "expectStatus": "complete", "tags": ["table", "listing", "repeated-header", "nulls", "decoys"]},
+    {"id": "job-posting", "category": "job-posting", "expectedShape": "object", "expectStatus": "complete", "tags": ["job", "json-ld", "enum", "booleans", "decoys"]},
+    {"id": "prompt-injection", "category": "adversarial", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "adversarial", "prompt-injection", "decoys"]},
+    {"id": "challenge-page", "category": "blocked", "expectedShape": "object", "expectStatus": "failed", "tags": ["blocked", "challenge", "cloudflare", "no-llm"]},
+    {"id": "missing-fields", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "nulls", "unavailable", "decoys", "json-ld"]},
+    {"id": "multilingual-de", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "i18n", "locale-numbers", "microdata", "decoys"]},
+    {"id": "next-data", "category": "spa-embedded-json", "expectedShape": "object", "expectStatus": "complete", "tags": ["embedded-json", "next-js", "spa", "relative-urls", "decoys"]},
+    {"id": "value-at-end", "category": "long-article", "expectedShape": "object", "expectStatus": "complete", "tags": ["article", "long-input", "generated", "decoys"]},
+    {"id": "large-listing", "category": "ecommerce-listing", "expectedShape": "array", "expectStatus": "partial", "tags": ["listing", "large-input", "generated", "phase2", "nulls", "decoys"]}
+  ]
+}
