@@ -7,6 +7,25 @@ import { tier3Fetch, isLightpandaConfigured } from './tier3-light.js';
 import { tier4Fetch } from './tier4-browser.js';
 import { tier4StealthFetch } from './tier4-stealth.js';
 import { ProxyManager, type SelectedProxy } from '../proxy/manager.js';
+import { calculateQualityScore } from '../extraction/quality-scorer.js';
+
+// Minimum quality score below which a tier's response is treated as a
+// soft-block and escalation continues. Target.com, Bing SERPs, and the
+// first run of Amazon all ship a cloaked 200-OK page that slips past
+// `isValidContent` (no block keywords, normal size) but scores < 0.6
+// because the visible text is thin and there's no semantic content.
+//
+// Set as conservatively as possible: legitimate thin pages (example.com)
+// score 0.8 thanks to the short-content carve-out in quality-scorer, so
+// 0.55 is the sweet spot — blocks T1/T2 soft-blocks, allows genuine
+// minimal pages through.
+const MIN_TIER_ACCEPT_QUALITY = 0.55;
+
+// On the TERMINAL tier (T5 stealth) we're out of escalation targets, so
+// we accept whatever we get even if low-quality — returning *something*
+// with a low quality score is more useful than throwing "All tiers
+// exhausted" and wasting the browser context cost entirely.
+const TERMINAL_TIER_ACCEPT_QUALITY = 0;
 
 export interface RouterResult {
   html: string;
@@ -76,6 +95,45 @@ function isHardDomain(domain: string): boolean {
   return false;
 }
 
+// Single decision gate used by every tier in the router. Returns either
+// `{ ok: true, score }` if we should accept the tier's response, or
+// `{ ok: false, reason }` if the router should continue escalating.
+//
+// Layered checks:
+//   1. `isValidContent` — fast keyword/structural block detection
+//   2. `calculateQualityScore` — catches cloaked 200-OK pages that slip
+//      past step 1 (empty body wrapped in nav/footer markup)
+//
+// On the terminal tier (T5 stealth) we skip the quality gate because
+// there's nowhere left to escalate to; best-effort is better than
+// "all tiers exhausted".
+function assessTier(
+  html: string,
+  statusCode: number,
+  tier: number,
+  latencyMs: number,
+  url: string,
+  terminal = false,
+): { ok: true; score: number } | { ok: false; score: number; reason: string } {
+  if (!isValidContent(html, statusCode, url)) {
+    return {
+      ok: false,
+      score: 0,
+      reason: `invalid content (status=${statusCode} htmlLen=${html.length})`,
+    };
+  }
+  const { score, signals } = calculateQualityScore(html, statusCode, tier, latencyMs);
+  const threshold = terminal ? TERMINAL_TIER_ACCEPT_QUALITY : MIN_TIER_ACCEPT_QUALITY;
+  if (score < threshold) {
+    return {
+      ok: false,
+      score,
+      reason: `low quality ${score.toFixed(2)} (${signals[0] || 'no signal'})`,
+    };
+  }
+  return { ok: true, score };
+}
+
 export class SmartRouter {
   private proxyManager: ProxyManager;
 
@@ -134,6 +192,13 @@ export class SmartRouter {
     const proxyUrl = proxy?.url;
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
 
+    // Each tier pushes a short diagnostic string so the final error tells us
+    // why every attempt failed instead of the opaque "All tiers exhausted".
+    const attempts: string[] = [];
+    const note = (tier: number, msg: string) => {
+      attempts.push(`T${tier}:${msg}`);
+    };
+
     // ─── Tier 1: plain HTTP with impit defaults ───
     if (!flags.skipHttpTiers) {
       try {
@@ -141,13 +206,15 @@ export class SmartRouter {
           headers: options.headers,
           timeout: Math.min(options.timeout || 15_000, 15_000),
         });
-        if (isValidContent(r.html, r.statusCode, url)) {
+        const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
+        if (v.ok) {
           await this.updateDomainStrategy(domain, 1, true, r.latencyMs);
           return { ...r, tierUsed: 1, ...proxyMeta };
         }
+        note(1, v.reason);
         await this.updateDomainStrategy(domain, 1, false, r.latencyMs);
-      } catch {
-        /* escalate */
+      } catch (err) {
+        note(1, `threw ${(err as Error).message.slice(0, 120)}`);
       }
 
       // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
@@ -157,15 +224,17 @@ export class SmartRouter {
           timeout: Math.min(options.timeout || 15_000, 15_000),
           proxy: proxyUrl,
         });
-        if (isValidContent(r.html, r.statusCode, url)) {
+        const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
+        if (v.ok) {
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           if (proxy) await this.proxyManager.recordResult(proxy, domain, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
         }
+        note(2, v.reason);
         await this.updateDomainStrategy(domain, 2, false, r.latencyMs);
         if (proxy) await this.proxyManager.recordResult(proxy, domain, false, r.latencyMs);
-      } catch {
-        /* escalate */
+      } catch (err) {
+        note(2, `threw ${(err as Error).message.slice(0, 120)}`);
       }
     }
 
@@ -177,17 +246,24 @@ export class SmartRouter {
           timeout: options.timeout,
           proxy: proxyUrl,
         });
-        if (r && isValidContent(r.html, r.statusCode)) {
-          await this.updateDomainStrategy(domain, 3, true, r.latencyMs);
-          return { ...r, tierUsed: 3, ...proxyMeta };
+        if (r) {
+          const v = assessTier(r.html, r.statusCode, 3, r.latencyMs, url);
+          if (v.ok) {
+            await this.updateDomainStrategy(domain, 3, true, r.latencyMs);
+            return { ...r, tierUsed: 3, ...proxyMeta };
+          }
+          note(3, v.reason);
+        } else {
+          note(3, 'no result');
         }
-      } catch {
-        /* escalate */
+      } catch (err) {
+        note(3, `threw ${(err as Error).message.slice(0, 120)}`);
       }
     }
 
     // ─── Tier 4: full Patchright headless browser ───
     let context: BrowserContext | null = null;
+    let t4Result: { html: string; statusCode: number; latencyMs: number; screenshot?: string } | null = null;
     try {
       context = await this.getBrowserContext();
       const r = await tier4Fetch(url, context, {
@@ -197,19 +273,28 @@ export class SmartRouter {
         mobile: options.mobile,
         screenshot: options.screenshot,
       });
-      if (isValidContent(r.html, r.statusCode, url)) {
+      t4Result = r;
+      const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
+      if (v.ok) {
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return { ...r, tierUsed: 4, ...proxyMeta };
       }
+      note(4, v.reason);
       await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
-    } catch {
-      /* escalate to stealth */
+    } catch (err) {
+      note(4, `threw ${(err as Error).message.slice(0, 120)}`);
     } finally {
       if (context) this.releaseBrowserContext(context);
       context = null;
     }
 
-    // ─── Tier 5 (stealth): anti-detect patches ───
+    // ─── Tier 5 (stealth): anti-detect patches — TERMINAL ───
+    //
+    // Last stop. The quality gate is relaxed here so we always return
+    // *something* rather than throwing "all tiers exhausted"; the caller
+    // can decide based on qualityScore whether the result is usable.
+    // If T5 itself throws, we still want to fall back to T4's data if
+    // we captured it — otherwise the caller gets nothing at all.
     try {
       // Escalate proxy if current one failed at browser tier
       const stealthProxy = proxy
@@ -223,8 +308,9 @@ export class SmartRouter {
         blockResources: options.blockResources,
         screenshot: options.screenshot,
       });
-      if (isValidContent(r.html, r.statusCode, url)) {
-        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
+      const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
+      if (v.ok) {
+        await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
         return {
           ...r,
           tierUsed: 5,
@@ -232,11 +318,26 @@ export class SmartRouter {
           proxyCost: stealthProxy?.cost || proxy?.cost || 0,
         };
       }
-
-      throw new Error(`All tiers exhausted for ${domain}`);
+      note(5, v.reason);
+    } catch (err) {
+      note(5, `threw ${(err as Error).message.slice(0, 120)}`);
     } finally {
       if (context) this.releaseBrowserContext(context);
     }
+
+    // Last-resort: return T4's body with a zero quality flag baked in via
+    // the quality scorer downstream, instead of throwing. This is what the
+    // user wants 99% of the time (they already paid for the browser fetch,
+    // returning empty markdown is strictly better than 500-ing the API).
+    if (t4Result) {
+      return {
+        ...t4Result,
+        tierUsed: 4,
+        ...proxyMeta,
+      };
+    }
+
+    throw new Error(`All tiers exhausted for ${domain} — ${attempts.join(' | ')}`);
   }
 
   // ── Cached-tier fast path ──────────────────────────────
@@ -254,7 +355,8 @@ export class SmartRouter {
     if (tier <= 1) {
       try {
         const r = await tier1Fetch(url, { headers: options.headers });
-        if (isValidContent(r.html, r.statusCode, url)) {
+        const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
+        if (v.ok) {
           await this.updateDomainStrategy(domain, tier, true, r.latencyMs);
           return { ...r, tierUsed: tier, ...proxyMeta };
         }
@@ -265,7 +367,8 @@ export class SmartRouter {
     if (tier === 2) {
       try {
         const r = await tier2Fetch(url, { headers: options.headers, proxy: proxyUrl });
-        if (isValidContent(r.html, r.statusCode, url)) {
+        const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
+        if (v.ok) {
           await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
           return { ...r, tierUsed: 2, ...proxyMeta };
         }
@@ -289,12 +392,11 @@ export class SmartRouter {
     let context = await this.getBrowserContext();
     try {
       const r = await tier4Fetch(url, context, options);
-      if (isValidContent(r.html, r.statusCode, url)) {
+      const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
+      if (v.ok) {
         await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
         return { ...r, tierUsed: 4, ...proxyMeta };
       }
-      // Cloaked block page (200 OK, short body / block phrase). Don't
-      // record as success — fall through to T5 stealth.
       await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
     } catch {
       /* fall through to stealth */
@@ -302,7 +404,7 @@ export class SmartRouter {
       this.releaseBrowserContext(context);
     }
 
-    // ── T5: stealth ──
+    // ── T5: stealth (terminal — accept whatever we get) ──
     context = await this.getBrowserContext();
     try {
       const r = await tier4StealthFetch(url, context, {
@@ -311,13 +413,12 @@ export class SmartRouter {
         blockResources: options.blockResources,
         screenshot: options.screenshot,
       });
-      if (isValidContent(r.html, r.statusCode, url)) {
-        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
-        return { ...r, tierUsed: 5, ...proxyMeta };
+      const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
+      if (v.ok) {
+        await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
+      } else {
+        await this.updateDomainStrategy(domain, 5, false, r.latencyMs);
       }
-      // Both tiers produced a block page. Return the T5 result so the caller
-      // still sees what the site served, tagged with tier 5.
-      await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
       return { ...r, tierUsed: 5, ...proxyMeta };
     } finally {
       this.releaseBrowserContext(context);

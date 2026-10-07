@@ -102,9 +102,32 @@ export function isValidContent(
     'shieldsquare',
   ];
 
-  const lowerHtml = html.toLowerCase();
-  if (blockIndicators.some((indicator) => lowerHtml.includes(indicator))) {
-    return false;
+  // Keyword-based block detection is only reliable on SMALL responses.
+  // Long-form articles legitimately mention vendor names ("DataDome",
+  // "PerimeterX"), CAPTCHA, and phrases like "access denied" — Wikipedia's
+  // "Web scraping" article is the canonical example. Real block pages are
+  // almost always under ~10 KB, so we gate the heuristic on size.
+  if (html.length < 10_000) {
+    const lowerHtml = html.toLowerCase();
+    if (blockIndicators.some((indicator) => lowerHtml.includes(indicator))) {
+      return false;
+    }
+  } else {
+    // On large pages, still catch the obvious Cloudflare / DataDome challenge
+    // markers that appear in page <head> regardless of body size. These are
+    // structural (script src, meta tags) rather than prose mentions.
+    const head = html.slice(0, 4000).toLowerCase();
+    const structuralMarkers = [
+      'cf-browser-verification',
+      'challenge-platform',
+      'captcha-delivery',
+      'errors/validatecaptcha',
+      'px-captcha',
+      'pxcaptcha',
+    ];
+    if (structuralMarkers.some((m) => head.includes(m))) {
+      return false;
+    }
   }
 
   // Cloaked-block check: some sites serve a 200 OK with a near-empty body

@@ -46,7 +46,10 @@ export interface ScrapeResult {
     markdown?: string;
     text?: string;
     screenshot?: string;
-    json?: Record<string, unknown>;
+    // Union because listing-page extractions return an array of items
+    // while single-entity pages return one object. Clients using `json`
+    // should check `Array.isArray(...)` before indexing into properties.
+    json?: Record<string, unknown> | Array<Record<string, unknown>>;
   };
   metadata: {
     tierUsed: number;
@@ -55,6 +58,10 @@ export interface ScrapeResult {
     cached: boolean;
     qualityScore: number;
     extractionMethod?: string;
+    /** Page title resolved from JSON-LD, Readability, or meta tags. */
+    title?: string;
+    /** Page description resolved from `meta[description]` / og / twitter. */
+    description?: string;
     costBreakdown: CostBreakdown;
   };
   error?: string;

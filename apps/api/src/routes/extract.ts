@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { ScrapeJobData, isUrlSafe } from '@scrapeforge/shared';
+import { ScrapeJobData, isUrlSafe, createCacheKey } from '@scrapeforge/shared';
 
 const emptyToUndefined = (v: unknown) => (v === '' || v === null ? undefined : v);
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
@@ -59,8 +59,16 @@ export async function extractRoutes(app: FastifyInstance) {
 
     const { redis, queues, queueEvents } = app;
 
-    // Check cache
-    const cacheKey = `extract:${new URL(body.url).hostname}:${JSON.stringify(body.schema)}`;
+    // Check cache — uses the same `cache:<hash>` namespace and key shape as
+    // the worker writes to (see apps/worker/src/worker.ts → Stage 5). Previously
+    // this route read from an `extract:...` key that nothing ever wrote to,
+    // so extract cache hits never occurred and every request re-hit the LLM.
+    const formatsForKey = [...new Set([...body.formats, 'json', 'markdown'])];
+    const cacheKey = `cache:${createCacheKey(body.url, {
+      formats: formatsForKey,
+      proxy: body.proxy,
+      extractSchema: body.schema,
+    })}`;
     if (body.cacheTtl > 0) {
       const cached = await redis.get(cacheKey);
       if (cached) {

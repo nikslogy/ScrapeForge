@@ -1,5 +1,5 @@
 import { buildSync } from 'esbuild';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +21,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // smaller bundle, identical behavior.
 const bundleDir = resolve(__dirname, '..', '..', '.extraction-cache');
 if (!existsSync(bundleDir)) mkdirSync(bundleDir, { recursive: true });
-const bundlePath = resolve(bundleDir, 'pipeline-worker.mjs');
+
+// Per-PID bundle path + atomic rename. Prevents two worker processes
+// (e.g. tsx-watch reload leaving an orphan, or the old + new process
+// briefly overlapping) from racing on the same file and leaving a
+// half-written bundle → Piscina crashes with
+// "No handler function exported from pipeline-worker.mjs".
+const bundlePath = resolve(bundleDir, `pipeline-worker-${process.pid}.mjs`);
+const tmpBundlePath = `${bundlePath}.tmp`;
 
 buildSync({
   entryPoints: [resolve(__dirname, 'pipeline-worker.ts')],
@@ -29,7 +36,7 @@ buildSync({
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  outfile: bundlePath,
+  outfile: tmpBundlePath,
   external: [
     'jsdom',
     '@mozilla/readability',
@@ -41,6 +48,31 @@ buildSync({
   sourcemap: 'inline',
   logLevel: 'warning',
 });
+
+// Sanity-check the bundle before Piscina tries to load it — catches the
+// "export default not emitted" class of issue at startup rather than on
+// the first job, and makes the error message actionable.
+const bundleSource = readFileSync(tmpBundlePath, 'utf8');
+if (!/export\s*{[^}]*\bas\s+default\b[^}]*}|export\s+default\b/.test(bundleSource)) {
+  throw new Error(
+    `[extraction-pool] Bundle at ${tmpBundlePath} is missing a default export ` +
+      `(pipeline-worker.ts must \`export default\` a handler function).`,
+  );
+}
+
+// Atomic rename: Piscina only ever sees a fully-written file.
+renameSync(tmpBundlePath, bundlePath);
+
+// Best-effort cleanup of our own bundle on graceful shutdown so we don't
+// pollute the cache dir across restarts.
+for (const sig of ['SIGINT', 'SIGTERM', 'beforeExit'] as const) {
+  process.once(sig, () => {
+    try { unlinkSync(bundlePath); } catch { /* already gone */ }
+  });
+}
+
+// Silence an unused-import warning when some of these aren't triggered.
+void writeFileSync;
 
 const threads = Math.max(
   2,

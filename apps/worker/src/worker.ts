@@ -127,7 +127,12 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     const computeCost = TIER_COMPUTE_COST[rr.tierUsed] ?? 0.0005;
     const totalCost = computeCost + rr.proxyCost + llmCost;
 
-    const { extractionMethod, ...contentFields } = extracted;
+    const {
+      extractionMethod,
+      title: extractedTitle,
+      description: extractedDescription,
+      ...contentFields
+    } = extracted;
 
     const result: ScrapeResult = {
       jobId,
@@ -145,6 +150,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
         cached: false,
         qualityScore: quality.score,
         extractionMethod: extractionMethod || 'unknown',
+        title: extractedTitle,
+        description: extractedDescription,
         costBreakdown: {
           compute: computeCost,
           proxy: rr.proxyCost,
@@ -156,9 +163,30 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     };
 
     // ── Stage 5: Cache + persist ───────────────────────
+    //
+    // Cache key incorporates `extractSchema` so two callers with different
+    // schemas don't collide on the same URL. We also refuse to cache an
+    // "extract" request that came back with no JSON (LLM rate-limit /
+    // truncation) — otherwise a poisoned entry would mask the failure on
+    // every subsequent call for the cacheTtl window.
     if (options.cacheTtl && options.cacheTtl > 0) {
-      const cacheKeyStr = `cache:${createCacheKey(url, { formats: options.formats, proxy: options.proxy })}`;
-      await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
+      const askedForJson = Boolean(options.extractSchema);
+      const json = result.content.json;
+      // Listing-page extractions now produce arrays — an empty array is just
+      // as poisoned as an empty object, so check both shapes.
+      const jsonIsEmpty =
+        !json ||
+        (Array.isArray(json) ? json.length === 0 : Object.keys(json).length === 0);
+      const poisoned = askedForJson && jsonIsEmpty;
+
+      if (!poisoned) {
+        const cacheKeyStr = `cache:${createCacheKey(url, {
+          formats: options.formats,
+          proxy: options.proxy,
+          extractSchema: options.extractSchema,
+        })}`;
+        await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
+      }
     }
 
     await redis.set(`result:${jobId}`, JSON.stringify(result), 'EX', 3600);
@@ -248,6 +276,10 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
 // Default concurrency to MAX_BROWSER_CONTEXTS so heavy SPAs can't queue
 // past the API's sync-mode timeout. Extraction is offloaded to a Piscina
 // pool, so the main thread is no longer a bottleneck here.
+// stalledInterval defaults to 30s in BullMQ, which combined with the API's
+// default sync timeout can make a crashed-worker scrape look like a hard
+// timeout to the caller instead of a recovery. 15s is aggressive but still
+// well above any legitimate long-running scrape heartbeat.
 const workerOptions = {
   connection: bullConnection,
   concurrency: parseInt(
@@ -255,6 +287,8 @@ const workerOptions = {
       process.env.MAX_BROWSER_CONTEXTS ||
       '5',
   ),
+  stalledInterval: parseInt(process.env.BULLMQ_STALLED_INTERVAL_MS || '15000'),
+  maxStalledCount: parseInt(process.env.BULLMQ_MAX_STALLED_COUNT || '2'),
 };
 
 const workers: Worker[] = [];

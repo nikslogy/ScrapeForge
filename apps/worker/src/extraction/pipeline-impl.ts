@@ -22,8 +22,10 @@ export interface ExtractionResult {
   html?: string;
   markdown?: string;
   text?: string;
-  json?: Record<string, unknown>;
+  json?: Record<string, unknown> | Array<Record<string, unknown>>;
   extractionMethod?: string;
+  title?: string;
+  description?: string;
 }
 
 /**
@@ -44,21 +46,42 @@ export async function extractContent(
     result.html = cleanHtml(rawHtml);
   }
 
+  // Always resolve the page title + description. They're cheap to derive
+  // (a few cheerio lookups) and almost every downstream consumer wants
+  // them — playground UI, webhook recipients, cached-tier listings, etc.
+  const meta = extractMetaTags(rawHtml);
+  let chainTitle: string | undefined;
+
   if (formats.includes('markdown') || formats.includes('text')) {
     const extracted = runExtractionChain(rawHtml, url);
     result.extractionMethod = extracted.method;
+    chainTitle = extracted.title;
 
     if (formats.includes('markdown')) {
-      result.markdown = cleanMarkdown(
+      const rawMd = cleanMarkdown(
         extracted.html
           ? turndown.turndown(extracted.html)
           : extracted.text || '',
       );
+
+      // Readability (and JSON-LD) strip the article's H1 because they treat
+      // it as metadata. Downstream consumers (RAG pipelines, doc importers,
+      // our own markdown-fidelity tests) expect the title as a leading H1 —
+      // match the de-facto convention Firecrawl / Reader / Mercury all use.
+      const titleForHeading = extracted.title || meta?.title;
+      const startsWithHeading = /^\s*#\s+/.test(rawMd);
+      result.markdown = titleForHeading && !startsWithHeading
+        ? `# ${titleForHeading.trim()}\n\n${rawMd}`
+        : rawMd;
     }
     if (formats.includes('text')) {
       result.text = extracted.text;
     }
   }
+
+  const resolvedTitle = chainTitle || meta?.title;
+  if (resolvedTitle) result.title = resolvedTitle.trim();
+  if (meta?.description) result.description = meta.description.trim();
 
   return result;
 }

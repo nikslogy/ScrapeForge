@@ -50,7 +50,11 @@ export async function scrapeRoutes(app: FastifyInstance) {
     }
 
     const { redis, queues, queueEvents } = app;
-    const cacheKeyStr = `cache:${createCacheKey(body.url, { formats: body.formats, proxy: body.proxy })}`;
+    const cacheKeyStr = `cache:${createCacheKey(body.url, {
+      formats: body.formats,
+      proxy: body.proxy,
+      extractSchema: body.extractSchema,
+    })}`;
 
     if (body.cacheTtl > 0) {
       const cached = await redis.get(cacheKeyStr);

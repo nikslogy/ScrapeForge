@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/worker.ts",
+    "dev": "tsx watch --env-file=../../.env src/worker.ts",
     "build": "tsc",
     "start": "node dist/worker.js"
   },
