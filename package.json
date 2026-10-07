@@ -15,7 +15,9 @@
     "seed": "tsx infra/scripts/seed.ts",
     "test:integration": "vitest run tests/integration",
     "test:perf": "tsx tests/perf/percentiles.ts",
-    "test:bench": "tsx tests/bench/real-world.ts"
+    "test:bench": "tsx tests/bench/real-world.ts",
+    "test": "vitest run",
+    "typecheck": "npm run build -w packages/shared && tsc --noEmit -p apps/api && tsc --noEmit -p apps/worker"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
