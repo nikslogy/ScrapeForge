@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto';
 import type { RecordGroup, SourceDocument } from '../types.js';
 import { emitBlocks } from './blocks.js';
 import { findChildElement, parseHtml } from './dom.js';
+import { guardHtmlNesting } from './guard.js';
+import { DOCUMENT_LIMITS } from './limits.js';
 import { buildLayout } from './layout.js';
 import { detectRecordGroups } from './records.js';
 import { groupSelector } from './selector.js';
 import { extractStructured, resolveBaseUrl } from './structured.js';
 import { templateSignature } from './template.js';
+
+/** Warning prefix set when the raw HTML had to be flattened before parsing. */
+export const HTML_REWRITTEN_WARNING = 'html_nesting_flattened';
 
 /**
  * SourceDocument['stats'] plus build diagnostics. The extra fields are not in
@@ -38,7 +43,8 @@ export function buildSourceDocument(html: string, url: string): SourceDocument {
   const pageUrl = typeof url === 'string' ? url : '';
   const snapshotHash = createHash('sha256').update(raw).digest('hex');
 
-  const root = parseHtml(raw);
+  const guarded = guardHtmlNesting(raw, DOCUMENT_LIMITS.maxHtmlNesting);
+  const root = parseHtml(guarded.html);
   const htmlEl = findChildElement(root, 'html');
   const head = htmlEl ? findChildElement(htmlEl, 'head') : undefined;
   const body = htmlEl ? findChildElement(htmlEl, 'body') : undefined;
@@ -46,6 +52,13 @@ export function buildSourceDocument(html: string, url: string): SourceDocument {
 
   const structured = extractStructured(root, base);
   const warnings = [...structured.warnings];
+  if (guarded.rewritten) {
+    // Selectors now refer to the flattened snapshot, not the raw HTML; the
+    // engine checks this warning before using or learning recipes.
+    warnings.push(
+      `${HTML_REWRITTEN_WARNING}: nesting ${guarded.maxDepth} > ${DOCUMENT_LIMITS.maxHtmlNesting}, ${guarded.droppedTags} tags dropped`,
+    );
+  }
 
   // Frameset documents have no <body>: walk <html> (head is skipped).
   const visibleRoot = body ?? htmlEl;

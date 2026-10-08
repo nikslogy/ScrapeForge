@@ -10,6 +10,11 @@ export const DOCUMENT_LIMITS = {
    * (and therefore document size) on adversarially deep DOMs.
    */
   maxBlockDepth: 80,
+  /**
+   * Raw HTML nesting deeper than this is flattened before parsing (parse5 is
+   * quadratic in nesting depth). Real pages stay far below it.
+   */
+  maxHtmlNesting: 512,
   /** Scripts whose text is longer than this (UTF-16 chars) are not parsed. */
   maxScriptChars: 2 * 1024 * 1024,
   maxStructuredItems: 200,

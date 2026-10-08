@@ -1,6 +1,6 @@
 import type { SourceBlock, SourceDocument } from '../types.js';
 
-export { buildSourceDocument, documentBuildInfo } from './build.js';
+export { buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING } from './build.js';
 export type { DocumentBuildStats } from './build.js';
 export { renderBlocks } from './render.js';
 export type { RenderOptions, RenderResult } from './render.js';

@@ -13,7 +13,7 @@
 import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { roundMs, StageTracer } from '../tracing.js';
-import { blockContext, buildSourceDocument, documentBuildInfo, renderBlocks } from './document/index.js';
+import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks } from './document/index.js';
 import {
   Budget,
   buildExtractionPrompt,
@@ -540,6 +540,9 @@ class ExtractionRun {
       return null;
     }
     if (host === '' || this.doc.templateSignature === '') return null;
+    // A flattened snapshot (adversarial nesting) has selectors that do not
+    // match the raw HTML recipes run against: neither serve nor learn.
+    if (documentBuildInfo(this.doc).warnings.some((w) => w.startsWith(HTML_REWRITTEN_WARNING))) return null;
     return { tenantId: this.req.tenantId, host, templateSignature: this.doc.templateSignature, schemaHash: this.schema.hash };
   }
 
