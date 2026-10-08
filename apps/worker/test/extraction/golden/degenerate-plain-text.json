@@ -1,0 +1,13 @@
+{
+ "id": "degenerate-plain-text",
+ "source": "degenerate",
+ "url": "https://example.com/",
+ "inputBytes": 25,
+ "all": {
+  "extractionMethod": "fallback",
+  "markdown": "just some text, no markup",
+  "text": "just some text, no markup",
+  "html": "<html><head></head><body>just some text, no markup</body></html>"
+ },
+ "htmlOnly": {}
+}

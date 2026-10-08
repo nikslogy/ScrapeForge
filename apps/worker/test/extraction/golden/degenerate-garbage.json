@@ -1,0 +1,13 @@
+{
+ "id": "degenerate-garbage",
+ "source": "degenerate",
+ "url": "https://example.com/",
+ "inputBytes": 8,
+ "all": {
+  "extractionMethod": "fallback",
+  "markdown": "\u0001<\u0002>￿",
+  "text": "\u0001<\u0002>￿",
+  "html": "<html><head></head><body>\u0001&lt;\u0002&gt;￿</body></html>"
+ },
+ "htmlOnly": {}
+}

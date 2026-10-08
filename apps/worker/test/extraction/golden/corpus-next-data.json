@@ -1,0 +1,18 @@
+{
+ "id": "corpus-next-data",
+ "source": "corpus",
+ "url": "https://www.ridgelinerunning.com/products/ridgeline-trail-runner-2?color=black",
+ "inputBytes": 5544,
+ "all": {
+  "extractionMethod": "fallback",
+  "title": "Ridgeline Trail Runner 2",
+  "description": "Grippy, stable and light: the Trail Runner 2 is built for technical singletrack.",
+  "markdown": "# Ridgeline Trail Runner 2\n\nRidgeline Trail Runner 2 | Ridgeline Running Co.\n\n# Ridgeline Trail Runner 2\n\n$129.95\n\nLoading sizes…\n\n## You might also like",
+  "text": "Ridgeline Trail Runner 2\n\nGrippy, stable and light: the Trail Runner 2 is built for technical singletrack.\n\nRidgelineTrailRoadApparelCart (0)Ridgeline Trail Runner 2$129.95Loading sizes…You might also like© 2026 Ridgeline Running Co. Free returns within 60 days.",
+  "html": "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Ridgeline Trail Runner 2 | Ridgeline Running Co.</title><meta name=\"description\" content=\"Grippy, stable and light: the Trail Runner 2 is built for technical singletrack.\"><meta property=\"og:title\" content=\"Ridgeline Trail Runner 2\"><meta property=\"og:type\" content=\"product\"><meta property=\"og:url\" content=\"https://www.ridgelinerunning.com/products/ridgeline-trail-runner-2\"><link rel=\"canonical\" href=\"https://www.ridgelinerunning.com/products/ridgeline-trail-runner-2\"><link rel=\"preload\" as=\"image\" imagesrcset=\"/_next/image?url=%2Fmedia%2Fcatalog%2Frtr2%2Fblack-side.jpg&amp;w=640&amp;q=75 640w, /_next/image?url=%2Fmedia%2Fcatalog%2Frtr2%2Fblack-side.jpg&amp;w=1080&amp;q=75 1080w\" imagesizes=\"(max-width: 768px) 100vw, 50vw\"><meta name=\"next-head-count\" content=\"9\"><link rel=\"preload\" href=\"/_next/static/css/a7d3c9e1f2b4.css\" as=\"style\"><link rel=\"stylesheet\" href=\"/_next/static/css/a7d3c9e1f2b4.css\" data-n-g=\"\"></head><body><div id=\"__next\"><div class=\"Layout_root__a1B2c\"><main class=\"ProductPage_main__V5b6N\"><div class=\"ProductPage_gallery__H4j5K\" aria-busy=\"true\"><div class=\"Skeleton_block__k2P9d\" style=\"height:420px\"></div><div class=\"Skeleton_row__m3N4b\"><div class=\"Skeleton_thumb__r5T6y\"></div><div class=\"Skeleton_thumb__r5T6y\"></div><div class=\"Skeleton_thumb__r5T6y\"></div></div></div><div class=\"ProductPage_info__D7f8G\"><h1 class=\"ProductTitle_title__x8Kq2\">Ridgeline Trail Runner 2</h1><div class=\"Price_root__u1I2o\"><span class=\"Price_amount__3fGh7\">$129.95</span></div><div class=\"Skeleton_line__w9E8r\" style=\"width:60%\"></div><div class=\"Skeleton_line__w9E8r\" style=\"width:80%\"></div><div class=\"SizePicker_placeholder__b2V3c\" aria-busy=\"true\">Loading sizes…</div><div class=\"Skeleton_button__t4Y5u\"></div></div><section class=\"Recs_root__n6M7k\" aria-busy=\"true\"><h2 class=\"Recs_title__j8K9l\">You might also like</h2><div class=\"Skeleton_card__c1D2e\"></div><div class=\"Skeleton_card__c1D2e\"></div></section></main></div></div>\n</body></html>"
+ },
+ "htmlOnly": {
+  "title": "Ridgeline Trail Runner 2",
+  "description": "Grippy, stable and light: the Trail Runner 2 is built for technical singletrack."
+ }
+}

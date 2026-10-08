@@ -1,0 +1,18 @@
+{
+ "id": "degenerate-article",
+ "source": "degenerate",
+ "url": "https://example.com/tide-pools",
+ "inputBytes": 866,
+ "all": {
+  "extractionMethod": "readability",
+  "title": "Field Notes on Tide Pools",
+  "description": "A short article about tide pools.",
+  "markdown": "# Field Notes on Tide Pools\n\nTide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.\n\nVisiting at low tide reveals the richest variety of life. Step only on bare rock, never lift animals from their pools, and watch the incoming tide so you are not cut off from the shore.\n\nResearchers use tide pools as natural laboratories for studying competition, predation and how communities recover after storms disturb the rocks.",
+  "text": "Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.\nVisiting at low tide reveals the richest variety of life. Step only on bare rock, never lift animals from their pools, and watch the incoming tide so you are not cut off from the shore.\nResearchers use tide pools as natural laboratories for studying competition, predation and how communities recover after storms disturb the rocks.",
+  "html": "<!DOCTYPE html><html><head><title>Field Notes on Tide Pools</title>\n<meta name=\"description\" content=\"A short article about tide pools.\"></head>\n<body>\n<article><h1>Field Notes on Tide Pools</h1>\n<p>Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.</p>\n<p>Visiting at low tide reveals the richest variety of life. Step only on bare rock, never lift animals from their pools, and watch the incoming tide so you are not cut off from the shore.</p>\n<p>Researchers use tide pools as natural laboratories for studying competition, predation and how communities recover after storms disturb the rocks.</p>\n</article></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Field Notes on Tide Pools",
+  "description": "A short article about tide pools."
+ }
+}

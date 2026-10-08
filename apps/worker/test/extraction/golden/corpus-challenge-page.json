@@ -1,0 +1,16 @@
+{
+ "id": "corpus-challenge-page",
+ "source": "corpus",
+ "url": "https://www.shopmarten.com/products/alpine-down-jacket",
+ "inputBytes": 5769,
+ "all": {
+  "extractionMethod": "paragraph-density",
+  "title": "Just a moment...",
+  "markdown": "# www.shopmarten.com\n\nVerifying you are human. This may take a few seconds.\n\nwww.shopmarten.com needs to review the security of your connection before proceeding.\n\nVerification successful. Waiting for www.shopmarten.com to respond...\n\nChecking your browser before accessing www.shopmarten.com.",
+  "text": "www.shopmarten.comVerifying you are human. This may take a few seconds.www.shopmarten.com needs to review the security of your connection before proceeding.Verification successful. Waiting for www.shopmarten.com to respond...Checking your browser before accessing www.shopmarten.com.",
+  "html": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA-Compatible\" content=\"IE=Edge\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"390\"></head><body class=\"no-js\"><div class=\"main-wrapper\" role=\"main\"><div class=\"main-content\"><h1 class=\"zone-name-title h1\">www.shopmarten.com</h1><p data-translate=\"please_wait\" id=\"QVkpz3\" class=\"h2 spacer-bottom\">Verifying you are human. This may take a few seconds.</p><div id=\"turnstile-wrapper\" class=\"spacer\"><div class=\"cf-turnstile\" data-sitekey=\"0x4AAAAAAADnPIDROrmt1Wwj\" data-theme=\"auto\" data-appearance=\"always\"></div></div><div id=\"challenge-body-text\" class=\"core-msg spacer\">www.shopmarten.com needs to review the security of your connection before proceeding.</div><div id=\"challenge-success\" style=\"display:none\"><div class=\"h2\">Verification successful. Waiting for www.shopmarten.com to respond...</div></div><form id=\"challenge-form\" action=\"/products/alpine-down-jacket?__cf_chl_f_tk=Qm9yZWFsaXNUZXN0VG9rZW4tMTcyODMwNDQ1OQ\" method=\"POST\" enctype=\"application/x-www-form-urlencoded\"><input type=\"hidden\" name=\"md\" value=\"Q2hlY2tpbmcgeW91ciBicm93c2VyIGJlZm9yZSBhY2Nlc3Npbmc\"><input type=\"hidden\" name=\"r\" value=\"ZmFrZS1yZXF1ZXN0LXRva2VuLWZvci1maXh0dXJl\"></form><p id=\"cf-spinner-please-wait\" class=\"text-center\" style=\"display:none\">Checking your browser before accessing www.shopmarten.com.</p></div></div><div class=\"footer\" role=\"contentinfo\"><div class=\"footer-inner\"><div class=\"clearfix diagnostic-wrapper\"><div class=\"ray-id\">Ray ID: <code>8c2f1a9e4b7d3f21</code></div></div><div class=\"text-center\" id=\"footer-text\">Performance &amp; security by <a rel=\"noopener noreferrer\" href=\"https://www.cloudflare.com?utm_source=challenge&amp;utm_campaign=m\" target=\"_blank\">Cloudflare</a></div></div></div>\n</body></html>"
+ },
+ "htmlOnly": {
+  "title": "Just a moment..."
+ }
+}

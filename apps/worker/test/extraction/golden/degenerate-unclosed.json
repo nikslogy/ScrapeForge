@@ -1,0 +1,13 @@
+{
+ "id": "degenerate-unclosed",
+ "source": "degenerate",
+ "url": "https://example.com/",
+ "inputBytes": 22,
+ "all": {
+  "extractionMethod": "fallback",
+  "markdown": "dangling",
+  "text": "dangling",
+  "html": "<html><head></head><body><div><p><span>dangling</span></p></div></body></html>"
+ },
+ "htmlOnly": {}
+}

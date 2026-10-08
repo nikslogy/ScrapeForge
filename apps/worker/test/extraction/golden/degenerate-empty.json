@@ -1,0 +1,13 @@
+{
+ "id": "degenerate-empty",
+ "source": "degenerate",
+ "url": "https://example.com/",
+ "inputBytes": 0,
+ "all": {
+  "extractionMethod": "fallback",
+  "markdown": "",
+  "text": "",
+  "html": "<html><head></head><body></body></html>"
+ },
+ "htmlOnly": {}
+}
