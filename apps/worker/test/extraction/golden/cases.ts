@@ -4,12 +4,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadFixtures } from '../../../../../tests/fixtures/extraction/load.js';
 import { compactPage, largePage, smallPage } from '../../../../../tests/latency/lib/fixtures.js';
+import { invalidUrlCases, syntheticCases } from './synthetic.js';
 
 export const GOLDEN_DIR = dirname(fileURLToPath(import.meta.url));
 
 export interface GoldenCase {
   id: string;
-  source: 'corpus' | 'latency' | 'degenerate';
+  source: 'corpus' | 'latency' | 'degenerate' | 'synthetic';
   url: string;
   html: string;
 }
@@ -70,5 +71,11 @@ export function goldenCases(): GoldenCase[] {
     { id: 'degenerate-unclosed', source: 'degenerate', url: 'https://example.com/', html: '<div><p><span>dangling' },
     { id: 'degenerate-garbage', source: 'degenerate', url: 'https://example.com/', html: '\u0000\u0001<\u0002>￿' },
   ];
-  return [...corpus, ...latency, ...degenerate];
+  const synthetic: GoldenCase[] = [...syntheticCases(), ...invalidUrlCases()].map((c) => ({
+    id: `synthetic-${c.id}`,
+    source: 'synthetic',
+    url: c.url,
+    html: c.html,
+  }));
+  return [...corpus, ...latency, ...degenerate, ...synthetic];
 }

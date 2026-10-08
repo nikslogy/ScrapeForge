@@ -11,7 +11,13 @@
 //     words: a large page contains most common words, so single-word overlap
 //     would ground fabricated paragraphs.
 // Locations are searched block → attrs → record → document; 'document' means
-// the value exists on the page but outside the cited block/record.
+// the value exists on the page but outside the cited block/record. 'record'
+// covers the record's text and the evidence attributes of the blocks inside
+// it (recordAttrs): an attribute-only value (class="star-rating Three", an
+// href) cited from a sibling block of the same card is still verified. Numbers
+// are looked up only in value-carrying attributes there (aria-label, content,
+// value, title, alt, datetime, data-*), never in class names or URLs, so "4"
+// is not "grounded" by class="col-4" or href="/p/4".
 //
 // Source texts are prepared once (prepareText, LRU-cached by string) with
 // lazily built indexes, so checking many fields against one large document
@@ -35,6 +41,8 @@ export interface GroundingContext {
   blockText?: GroundingText;
   attrs?: Record<string, string>;
   recordText?: GroundingText;
+  /** Evidence attributes of the blocks of the cited block's record (see blockContext). */
+  recordAttrs?: ReadonlyArray<Readonly<Record<string, string>>>;
   documentText?: GroundingText;
 }
 
@@ -67,7 +75,7 @@ export function checkGrounding(raw: unknown, ctx: GroundingContext, opts: Ground
 function checkValue(raw: unknown, locations: Locations, depth: number): GroundingResult {
   if (raw === null || raw === undefined) return VACUOUS;
   if (typeof raw === 'string') return checkString(raw, locations);
-  if (typeof raw === 'number') return Number.isFinite(raw) ? locations.firstHit((p) => numericScore(p, [raw])) : NOT_GROUNDED;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? locations.firstHit((p) => numericScore(p, [raw]), true) : NOT_GROUNDED;
   // A boolean has no printed form to look for; the page said "In stock".
   if (depth >= MAX_NESTING || !(Array.isArray(raw) || isPlainObject(raw))) return NOT_GROUNDED;
   const members = (Array.isArray(raw) ? raw : Object.values(raw)).filter((v) => v !== null && v !== undefined && v !== '');
@@ -89,7 +97,7 @@ function checkString(raw: string, locations: Locations): GroundingResult {
   const needle = normalizeForMatch(raw);
   if (needle === '') return VACUOUS;
   const numbers = numericCandidates(needle);
-  if (numbers) return locations.firstHit((p) => numericScore(p, numbers));
+  if (numbers) return locations.firstHit((p) => numericScore(p, numbers), true);
   if (needle.length <= SHORT_TEXT_MAX_CHARS) return locations.firstHit((p) => (containsBounded(p, needle) ? 1 : 0));
   return checkLongText(needle, locations);
 }
@@ -188,6 +196,13 @@ let preparedChars = 0;
 // document checked field after field, which must not be re-normalized each time.
 let oversized: { text: string; prepared: PreparedText } | null = null;
 const preparedAttrs = new WeakMap<Record<string, string>, PreparedText>();
+const preparedRecordAttrs = new WeakMap<object, { all: PreparedText; values: PreparedText }>();
+
+/** Attributes whose values are data rather than styling or links. */
+function isValueAttr(name: string): boolean {
+  return VALUE_ATTRS.has(name) || name.startsWith('data-');
+}
+const VALUE_ATTRS = new Set(['aria-label', 'content', 'value', 'title', 'alt', 'datetime']);
 
 /**
  * Normalizes `text` for matching. Results are cached by the raw string (LRU,
@@ -231,6 +246,26 @@ function prepareAttrs(attrs: Record<string, string>): PreparedText {
   return prepared;
 }
 
+function prepareRecordAttrs(list: ReadonlyArray<Readonly<Record<string, string>>>, numeric: boolean): PreparedText {
+  let prepared = preparedRecordAttrs.get(list);
+  if (!prepared) {
+    const all: string[] = [];
+    const values: string[] = [];
+    for (const attrs of list) {
+      if (!attrs || typeof attrs !== 'object') continue;
+      for (const [name, v] of Object.entries(attrs)) {
+        if (typeof v !== 'string' || v === '') continue;
+        const text = normalizeForMatch(v);
+        all.push(text);
+        if (isValueAttr(name)) values.push(text);
+      }
+    }
+    prepared = { all: new PreparedText(all.join('\u0001')), values: new PreparedText(values.join('\u0001')) };
+    preparedRecordAttrs.set(list, prepared);
+  }
+  return numeric ? prepared.values : prepared.all;
+}
+
 /** Drops cached prepared texts (tests and memory-pressure hooks). */
 export function clearPreparedTextCache(): void {
   preparedCache.clear();
@@ -238,20 +273,32 @@ export function clearPreparedTextCache(): void {
   oversized = null;
 }
 
+type Source = 'block' | 'attrs' | 'record' | 'recordAttrs' | 'recordAttrValues' | 'document';
+
+const REPORTED_AS: Record<Source, Exclude<GroundingLocation, 'none'>> = {
+  block: 'block',
+  attrs: 'attrs',
+  record: 'record',
+  recordAttrs: 'record',
+  recordAttrValues: 'record',
+  document: 'document',
+};
+
 class Locations {
-  private readonly prepared = new Map<GroundingLocation, PreparedText | null>();
+  private readonly prepared = new Map<Source, PreparedText | null>();
 
   constructor(private readonly ctx: GroundingContext) {}
 
-  *each(): Generator<{ where: Exclude<GroundingLocation, 'none'>; prepared: PreparedText }> {
-    for (const where of ['block', 'attrs', 'record', 'document'] as const) {
-      const prepared = this.get(where);
-      if (prepared) yield { where, prepared };
+  /** `numeric`: record attributes are limited to value-carrying ones. */
+  *each(numeric = false): Generator<{ where: Exclude<GroundingLocation, 'none'>; prepared: PreparedText }> {
+    for (const source of ['block', 'attrs', 'record', numeric ? 'recordAttrValues' : 'recordAttrs', 'document'] as const) {
+      const prepared = this.get(source);
+      if (prepared) yield { where: REPORTED_AS[source], prepared };
     }
   }
 
-  firstHit(score: (p: PreparedText) => number): GroundingResult {
-    for (const { where, prepared } of this.each()) {
+  firstHit(score: (p: PreparedText) => number, numeric = false): GroundingResult {
+    for (const { where, prepared } of this.each(numeric)) {
       const s = score(prepared);
       if (s > 0) return { grounded: true, where, score: s };
     }
@@ -259,16 +306,20 @@ class Locations {
   }
 
   /** Prepared lazily: the document is only normalized if earlier locations miss. */
-  private get(where: GroundingLocation): PreparedText | null {
-    if (this.prepared.has(where)) return this.prepared.get(where)!;
+  private get(source: Source): PreparedText | null {
+    if (this.prepared.has(source)) return this.prepared.get(source)!;
     let prepared: PreparedText | null = null;
-    if (where === 'attrs') {
+    if (source === 'attrs') {
       if (this.ctx.attrs && typeof this.ctx.attrs === 'object') prepared = prepareAttrs(this.ctx.attrs);
+    } else if (source === 'recordAttrs' || source === 'recordAttrValues') {
+      if (Array.isArray(this.ctx.recordAttrs) && this.ctx.recordAttrs.length > 0) {
+        prepared = prepareRecordAttrs(this.ctx.recordAttrs, source === 'recordAttrValues');
+      }
     } else {
-      const source = where === 'block' ? this.ctx.blockText : where === 'record' ? this.ctx.recordText : this.ctx.documentText;
-      if (typeof source === 'string' || source instanceof PreparedText) prepared = prepareText(source);
+      const text = source === 'block' ? this.ctx.blockText : source === 'record' ? this.ctx.recordText : this.ctx.documentText;
+      if (typeof text === 'string' || text instanceof PreparedText) prepared = prepareText(text);
     }
-    this.prepared.set(where, prepared);
+    this.prepared.set(source, prepared);
     return prepared;
   }
 }

@@ -1,0 +1,18 @@
+{
+ "id": "synthetic-fallback-scripts-nav",
+ "source": "synthetic",
+ "url": "https://app.example.com/",
+ "inputBytes": 321,
+ "all": {
+  "extractionMethod": "fallback",
+  "title": "App shell",
+  "description": "Single page app shell",
+  "markdown": "# App shell\n\nApp shell",
+  "text": "App shell\n\nSingle page app shell\n\nHome DocsFooter © 2026",
+  "html": "<!DOCTYPE html><html><head><title>App shell</title><meta property=\"og:description\" content=\"Single page app shell\"></head>\n<body><div id=\"root\"></div></body></html>"
+ },
+ "htmlOnly": {
+  "title": "App shell",
+  "description": "Single page app shell"
+ }
+}

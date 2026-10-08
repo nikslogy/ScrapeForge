@@ -1,0 +1,16 @@
+{
+ "id": "synthetic-largest-entry-content",
+ "source": "synthetic",
+ "url": "https://wp.example.com/post",
+ "inputBytes": 372,
+ "all": {
+  "extractionMethod": "largest-block",
+  "title": "Entry",
+  "markdown": "# Entry\n\nEntry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs.",
+  "text": "Entry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs.",
+  "html": "<!DOCTYPE html><html><head><title>Entry</title></head><body>\n<div class=\"entry-content\"><span>Entry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs. Entry content words without paragraphs. </span></div>\n<div class=\"sidebar\"><ul><li><a href=\"/a\">A</a></li><li><a href=\"/b\">B</a></li></ul></div></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Entry"
+ }
+}

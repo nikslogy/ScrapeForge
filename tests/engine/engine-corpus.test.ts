@@ -44,17 +44,10 @@ const FIXTURES = loadFixtures({ excludeTags: ['phase2'] });
  * fixture below precision 1.0 / recall 0.95 or off its expected status. Each
  * entry is explained in the engine report; tighten when the cause is fixed.
  */
-const KNOWN_LIMITS: Record<string, { precision: number; recall: number; status: ExtractionOutcome['status']; why: string }> = {
-  'job-posting': {
-    precision: 6 / 7,
-    recall: 6 / 8,
-    status: 'partial',
-    why:
-      'structured mapper fills location with JSON-LD addressLocality "Austin" (visible, so accepted) instead of "Austin, TX"; ' +
-      'remote=false is shown only as "On-site" / "not eligible for fully remote work", which boolean normalization cannot read, ' +
-      'so the required boolean is missing and the output is schema-invalid',
-  },
-};
+// job-posting used to be listed (P 6/7, R 6/8, partial): location is now composed
+// as "Austin, TX" from addressLocality + addressRegion because the field asks
+// for "City and state", and "On-site" is read as remote=false.
+const KNOWN_LIMITS: Record<string, { precision: number; recall: number; status: ExtractionOutcome['status']; why: string }> = {};
 
 /** Fixtures whose structured data covers every field visibly: no model call is needed. */
 const STRUCTURED_ONLY = ['news-article'];

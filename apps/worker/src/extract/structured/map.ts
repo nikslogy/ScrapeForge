@@ -10,13 +10,20 @@
 //
 // Array shape: one list is chosen (ItemList / OfferCatalog / search results,
 // FAQ questions, reviews, variants, repeated top-level entities, embedded app
-// state lists) and every member becomes a record, in order.
+// state lists) and every member becomes a record, in order. Without a list,
+// only a content entity of a type the requested fields belong to (the
+// product of a product page) is a one-record array. Page-level OpenGraph and
+// meta never make array records: "Mystery | Books to Scrape" is the title of
+// a listing page, not a book. For 'auto' they decide nothing either unless
+// they describe the kind of thing the fields ask for (og:type article for an
+// author field), or the fields are generic page facts (title, description).
 //
 // Every value is reported raw, with the structured item id and JSON pointer it
 // came from and whether it is visible in the page text. Fields with no
 // confident mapping are simply absent: later stages fill them.
 
 import type { NormalizedSchema, SourceDocument, StructuredSource } from '../types.js';
+import { isUrlField } from '../validate/normalize.js';
 import { CONCEPT_BY_ID, type FieldPlan, type SchemaPlan, planSchema } from './concepts.js';
 import { type Discovery, type Entity, type ListCandidate, discover } from './entities.js';
 import { FAMILY_PRIOR, isContentFamily } from './families.js';
@@ -31,8 +38,19 @@ export interface StructuredFieldValue {
   structuredId: string;
   /** JSON pointer of the value inside that item's data. */
   pointer: string;
-  /** The value (or every member of an array value) appears on the rendered page. */
+  /**
+   * The value (or every member of an array value) appears on the rendered
+   * page. A schema.org enumeration URL ("https://schema.org/InStock") read
+   * into a text field is never visible: the page shows a label, not the URL.
+   */
   visibleInPage: boolean;
+  /**
+   * Enumeration member named by a schema.org URL ("InStock"), for consumers
+   * that map enumerations (a boolean "in stock" field).
+   */
+  enumLabel?: string;
+  /** The value was composed from several properties (address parts); their pointers. */
+  composedFrom?: string[];
 }
 
 export type StructuredRecord = Record<string, StructuredFieldValue>;
@@ -104,21 +122,36 @@ class Mapper {
     this.d = discover(this.doc, this.page);
     this.r = new Resolver(this.d.refs, this.page);
 
-    const candidates = this.rankCandidates();
-    const primary = candidates[0];
-    const standalone = candidates.find((c) => c.entity.role !== 'member');
+    const all = this.rankCandidates();
     const list = this.bestList();
     const shape = this.schema.shape;
 
-    if (shape === 'object') return primary ? this.objectResult(primary, candidates) : this.empty();
+    if (shape === 'object') return all[0] ? this.objectResult(all[0], all) : this.empty();
     if (shape === 'array') {
-      if (list && (!standalone || this.listWins(list, standalone, 'array'))) return this.arrayResult(list);
-      return standalone ? this.arrayOfOne(standalone, candidates) : this.empty();
+      // A listing of one is a content entity the fields describe; never page-level metadata.
+      const single = all.find((c) => c.entity.role !== 'member' && !c.entity.flat && isContentFamily(c.entity.family) && c.fit > 0);
+      if (list && (!single || this.listWins(list, single, 'array'))) return this.arrayResult(list);
+      return single ? this.arrayOfOne(single, all) : this.empty();
     }
+    const candidates = all.filter((c) => !c.entity.flat || this.flatDescribesRecord(c));
+    const primary = candidates[0];
+    const standalone = candidates.find((c) => c.entity.role !== 'member');
     // auto: an array only when the page clearly lists ≥ 2 items.
     if (!list || list.records.length < 2) return primary ? this.objectResult(primary, candidates) : this.empty();
     if (!standalone || this.listWins(list, standalone, 'auto')) return this.arrayResult(list);
     return this.objectResult(standalone, candidates);
+  }
+
+  /**
+   * May a page-level (OpenGraph/meta) entity be the record when the schema
+   * does not say object or list? Only when the fields are generic page facts
+   * (title, description, image) or the entity is of a type some field is
+   * characteristic of (og:type article and an author field). A listing
+   * page's og:title next to price/rating fields describes the page, not an
+   * item, and would otherwise commit the extraction to one object.
+   */
+  private flatDescribesRecord(c: Scored): boolean {
+    return c.fit > 0 || this.plan.fields.every((f) => f.fit.size === 0);
   }
 
   /**
@@ -294,11 +327,26 @@ class Mapper {
   }
 
   private value(f: FieldPlan, h: Hit): StructuredFieldValue {
-    const visibleInPage = this.page.visible(h.raw, h.kind);
-    if (!visibleInPage) this.warnings.add(`structured_value_not_visible:${f.field.name}`);
-    for (const note of h.notes) this.warnings.add(note === 'multiple_offers' ? note : `${note}:${f.field.name}`);
-    return { raw: h.raw, structuredId: h.itemId, pointer: h.pointer, visibleInPage };
+    const enumLabel = typeof h.raw === 'string' ? schemaOrgEnumLabel(h.raw) : undefined;
+    const field = f.field;
+    // A text field would receive the URL itself, which the page never shows
+    // (the label "In stock" being visible says nothing about the URL).
+    const urlAsText = enumLabel !== undefined && (field.type === 'string' || field.type === 'unknown') && !isUrlField(field);
+    const visibleInPage = !urlAsText && this.page.visible(h.raw, h.kind);
+    if (!visibleInPage) this.warnings.add(`structured_value_not_visible:${field.name}`);
+    for (const note of h.notes) this.warnings.add(note === 'multiple_offers' ? note : `${note}:${field.name}`);
+    const out: StructuredFieldValue = { raw: h.raw, structuredId: h.itemId, pointer: h.pointer, visibleInPage };
+    if (enumLabel !== undefined) out.enumLabel = enumLabel;
+    if (h.composedFrom) out.composedFrom = [...h.composedFrom];
+    return out;
   }
+}
+
+const SCHEMA_ORG_ENUM = /^https?:\/\/(?:www\.)?schema\.org\/([A-Za-z][A-Za-z0-9]{0,63})$/;
+
+/** "https://schema.org/InStock" → "InStock". */
+function schemaOrgEnumLabel(raw: string): string | undefined {
+  return SCHEMA_ORG_ENUM.exec(raw.trim())?.[1];
 }
 
 function compareLists(a: ScoredList, b: ScoredList): number {

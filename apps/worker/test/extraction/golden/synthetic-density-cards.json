@@ -1,0 +1,16 @@
+{
+ "id": "synthetic-density-cards",
+ "source": "synthetic",
+ "url": "https://cards.example.com/",
+ "inputBytes": 863,
+ "all": {
+  "extractionMethod": "readability",
+  "title": "Cards",
+  "markdown": "# Cards\n\nCard 0 first line with a few words.\n\nCard 0 second line, also short.\n\nCard 1 first line with a few words.\n\nCard 1 second line, also short.\n\nCard 2 first line with a few words.\n\nCard 2 second line, also short.\n\nCard 3 first line with a few words.\n\nCard 3 second line, also short.\n\nCard 4 first line with a few words.\n\nCard 4 second line, also short.\n\nCard 5 first line with a few words.\n\nCard 5 second line, also short.",
+  "text": "Card 0 first line with a few words.Card 0 second line, also short.Card 1 first line with a few words.Card 1 second line, also short.Card 2 first line with a few words.Card 2 second line, also short.Card 3 first line with a few words.Card 3 second line, also short.Card 4 first line with a few words.Card 4 second line, also short.Card 5 first line with a few words.Card 5 second line, also short.",
+  "html": "<!DOCTYPE html><html><head><title>Cards</title></head><body>\n<div class=\"grid\"><div class=\"card\"><p>Card 0 first line with a few words.</p><p>Card 0 second line, also short.</p></div><div class=\"card\"><p>Card 1 first line with a few words.</p><p>Card 1 second line, also short.</p></div><div class=\"card\"><p>Card 2 first line with a few words.</p><p>Card 2 second line, also short.</p></div><div class=\"card\"><p>Card 3 first line with a few words.</p><p>Card 3 second line, also short.</p></div><div class=\"card\"><p>Card 4 first line with a few words.</p><p>Card 4 second line, also short.</p></div><div class=\"card\"><p>Card 5 first line with a few words.</p><p>Card 5 second line, also short.</p></div></div>\n<section><p>Section paragraph one is moderately long and talks about the cards above.</p><p>Section paragraph two closes it.</p></section>\n</body></html>"
+ },
+ "htmlOnly": {
+  "title": "Cards"
+ }
+}

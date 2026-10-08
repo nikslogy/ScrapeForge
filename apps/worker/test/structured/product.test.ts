@@ -103,7 +103,7 @@ describe('Product with Offer and AggregateRating', () => {
       name: true,
       price: true,
       currency: true, // "$" on the page
-      availability: true, // "In stock"
+      availability: false, // the URL itself is never shown ("In stock" is its label)
       rating: true,
       reviewCount: true,
       brand: true,
@@ -115,13 +115,18 @@ describe('Product with Offer and AggregateRating', () => {
     expect(res.warnings).toContain('structured_value_not_visible:sku');
     expect(res.warnings).toContain('structured_value_not_visible:images');
     expect(res.warnings).not.toContain('structured_value_not_visible:price');
+    expect(res.warnings).toContain('structured_value_not_visible:availability');
+    expect(rec.availability.enumLabel).toBe('InStock');
+    expect(rec.condition).toMatchObject({ enumLabel: 'NewCondition', visibleInPage: false });
+    expect(rec.price.enumLabel).toBeUndefined();
     expect(res.warnings).not.toContain('multiple_offers');
   });
 
   it('maps a boolean stock field to the raw availability URL', () => {
     const r = extractFromStructuredData(doc, makeSchema([{ name: 'inStock', type: 'boolean' }]));
     expect(raws(r.records[0])).toEqual({ inStock: 'https://schema.org/InStock' });
-    expect(r.records[0].inStock.visibleInPage).toBe(true);
+    // A boolean is read from the enumeration's meaning, which the page shows.
+    expect(r.records[0].inStock).toMatchObject({ visibleInPage: true, enumLabel: 'InStock' });
   });
 });
 

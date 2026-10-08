@@ -1,0 +1,16 @@
+{
+ "id": "synthetic-jsonld-graph",
+ "source": "synthetic",
+ "url": "https://blog.example.com/post",
+ "inputBytes": 725,
+ "all": {
+  "extractionMethod": "json-ld",
+  "title": "Graph post title",
+  "markdown": "# Graph post title\n\nGraph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one.",
+  "text": "Graph post title\n\nGraph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. Graph body sentence number one. ",
+  "html": "<!DOCTYPE html><html><head><title>Post</title>\n\n</head><body><p>Body</p></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Post"
+ }
+}

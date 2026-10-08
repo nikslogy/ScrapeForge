@@ -1,0 +1,16 @@
+{
+ "id": "synthetic-jsonld-article",
+ "source": "synthetic",
+ "url": "https://news.example.com/2026/10/seawall",
+ "inputBytes": 888,
+ "all": {
+  "extractionMethod": "json-ld",
+  "title": "Council approves seawall & <flood> plan",
+  "markdown": "# Council approves seawall & <flood> plan\n\nThe council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall.\n\nConstruction starts in spring. Residents asked about access to the beach during the works. Residents asked about access to the beach during the works. Residents asked about access to the beach during the works.",
+  "text": "Council approves seawall & <flood> plan\n\nThe council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. The council voted 7-2 on Tuesday to fund the seawall. \n\nConstruction starts in spring. Residents asked about access to the beach during the works. Residents asked about access to the beach during the works. Residents asked about access to the beach during the works. ",
+  "html": "<!DOCTYPE html><html><head><title>Seawall | Example News</title>\n\n</head><body><article><h1>Seawall</h1><p>Short teaser.</p></article></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Seawall | Example News"
+ }
+}

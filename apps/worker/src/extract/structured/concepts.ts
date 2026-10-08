@@ -982,6 +982,12 @@ export interface FieldPlan {
    */
   readonly exactKeyFallback: boolean;
   readonly matchedBy: 'name' | 'description' | 'none';
+  /**
+   * A text location field whose name or description asks for more than the
+   * city ("City and state of the job", "cityCountry"): the address parts to
+   * add to the locality.
+   */
+  readonly addressDetail?: { readonly region: boolean; readonly country: boolean };
 }
 
 export interface SchemaPlan {
@@ -1046,7 +1052,42 @@ function planField(field: FieldSpec, index: number): FieldPlan {
   for (const c of concepts) for (const f of c.fit ?? []) fit.add(f);
   const keyPhrase = identifierTokens(name).join(' ');
   const exactKeyFallback = byName.length === 0 && concepts.length === 0 && keyPhrase.length > 0;
-  return { index, field, concepts, fit, keyPhrase, exactKeyFallback, matchedBy };
+  const addressDetail = concepts.some((c) => COMPOSABLE_LOCATIONS.has(c.id)) ? addressDetailOf(field) : undefined;
+  return { index, field, concepts, fit, keyPhrase, exactKeyFallback, matchedBy, ...(addressDetail ? { addressDetail } : {}) };
+}
+
+/** Concepts whose text value is a place a customer may want as "City, ST". */
+export const COMPOSABLE_LOCATIONS: ReadonlySet<string> = new Set(['location', 'city', 'address']);
+
+const REGION_WORDS = new Set(['state', 'states', 'region', 'regions', 'province', 'provinces', 'county', 'prefecture', 'territory', 'canton']);
+const COUNTRY_WORDS = new Set(['country', 'countries', 'nation']);
+const NEGATIONS = new Set(['without', 'excluding', 'except', 'no', 'not', 'omit', 'omitting', 'minus']);
+
+/**
+ * Which address parts beyond the locality a text field asks for, from the
+ * words of its name and description ("City and state" → region; "city,
+ * state and country" → both). A part named right after a negation ("city
+ * without the state") is not asked for. undefined when only the city is.
+ */
+export function addressDetailOf(field: Pick<FieldSpec, 'name' | 'type' | 'description'>): { region: boolean; country: boolean } | undefined {
+  if (field.type !== 'string' && field.type !== 'unknown') return undefined;
+  const words = [
+    ...identifierTokens(typeof field.name === 'string' ? field.name : ''),
+    '.',
+    ...(typeof field.description === 'string' ? (field.description.slice(0, 500).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) : []),
+  ];
+  let region = false;
+  let country = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const isRegion = REGION_WORDS.has(w);
+    const isCountry = COUNTRY_WORDS.has(w);
+    if (!isRegion && !isCountry) continue;
+    if (words.slice(Math.max(0, i - 3), i).some((p) => NEGATIONS.has(p))) continue;
+    if (isRegion) region = true;
+    if (isCountry) country = true;
+  }
+  return region || country ? { region, country } : undefined;
 }
 
 /** Property paths of a concept for an entity's families (family-specific first, then defaults). */

@@ -824,7 +824,7 @@ class ExtractionRun {
     } else {
       const g = checkGrounding(
         cell.v,
-        { blockText: ctx?.block.text, attrs: ctx?.block.attrs, recordText: ctx?.record?.text, documentText: this.prepared },
+        { blockText: ctx?.block.text, attrs: ctx?.block.attrs, recordText: ctx?.record?.text, recordAttrs: ctx?.recordAttrs, documentText: this.prepared },
         { derived: false },
       );
       if (!g.grounded || g.where === 'none') {

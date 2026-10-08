@@ -52,8 +52,10 @@ describe('Book', () => {
       language: 'en',
     });
     expect(res.records[0].author.pointer).toBe('/author/name');
-    expect(res.records[0].format.visibleInPage).toBe(true);
+    // A text field would get the enumeration URL, which the page never shows ("Paperback" is its label).
+    expect(res.records[0].format).toMatchObject({ visibleInPage: false, enumLabel: 'Paperback' });
     expect(res.records[0].pages.visibleInPage).toBe(true);
+    expect(res.records[0].pages.enumLabel).toBeUndefined();
   });
 
   it('rejects an isbn that is not one', () => {

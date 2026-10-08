@@ -1,0 +1,18 @@
+{
+ "id": "synthetic-no-body-tags",
+ "source": "synthetic",
+ "url": "https://min.example.com/",
+ "inputBytes": 1069,
+ "all": {
+  "extractionMethod": "readability",
+  "title": "Minimal page without structure tags",
+  "description": "A page that omits html, head and body.",
+  "markdown": "# Minimal page without structure tags\n\n## Omitted tags\n\nParagraph 1. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.\n\nParagraph 2. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.\n\nParagraph 3. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.\n\nParagraph 4. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.",
+  "text": "Omitted tagsParagraph 1. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. \nParagraph 2. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. \nParagraph 3. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. \nParagraph 4. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity.",
+  "html": "<html><head><title>Minimal page without structure tags</title><meta name=\"description\" content=\"A page that omits html, head and body.\">\n</head><body><h1>Omitted tags</h1><p>Paragraph 1. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. </p>\n<p>Paragraph 2. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. </p>\n<p>Paragraph 3. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. </p>\n<p>Paragraph 4. Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. They host anemones, barnacles, sea stars and small fish that tolerate rapid swings in temperature and salinity. </p></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Minimal page without structure tags",
+  "description": "A page that omits html, head and body."
+ }
+}

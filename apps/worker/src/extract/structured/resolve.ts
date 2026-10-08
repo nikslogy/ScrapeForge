@@ -3,7 +3,7 @@
 // pointer it was read from, and the raw value exactly as published.
 
 import { parseLocaleNumber, findNumericTokens } from '../validate/numbers.js';
-import { type Concept, type FieldPlan, type ValueKind, conceptsForName, outputMode, pathsFor } from './concepts.js';
+import { COMPOSABLE_LOCATIONS, type Concept, type FieldPlan, type ValueKind, conceptsForName, outputMode, pathsFor } from './concepts.js';
 import { type Entity, type Node, type RefIndex, childNode, indexNode, isRefOnly } from './entities.js';
 import { type Family, familiesOf } from './families.js';
 import { STRUCTURED_LIMITS } from './limits.js';
@@ -20,6 +20,8 @@ export interface Hit {
   readonly pointer: string;
   readonly kind: ValueKind;
   readonly notes: readonly HitNote[];
+  /** Pointers of the properties a composed value was built from (address parts). */
+  readonly composedFrom?: readonly string[];
 }
 
 /** Wrapper keys unwrapped per leaf kind, in order ({"@value"}, Brand.name, ImageObject.url, ...). */
@@ -158,6 +160,10 @@ export class Resolver {
   // ── structured entities ────────────────────────────────────
 
   private concept(node: Node, families: readonly Family[], c: Concept, plan: FieldPlan, allowOffered: boolean): Hit | undefined {
+    if (plan.addressDetail && COMPOSABLE_LOCATIONS.has(c.id)) {
+      const h = this.composedAddress(node, families, c, plan, plan.addressDetail);
+      if (h) return h;
+    }
     if (c.special) {
       const h = this.special(node, families, c, plan);
       if (h) return h;
@@ -355,6 +361,46 @@ export class Resolver {
       raw = raws.length === 1 ? raws[0] : raws;
     }
     return { concept: c.id, raw, itemId: at.itemId, pointer: at.pointer, kind: c.kind, notes: [...notes] };
+  }
+
+  /**
+   * "Austin, TX" from a PostalAddress {addressLocality: "Austin",
+   * addressRegion: "TX"} when the field asks for the state (and the country
+   * only when it asks for it). Only parts the data has are joined; without a
+   * locality, or without any requested extra part, nothing is composed and
+   * the ordinary paths (the locality alone) apply.
+   */
+  private composedAddress(node: Node, families: readonly Family[], c: Concept, plan: FieldPlan, want: { region: boolean; country: boolean }): Hit | undefined {
+    for (const path of ADDRESS_PATHS[families.find((f) => Object.hasOwn(ADDRESS_PATHS, f)) ?? 'default']) {
+      const notes: HitNote[] = [];
+      let address: Node | undefined = node;
+      for (const step of path) {
+        address = this.step(address, step, notes, 0);
+        if (!address) break;
+      }
+      if (!address || !isPlainObject(address.value)) continue;
+      const locality = this.leafNode(address, 'addressLocality', 'name');
+      if (!locality || typeof locality.value !== 'string') continue;
+      const parts: Node[] = [locality];
+      const region = want.region ? this.leafNode(address, 'addressRegion', 'name') : undefined;
+      if (region && typeof region.value === 'string') parts.push(region);
+      const country = want.country ? this.leafNode(address, 'addressCountry', 'name') : undefined;
+      if (country && typeof country.value === 'string') parts.push(country);
+      if (parts.length === 1) return undefined;
+      const texts = parts.map((p) => (p.value as string).trim());
+      // A locality that already carries the region ("Austin, TX") is not doubled.
+      if (texts.slice(1).every((t) => containsWordSequence(texts[0], t))) return undefined;
+      return {
+        concept: c.id,
+        raw: texts.join(', '),
+        itemId: address.itemId,
+        pointer: address.pointer,
+        kind: c.kind,
+        notes,
+        composedFrom: parts.map((p) => p.pointer),
+      };
+    }
+    return undefined;
   }
 
   // ── offers, prices, salaries ───────────────────────────────
@@ -614,6 +660,30 @@ export class Resolver {
     return undefined;
   }
 }
+
+function words(s: string): string[] {
+  return s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/** "Austin, TX" contains "TX"; "Austin" does not contain "US". */
+function containsWordSequence(hay: string, needle: string): boolean {
+  const h = words(hay);
+  const n = words(needle);
+  if (n.length === 0) return true;
+  outer: for (let i = 0; i + n.length <= h.length; i++) {
+    for (let j = 0; j < n.length; j++) if (h[i + j] !== n[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+/** Where an entity keeps its PostalAddress, per family (steps). */
+const ADDRESS_PATHS: Readonly<Record<string, ReadonlyArray<readonly string[]>>> = {
+  job: [['jobLocation', 'address'], ['jobLocation']],
+  event: [['location', 'address'], ['location']],
+  person: [['address'], ['homeLocation', 'address']],
+  default: [['address'], ['location', 'address']],
+};
 
 const OG_PRICE_KEYS = ['product:sale_price:amount', 'product:price:amount', 'og:price:amount'];
 

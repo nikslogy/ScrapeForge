@@ -8,6 +8,7 @@
 // 'unparseable', and an object where a number belongs is a 'type_mismatch'.
 
 import type { FieldSpec, FieldType, JsonSchema } from '../types.js';
+import { readAvailability, readWorkplace, workplaceTopic } from './booleans.js';
 import {
   findNumericTokens,
   hasCurrencyMarker,
@@ -49,7 +50,7 @@ export function normalizeValue(raw: unknown, field: FieldSpec, ctx: NormalizeCon
     case 'integer':
       return normalizeNumber(raw, field.type === 'integer', ctx);
     case 'boolean':
-      return normalizeBoolean(raw);
+      return normalizeBoolean(raw, field);
     case 'string':
       return normalizeString(raw, field, ctx);
     case 'array':
@@ -204,54 +205,10 @@ function finishNumber(value: number, steps: string[], integer: boolean): Normali
 // Booleans
 // ─────────────────────────────────────────────────────────────
 
-const TRUE_WORDS = new Set(['true', 'yes', 'y', '1', 'on', 'checked', 'enabled', 'available', 'in stock', 'instock', '✓', '✔', '✅']);
-const FALSE_WORDS = new Set(['false', 'no', 'n', '0', 'off', 'unchecked', 'disabled', 'unavailable', '✗', '✘', '❌']);
+// The lexicons live in booleans.ts: availability for any boolean field, the
+// remote/on-site lexicon only for fields about remote work.
 
-const SCHEMA_ORG_AVAILABILITY = new Map([
-  ['instock', true],
-  ['instoreonly', true],
-  ['onlineonly', true],
-  ['limitedavailability', true],
-  ['preorder', true],
-  ['presale', true],
-  ['backorder', true],
-  ['madetoorder', true],
-  ['outofstock', false],
-  ['soldout', false],
-  ['discontinued', false],
-]);
-
-// Negative phrases are removed before positive ones are looked for, so "not
-// available" and "notify me when back in stock" do not read as available.
-const FALSE_PATTERNS = [
-  /\bout[ -]?of[ -]?stock\b/g,
-  /\boutofstock\b/g,
-  /\bnot (?:currently |yet )?(?:in[ -]?stock|available)\b/g,
-  /\b(?:currently |temporarily )?unavailable\b/g,
-  /\bsold[ -]?out\b/g,
-  /\bno longer (?:available|in stock|sold)\b/g,
-  /\bno stock\b/g,
-  /\bdiscontinued\b/g,
-  /\bavailable soon\b/g,
-  /\bcoming soon\b/g,
-  /\bnot for sale\b/g,
-  /\b(?:e-?mail|alert|notify) me(?: when (?:it'?s )?(?:back )?(?:in stock|available))?\b/g,
-];
-
-const TRUE_PATTERNS = [
-  /\bin[ -]?stock\b/,
-  /\bavailable\b/,
-  /\badd(?:ed)? to (?:cart|basket|bag|trolley)\b/,
-  /\bbuy (?:it )?now\b/,
-  /\bpre[ -]?order\b/,
-  /\blimited (?:stock|availability|quantities)\b/,
-  /\bonly \d+ (?:left|remaining)\b/,
-  /\b(?:few left|low stock)\b/,
-  /\bready to ship\b/,
-  /\bships (?:today|tomorrow|in|within)\b/,
-];
-
-function normalizeBoolean(raw: unknown): NormalizeResult {
+function normalizeBoolean(raw: unknown, field: FieldSpec): NormalizeResult {
   if (typeof raw === 'boolean') return ok(raw, []);
   if (typeof raw === 'number') {
     if (raw === 1 || raw === 0) return ok(raw === 1, ['parse-boolean']);
@@ -260,33 +217,13 @@ function normalizeBoolean(raw: unknown): NormalizeResult {
   if (typeof raw !== 'string') return fail('type_mismatch', `expected a boolean, got ${describe(raw)}`);
   const text = raw.length > MAX_BOOLEAN_TEXT * 4 ? raw : cleanText(raw).toLowerCase();
   if (text.length > MAX_BOOLEAN_TEXT) return fail('unparseable', 'text is too long for a yes/no value');
-  const parsed = parseBooleanText(text);
-  if (parsed === 'ambiguous') return fail('ambiguous', `both available and unavailable in ${quote(text)}`);
+  const workplace = workplaceTopic(field);
+  const parsed = workplace ? readWorkplace(text, workplace) : readAvailability(text);
+  if (parsed === 'ambiguous') {
+    return fail('ambiguous', workplace ? `no clear remote/on-site answer in ${quote(text)}` : `both available and unavailable in ${quote(text)}`);
+  }
   if (parsed === null) return fail('unparseable', `not a yes/no value: ${quote(text)}`);
   return ok(parsed, ['parse-boolean']);
-}
-
-function parseBooleanText(text: string): boolean | 'ambiguous' | null {
-  const bare = text.replace(/[.!]+$/, '').trim();
-  if (TRUE_WORDS.has(bare)) return true;
-  if (FALSE_WORDS.has(bare)) return false;
-  const schemaOrg = /^(?:https?:\/\/)?(?:www\.)?schema\.org\/([a-z]+)$/.exec(bare);
-  const availability = schemaOrg ? SCHEMA_ORG_AVAILABILITY.get(schemaOrg[1]) : undefined;
-  if (availability !== undefined) return availability;
-
-  let rest = bare;
-  let negative = false;
-  for (const pattern of FALSE_PATTERNS) {
-    const stripped = rest.replace(pattern, ' ');
-    if (stripped !== rest) {
-      negative = true;
-      rest = stripped;
-    }
-  }
-  const positive = TRUE_PATTERNS.some((p) => p.test(rest));
-  if (negative && positive) return 'ambiguous';
-  if (negative) return false;
-  return positive ? true : null;
 }
 
 // ─────────────────────────────────────────────────────────────
