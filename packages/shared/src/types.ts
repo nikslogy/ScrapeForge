@@ -22,6 +22,10 @@ export interface ScrapeOptions {
   cacheTtl?: number;
   webhookUrl?: string;
   extractSchema?: Record<string, unknown>;
+  /** Return per-field evidence in metadata.extraction.evidence. */
+  includeEvidence?: boolean;
+  /** Spend cap for model calls of this request, USD (also capped by the worker's EXTRACT_MAX_COST_USD). */
+  maxLlmCostUsd?: number;
 }
 
 export type OutputFormat = 'html' | 'markdown' | 'text' | 'screenshot' | 'json';
@@ -63,8 +67,89 @@ export interface ScrapeResult {
     /** Page description resolved from `meta[description]` / og / twitter. */
     description?: string;
     costBreakdown: CostBreakdown;
+    /** Structured-extraction outcome; present when an extract schema was given. */
+    extraction?: ExtractionMetadata;
+    /** Where the time went: per-stage milliseconds and router tier attempts. */
+    timings?: TimingsMetadata;
   };
   error?: string;
+}
+
+// === Structured extraction metadata ===
+// Mirrors the engine's ExtractionOutcome (apps/worker/src/extract/types.ts)
+// without its data and attempt log; see docs/engine/DESIGN.md.
+
+export type ExtractionStatus = 'complete' | 'partial' | 'failed';
+
+export type ExtractionMethod = 'structured-data' | 'recipe' | 'llm' | 'mixed' | 'none';
+
+export type ExtractionMissingReason =
+  | 'not_found'
+  | 'not_processed'
+  | 'ambiguous'
+  | 'provider_failure'
+  | 'truncated'
+  | 'rejected_ungrounded';
+
+export interface ExtractionMissingField {
+  /** JSON pointer into content.json, e.g. "/price" or "/items/3/price". */
+  path: string;
+  reason: ExtractionMissingReason;
+  detail?: string;
+}
+
+export interface ExtractionEvidence {
+  path: string;
+  source: 'structured-data' | 'recipe' | 'dom' | 'llm';
+  blockId?: string;
+  structuredId?: string;
+  excerpt?: string;
+  raw?: unknown;
+  normalization?: string[];
+  grounded: boolean;
+  derived?: boolean;
+  note?: string;
+}
+
+export interface ExtractionScope {
+  url: string;
+  snapshotHash: string;
+  description: 'page-snapshot';
+  blocksTotal: number;
+  blocksSentToModel: number;
+  recordsDetected: number;
+  truncated: boolean;
+}
+
+export interface ExtractionLlmSummary {
+  /** Model calls made, failed ones included. */
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** Distinct models that served the calls (resolved upstream model when reported). */
+  models: string[];
+}
+
+export interface ExtractionMetadata {
+  status: ExtractionStatus;
+  method: ExtractionMethod;
+  schemaValid: boolean;
+  schemaErrors?: string[];
+  missing: ExtractionMissingField[];
+  warnings: string[];
+  scope: ExtractionScope;
+  llm: ExtractionLlmSummary;
+  /** Only when the request set includeEvidence. */
+  evidence?: ExtractionEvidence[];
+}
+
+export interface TimingsMetadata {
+  /** Stage → milliseconds (fetch, content, extract, document, structured, recipe, llm, validate, …). */
+  stages: Record<string, number>;
+  /** Router tier attempts in order. */
+  attempts: Array<{ tier: number; ms: number; outcome: 'accepted' | 'rejected' | 'error'; reason?: string }>;
+  totalMs: number;
 }
 
 export interface CostBreakdown {

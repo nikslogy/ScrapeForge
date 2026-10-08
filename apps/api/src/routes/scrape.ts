@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { ScrapeJobData, createCacheKey, checkPublicUrl } from '@scrapeforge/shared';
+import { customerSchema, extractionOptions, jobRetryOptions } from './extract.js';
 
 // Empty strings coming from form-style API explorers (Scalar, Swagger UI)
 // should be treated as "field not provided" rather than "invalid value".
@@ -28,7 +29,8 @@ const ScrapeRequestSchema = z.object({
   blockResources: z.boolean().default(true),
   cacheTtl: z.number().min(0).max(2592000).default(3600),
   webhookUrl: optionalUrl,
-  extractSchema: z.record(z.unknown()).optional(),
+  extractSchema: customerSchema.optional(),
+  ...extractionOptions,
 });
 
 export async function scrapeRoutes(app: FastifyInstance) {
@@ -67,6 +69,8 @@ export async function scrapeRoutes(app: FastifyInstance) {
       formats: body.formats,
       proxy: body.proxy,
       extractSchema: body.extractSchema,
+      // Only present when set, so keys of plain requests are unchanged.
+      includeEvidence: body.includeEvidence || undefined,
     })}`;
 
     if (body.cacheTtl > 0) {
@@ -97,8 +101,7 @@ export async function scrapeRoutes(app: FastifyInstance) {
     const job = await queue.add(jobId, jobData, {
       jobId,
       priority: jobData.priority,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
+      ...jobRetryOptions(isSync),
       removeOnComplete: { age: 3600 },
       removeOnFail: { age: 86400 },
     });

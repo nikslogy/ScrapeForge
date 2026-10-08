@@ -69,6 +69,10 @@ const queues = {
 const queueEvents = {
   realtime: new QueueEvents(QUEUE_NAMES.SCRAPE_REALTIME, { connection: bullConnection }),
 };
+// Every in-flight synchronous request waits via job.waitUntilFinished(),
+// which adds a 'closing' listener here; Node warns (MaxListenersExceeded)
+// beyond 10. Bounded rather than unlimited so a real leak still warns.
+queueEvents.realtime.setMaxListeners(10_000);
 
 // --- Decorate Fastify ---
 app.decorate('redis', redis);

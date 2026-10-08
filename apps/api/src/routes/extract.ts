@@ -7,12 +7,90 @@ const emptyToUndefined = (v: unknown) => (v === '' || v === null ? undefined : v
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
 const optionalStr = z.preprocess(emptyToUndefined, z.string().optional());
 
+// Cheap pre-checks before a job is queued. The worker normalizes and
+// validates the schema fully (refs, patterns, property counts) and reports
+// problems as an `invalid_schema:*` extraction warning.
+export const MAX_SCHEMA_BYTES = 64 * 1024;
+export const MAX_SCHEMA_DEPTH = 10;
+// Raw JSON nesting beyond this is rejected outright (bounds the walk below).
+const MAX_JSON_NESTING = 64;
+// Keywords whose value maps names to subschemas: the map itself is not a level.
+const SCHEMA_MAPS = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas']);
+// Keywords holding data, not schemas.
+const SCHEMA_DATA = new Set(['enum', 'const', 'default', 'examples', 'example']);
+
+/**
+ * Nesting depth in schema levels: the root is 0 and every nested subschema
+ * (or nested shorthand object) adds one. Infinity for JSON nested deeper
+ * than MAX_JSON_NESTING. Iterative, so hostile input cannot overflow the stack.
+ */
+export function schemaDepth(schema: unknown): number {
+  let max = 0;
+  const stack: Array<{ value: unknown; level: number; nesting: number }> = [{ value: schema, level: 0, nesting: 0 }];
+  while (stack.length > 0) {
+    const { value, level, nesting } = stack.pop()!;
+    if (nesting > MAX_JSON_NESTING) return Number.POSITIVE_INFINITY;
+    if (Array.isArray(value)) {
+      for (const item of value) stack.push({ value: item, level, nesting: nesting + 1 });
+      continue;
+    }
+    if (typeof value !== 'object' || value === null) continue;
+    max = Math.max(max, level);
+    for (const [key, child] of Object.entries(value)) {
+      if (SCHEMA_DATA.has(key) || typeof child !== 'object' || child === null) continue;
+      if (SCHEMA_MAPS.has(key) && !Array.isArray(child)) {
+        for (const sub of Object.values(child)) stack.push({ value: sub, level: level + 1, nesting: nesting + 2 });
+      } else {
+        stack.push({ value: child, level: level + 1, nesting: nesting + 1 });
+      }
+    }
+  }
+  return max;
+}
+
+/** Why a customer schema is refused before queueing, or null. */
+export function schemaLimitIssue(schema: unknown): string | null {
+  let bytes: number;
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(schema) ?? '', 'utf8');
+  } catch {
+    return 'Schema is not serializable JSON';
+  }
+  if (bytes > MAX_SCHEMA_BYTES) return `Schema is larger than ${MAX_SCHEMA_BYTES} bytes`;
+  if (schemaDepth(schema) > MAX_SCHEMA_DEPTH) return `Schema is nested deeper than ${MAX_SCHEMA_DEPTH} levels`;
+  return null;
+}
+
+/** Customer schema: a non-empty object within the size and depth limits. */
+export const customerSchema = z.record(z.unknown()).superRefine((s, ctx) => {
+  const issue = schemaLimitIssue(s);
+  if (issue) ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue });
+});
+
+/** Request options of the extraction engine (also accepted by /v1/scrape). */
+export const extractionOptions = {
+  includeEvidence: z.boolean().default(false),
+  maxLlmCostUsd: z.number().min(0).max(1).optional(),
+};
+
+/**
+ * Queue options. A synchronous caller is waiting on the HTTP response, so a
+ * failing job gets one quick retry (permanent failures are unrecoverable in
+ * the worker and are not retried at all); webhook jobs have time to back off.
+ */
+export function jobRetryOptions(isSync: boolean): { attempts: number; backoff: { type: 'fixed' | 'exponential'; delay: number } } {
+  return isSync
+    ? { attempts: 2, backoff: { type: 'fixed', delay: 250 } }
+    : { attempts: 3, backoff: { type: 'exponential', delay: 1000 } };
+}
+
 const ExtractRequestSchema = z.object({
   url: z.string().url('Must be a valid URL'),
-  schema: z.record(z.unknown()).refine(
+  schema: customerSchema.refine(
     (s) => Object.keys(s).length > 0,
     { message: 'Schema must have at least one property' },
   ),
+  ...extractionOptions,
   formats: z
     .array(z.enum(['html', 'markdown', 'text', 'screenshot', 'json']))
     .default(['json']),
@@ -81,6 +159,8 @@ export async function extractRoutes(app: FastifyInstance) {
       formats: formatsForKey,
       proxy: body.proxy,
       extractSchema: body.schema,
+      // Only present when set, so keys of plain requests are unchanged.
+      includeEvidence: body.includeEvidence || undefined,
     })}`;
     if (body.cacheTtl > 0) {
       const cached = await redis.get(cacheKey);
@@ -118,8 +198,7 @@ export async function extractRoutes(app: FastifyInstance) {
     const job = await queue.add(jobId, jobData, {
       jobId,
       priority: jobData.priority,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
+      ...jobRetryOptions(isSync),
       removeOnComplete: { age: 3600 },
       removeOnFail: { age: 86400 },
     });

@@ -134,10 +134,37 @@ paths:
     post:
       summary: Extract structured data with AI
       description: |
-        Scrapes the page and uses LLM-powered extraction to return structured
-        JSON matching the provided schema. Falls back to markdown content if
-        AI extraction fails. Required fields: `url` + `schema`. Omit
+        Scrapes the page and returns structured JSON matching the provided
+        schema in `content.json`. Required fields: `url` + `schema`. Omit
         `webhookUrl` entirely for a synchronous response.
+
+        The engine tries cheap deterministic sources first (structured data
+        such as JSON-LD/microdata, then a learned extraction recipe for the
+        site's template) and asks a model only for what is still missing.
+        Every value is traced to the page: model answers that cannot be found
+        on the page are rejected, never returned. Markdown content is
+        returned alongside.
+
+        How to read the result (`metadata.extraction`):
+        * `status: complete` — schema-valid data, nothing truncated, and every
+          missing field is genuinely absent from the page (`not_found` on a
+          field the schema allows to be null or left out).
+        * `status: partial` — usable data, but something is missing for
+          another reason (rejected, ambiguous, provider failure, truncated
+          input), or the data does not validate against your schema
+          (`schemaValid: false`, see `schemaErrors`).
+        * `status: failed` — no usable data: blocked/challenge page, invalid
+          schema, provider failure with nothing else to go on, or nothing
+          found. `content.json` is omitted. Failed extractions are never
+          cached.
+        `missing` lists each absent value with its JSON pointer and reason;
+        `warnings` are machine-readable notes (e.g. `citation_mismatch:/price`,
+        `structured_value_not_visible:sku`, `source_page_blocked:challenge_page`,
+        `invalid_schema:<code>: <message>`).
+
+        Synchronous jobs are retried once after 250 ms; webhook jobs up to
+        three times with exponential backoff. Unreachable or private hosts
+        are not retried.
       tags: [Extract]
       requestBody:
         required: true
@@ -146,16 +173,38 @@ paths:
             schema:
               $ref: "#/components/schemas/ExtractRequest"
             examples:
-              productPage:
-                summary: Extract product fields
+              shorthand:
+                summary: Shorthand schema ("type — description")
                 value:
                   url: https://example.com/product/123
                   schema:
+                    title: "string — product title"
+                    price: "number — current price"
+                    currency: "string — ISO 4217 code"
+                    inStock: "boolean — whether the item can be bought"
+              listing:
+                summary: Every product card on a listing page, with evidence
+                value:
+                  url: https://example.com/collections/all
+                  includeEvidence: true
+                  maxLlmCostUsd: 0.01
+                  schema:
+                    products:
+                      - name: "string — product name"
+                        price: "number — current price"
+                        url: "url — product page"
+              productPage:
+                summary: Extract product fields (JSON Schema)
+                value:
+                  url: https://example.com/product/123
+                  schema:
+                    type: object
                     properties:
                       title: { type: string }
-                      price: { type: string }
+                      price: { type: number }
                       currency: { type: string }
                       inStock: { type: boolean }
+                    required: [title, price]
               articleMetadata:
                 summary: Extract article metadata
                 value:
@@ -355,6 +404,45 @@ components:
             If provided, results are delivered asynchronously via POST webhook
             and the API returns `202 Queued` immediately. **Omit this field
             entirely** (do not send `""`) for a synchronous response.
+        extractSchema:
+          $ref: "#/components/schemas/CustomerSchema"
+        includeEvidence:
+          type: boolean
+          default: false
+          description: |
+            Return per-field evidence in `metadata.extraction.evidence`: where
+            each value came from (structured data item, recipe, or the page
+            block the model cited), the raw text before normalization, the
+            normalization steps applied, and whether it was verified on the page.
+        maxLlmCostUsd:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Spend cap for model calls of this request, in USD. The server's own
+            cap (default $0.05) applies when it is lower. When the cap is
+            reached, fields still unresolved are reported as missing with
+            reason `provider_failure` (`budget_exhausted`).
+
+    CustomerSchema:
+      type: object
+      description: |
+        What to extract. Either a JSON Schema (an object, an array of
+        objects, or an object wrapping exactly one array of objects, which is
+        kept as a wrapper in the output) or the shorthand form
+        `{"field": "type — description"}` with types `string`, `number`,
+        `integer`, `boolean`, `url`, `date`, `datetime`, nested objects and
+        lists written as `"string[]"` or as one-item arrays such as `["string"]` or `[{"name": "string"}]`.
+        Shorthand fields are optional and nullable; a shorthand schema with
+        one array field is a listing, otherwise the engine returns an array
+        when the page lists several matching items and an object otherwise.
+        Mark inferred fields (a summary, a classification) with
+        `"x-derived": true`: they are exempt from verbatim grounding and are
+        labelled `derived` in evidence. Limits: 64 KB serialized, 10 levels
+        of nesting (checked before queueing, 400); local `$ref` only, safe
+        `pattern`s only, 300 properties (checked by the worker: reported as
+        an `invalid_schema:*` warning with `status: failed`).
+      additionalProperties: true
 
     ExtractRequest:
       allOf:
@@ -363,14 +451,7 @@ components:
           required: [schema]
           properties:
             schema:
-              type: object
-              description: JSON Schema describing the data you want to extract
-              example:
-                properties:
-                  title:
-                    type: string
-                  price:
-                    type: string
+              $ref: "#/components/schemas/CustomerSchema"
 
     ScrapeResult:
       type: object
@@ -395,11 +476,23 @@ components:
               type: string
               description: Base64-encoded PNG (only when screenshot=true)
             json:
-              type: object
-              description: Structured data from AI extraction
+              description: |
+                Extracted data: an object, an array of records, or the wrapper
+                object your schema declared. Omitted when the extraction failed.
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - type: array
+                  items:
+                    type: object
+                    additionalProperties: true
         metadata:
           type: object
           properties:
+            extraction:
+              $ref: "#/components/schemas/ExtractionMetadata"
+            timings:
+              $ref: "#/components/schemas/Timings"
             tierUsed:
               type: integer
               minimum: 1
@@ -427,6 +520,127 @@ components:
                   type: number
                 total:
                   type: number
+
+    ExtractionMetadata:
+      type: object
+      description: Outcome of structured extraction (present when a schema was given).
+      required: [status, method, schemaValid, missing, warnings, scope, llm]
+      properties:
+        status:
+          type: string
+          enum: [complete, partial, failed]
+          description: See the /v1/extract description for exact semantics.
+        method:
+          type: string
+          enum: [structured-data, recipe, llm, mixed, none]
+          description: Where the returned values came from.
+        schemaValid:
+          type: boolean
+          description: content.json validates against your schema. Never true for failed extractions.
+        schemaErrors:
+          type: array
+          items: { type: string }
+        missing:
+          type: array
+          items:
+            type: object
+            required: [path, reason]
+            properties:
+              path:
+                type: string
+                description: JSON pointer into content.json ("/price", "/items/3/price"; "/items" for the list itself).
+              reason:
+                type: string
+                enum: [not_found, not_processed, ambiguous, provider_failure, truncated, rejected_ungrounded]
+                description: |
+                  `not_found` — not on the page. `not_processed` — part of the page was not
+                  sent to the model (input too large) or the page was blocked.
+                  `ambiguous` — several conflicting values (e.g. a price range).
+                  `provider_failure` — the model call failed (detail: auth, quota,
+                  budget_exhausted, no_model_configured, …). `truncated` — the model's
+                  output was cut off. `rejected_ungrounded` — the model reported a value
+                  that is not on the page.
+              detail:
+                type: string
+        warnings:
+          type: array
+          items: { type: string }
+        scope:
+          type: object
+          properties:
+            url: { type: string }
+            snapshotHash:
+              type: string
+              description: sha256 of the HTML the extraction ran on.
+            description:
+              type: string
+              enum: [page-snapshot]
+              description: What "complete" refers to.
+            blocksTotal: { type: integer }
+            blocksSentToModel: { type: integer }
+            recordsDetected:
+              type: integer
+              description: Size of the largest group of repeated items detected on the page.
+            truncated:
+              type: boolean
+              description: Part of the page was not sent to the model (status is then never complete).
+        llm:
+          type: object
+          properties:
+            calls:
+              type: integer
+              description: Model calls made, failed ones included.
+            inputTokens: { type: integer }
+            outputTokens: { type: integer }
+            costUsd: { type: number }
+            models:
+              type: array
+              items: { type: string }
+        evidence:
+          type: array
+          description: Only with includeEvidence.
+          items:
+            type: object
+            required: [path, source, grounded]
+            properties:
+              path: { type: string }
+              source:
+                type: string
+                enum: [structured-data, recipe, dom, llm]
+              blockId: { type: string }
+              structuredId: { type: string }
+              excerpt: { type: string }
+              raw: {}
+              normalization:
+                type: array
+                items: { type: string }
+              grounded:
+                type: boolean
+                description: The raw value was verified on the page.
+              derived: { type: boolean }
+              note: { type: string }
+
+    Timings:
+      type: object
+      description: Where the time went, for this request.
+      properties:
+        stages:
+          type: object
+          additionalProperties: { type: number }
+          description: Stage → milliseconds (fetch, content, extract, document, structured, recipe, llm, validate, …).
+        attempts:
+          type: array
+          description: Router tier attempts in order.
+          items:
+            type: object
+            properties:
+              tier: { type: integer }
+              ms: { type: number }
+              outcome:
+                type: string
+                enum: [accepted, rejected, error]
+              reason: { type: string }
+        totalMs: { type: number }
 
     JobQueued:
       type: object

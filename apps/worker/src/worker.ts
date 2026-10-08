@@ -6,12 +6,22 @@ import {
   ScrapeResult,
   QUEUE_NAMES,
   createCacheKey,
+  type ExtractionMetadata,
+  type ScrapeOptions,
 } from '@scrapeforge/shared';
 import { SmartRouter } from './engine/router.js';
 import { BrowserPool } from './browser/pool.js';
 import { extractContent } from './extraction/pipeline.js';
 import { calculateQualityScore } from './extraction/quality-scorer.js';
-import { AiExtractor } from './extraction/ai-extractor.js';
+import {
+  blockedFromQualitySignals,
+  createDefaultModelClient,
+  extractStructured,
+  flushRecipeLearning,
+  RecipeStore,
+  type ExtractionOutcome,
+  type ModelClient,
+} from './extract/index.js';
 import { deliverWebhook } from './delivery/webhook.js';
 import { SseEmitter } from './delivery/sse-emitter.js';
 import {
@@ -20,8 +30,11 @@ import {
   scrapeCost,
   browserPoolSize,
   llmCostTotal,
+  observeStages,
+  observeTierAttempts,
   startMetricsServer,
 } from './metrics.js';
+import { StageTracer } from './tracing.js';
 
 // --- Connections ---
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -61,8 +74,39 @@ const router = new SmartRouter(
   (ctx) => browserPool.release(ctx),
 );
 
-// --- AI Extractor + SSE ---
-const aiExtractor = new AiExtractor(redis);
+// --- Structured extraction engine + SSE ---
+// One model client per process (its circuit breaker is process-wide). Its
+// configuration warnings are logged once; they never contain API keys.
+let modelClient: ModelClient | null = null;
+try {
+  modelClient = createDefaultModelClient(process.env);
+  for (const w of modelClient.warnings) console.warn(`[extract] ${w}`);
+  console.log(`[extract] models: ${modelClient.models.map((m) => m.key).join(', ') || 'none (schema extraction limited to structured data and recipes)'}`);
+} catch (err) {
+  console.error(`[extract] model client disabled: ${(err as Error).message}`);
+}
+
+// Recipes live in the worker's Redis (keys recipe:v1:*, 14-day TTL).
+const recipeStore = new RecipeStore({
+  get: (key) => redis.get(key),
+  set: (key, value, mode, ttlSec) => redis.set(key, value, mode, ttlSec),
+  del: (key) => redis.del(key),
+});
+
+const DEFAULT_MAX_LLM_COST_USD = 0.05;
+const MAX_LLM_COST_USD = (() => {
+  const raw = process.env.EXTRACT_MAX_COST_USD;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_LLM_COST_USD;
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0) return value;
+  console.warn(`[extract] EXTRACT_MAX_COST_USD is not a non-negative number; using ${DEFAULT_MAX_LLM_COST_USD}`);
+  return DEFAULT_MAX_LLM_COST_USD;
+})();
+
+// The extraction deadline leaves this much of the job timeout for writing
+// and delivering the result.
+const DEADLINE_SAFETY_MARGIN_MS = 2_000;
+
 const sseEmitter = new SseEmitter(redis);
 
 // --- Cost lookup (compute only, proxy cost comes from router) ---
@@ -74,9 +118,59 @@ const TIER_COMPUTE_COST: Record<number, number> = {
   5: 0.000_80,
 };
 
+// --- Extraction helpers ---
+
+function extractionMetadata(outcome: ExtractionOutcome, includeEvidence: boolean): ExtractionMetadata {
+  const models = [...new Set(outcome.llm.attempts.map((a) => a.resolvedModel ?? `${a.provider}:${a.model}`))];
+  const meta: ExtractionMetadata = {
+    status: outcome.status,
+    method: outcome.method,
+    schemaValid: outcome.schemaValid,
+    missing: outcome.missing,
+    warnings: outcome.warnings,
+    scope: outcome.scope,
+    llm: {
+      calls: outcome.llm.calls,
+      inputTokens: outcome.llm.inputTokens,
+      outputTokens: outcome.llm.outputTokens,
+      costUsd: outcome.llm.costUsd,
+      models,
+    },
+  };
+  if (outcome.schemaErrors) meta.schemaErrors = outcome.schemaErrors;
+  if (includeEvidence) meta.evidence = outcome.evidence;
+  return meta;
+}
+
+/** Metadata for an engine crash (a bug, never a page or model problem). */
+function engineErrorMetadata(url: string): ExtractionMetadata {
+  return {
+    status: 'failed',
+    method: 'none',
+    schemaValid: false,
+    missing: [],
+    warnings: ['engine_error'],
+    scope: { url, snapshotHash: '', description: 'page-snapshot', blocksTotal: 0, blocksSentToModel: 0, recordsDetected: 0, truncated: false },
+    llm: { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, models: [] },
+  };
+}
+
+function wantsExtraction(options: ScrapeOptions): options is ScrapeOptions & { extractSchema: Record<string, unknown> } {
+  return Boolean(options.extractSchema) && Object.keys(options.extractSchema as object).length > 0;
+}
+
+function llmSpendCap(options: ScrapeOptions): number {
+  const requested = options.maxLlmCostUsd;
+  return typeof requested === 'number' && Number.isFinite(requested) && requested >= 0
+    ? Math.min(requested, MAX_LLM_COST_USD)
+    : MAX_LLM_COST_USD;
+}
+
 // --- Job Processor ---
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
   const { jobId, url, options, userId, apiKeyId } = job.data;
+  const jobStart = Date.now();
+  const tracer = new StageTracer();
 
   console.log(`[${jobId}] Processing: ${url}`);
   await job.updateProgress(10);
@@ -84,39 +178,11 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
 
   try {
     // ── Stage 1: Scrape ────────────────────────────────
-    const rr = await router.route(url, options);
+    const rr = await tracer.time('fetch', () => router.route(url, options, tracer));
     await job.updateProgress(40);
     await sseEmitter.emitHeaders(jobId, rr.statusCode, {});
 
-    // ── Stage 2: Content extraction ────────────────────
-    const extracted = await extractContent(
-      rr.html,
-      url,
-      options.formats || ['markdown'],
-    );
-    await job.updateProgress(60);
-
-    const firstFormat = Object.keys(extracted)[0] as string | undefined;
-    if (firstFormat) {
-      await sseEmitter.emitContent(jobId, firstFormat, String((extracted as any)[firstFormat] || ''));
-    }
-
-    // ── Stage 3: AI extraction (if schema provided) ────
-    let llmCost = 0;
-    if (options.extractSchema && Object.keys(options.extractSchema).length > 0) {
-      try {
-        const aiResult = await aiExtractor.extract(rr.html, url, options.extractSchema);
-        extracted.json = aiResult.data;
-        llmCost = aiResult.llmCost;
-        console.log(`[${jobId}] AI extraction via ${aiResult.route}, cost $${llmCost.toFixed(6)}`);
-        await sseEmitter.emitExtraction(jobId, aiResult.data);
-      } catch (aiErr) {
-        console.warn(`[${jobId}] AI extraction failed:`, (aiErr as Error).message);
-      }
-    }
-    await job.updateProgress(80);
-
-    // ── Stage 4: Quality scoring + cost ────────────────
+    // Quality first: the extraction engine needs to know about block pages.
     const quality = calculateQualityScore(
       rr.html,
       rr.statusCode,
@@ -124,6 +190,62 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       rr.latencyMs,
     );
 
+    // ── Stage 2: content + structured extraction (both only need rr.html) ──
+    const timeoutMs = options.timeout ?? 60_000;
+    const deadlineMs = jobStart + timeoutMs - Math.min(DEADLINE_SAFETY_MARGIN_MS, timeoutMs * 0.1);
+    const includeEvidence = options.includeEvidence === true;
+    const sourceBlocked = blockedFromQualitySignals(quality, rr.statusCode);
+
+    const [extracted, outcome] = await Promise.all([
+      tracer.time('content', () => extractContent(rr.html, url, options.formats || ['markdown'])),
+      wantsExtraction(options)
+        ? tracer.time('extract', async (): Promise<ExtractionOutcome | null> => {
+            try {
+              return await extractStructured(
+                {
+                  html: rr.html,
+                  url,
+                  schema: options.extractSchema,
+                  // Recipes are scoped per customer; jobs always carry a userId from auth.
+                  tenantId: userId || 'anonymous',
+                  deadlineMs,
+                  maxCostUsd: llmSpendCap(options),
+                  includeEvidence,
+                },
+                { modelClient, recipeStore, tracer, ...(sourceBlocked ? { sourceBlocked } : {}) },
+              );
+            } catch (err) {
+              console.error(`[${jobId}] Extraction engine error:`, (err as Error).message);
+              return null;
+            }
+          })
+        : Promise.resolve(null),
+    ]);
+    await job.updateProgress(80);
+
+    const firstFormat = Object.keys(extracted)[0] as string | undefined;
+    if (firstFormat) {
+      await sseEmitter.emitContent(jobId, firstFormat, String((extracted as any)[firstFormat] || ''));
+    }
+
+    let extraction: ExtractionMetadata | undefined;
+    const llmCost = outcome?.llm.costUsd ?? 0;
+    if (wantsExtraction(options)) {
+      if (outcome) {
+        extraction = extractionMetadata(outcome, includeEvidence);
+        if (outcome.data !== null) {
+          extracted.json = outcome.data;
+          await sseEmitter.emitExtraction(jobId, outcome.data);
+        }
+        console.log(
+          `[${jobId}] Extraction ${outcome.status} via ${outcome.method}: ${outcome.llm.calls} model call(s), $${llmCost.toFixed(6)}`,
+        );
+      } else {
+        extraction = engineErrorMetadata(url);
+      }
+    }
+
+    // ── Stage 3: cost ──────────────────────────────────
     const computeCost = TIER_COMPUTE_COST[rr.tierUsed] ?? 0.0005;
     const totalCost = computeCost + rr.proxyCost + llmCost;
 
@@ -134,6 +256,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       ...contentFields
     } = extracted;
 
+    const trace = tracer.snapshot();
     const result: ScrapeResult = {
       jobId,
       url,
@@ -159,34 +282,25 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
           llm: llmCost,
           total: totalCost,
         },
+        ...(extraction ? { extraction } : {}),
+        timings: { stages: trace.stages, attempts: trace.attempts, totalMs: trace.totalMs },
       },
     };
 
-    // ── Stage 5: Cache + persist ───────────────────────
+    // ── Stage 4: Cache + persist ───────────────────────
     //
-    // Cache key incorporates `extractSchema` so two callers with different
-    // schemas don't collide on the same URL. We also refuse to cache an
-    // "extract" request that came back with no JSON (LLM rate-limit /
-    // truncation) — otherwise a poisoned entry would mask the failure on
-    // every subsequent call for the cacheTtl window.
-    if (options.cacheTtl && options.cacheTtl > 0) {
-      const askedForJson = Boolean(options.extractSchema);
-      const json = result.content.json;
-      // Listing-page extractions now produce arrays — an empty array is just
-      // as poisoned as an empty object, so check both shapes.
-      const jsonIsEmpty =
-        !json ||
-        (Array.isArray(json) ? json.length === 0 : Object.keys(json).length === 0);
-      const poisoned = askedForJson && jsonIsEmpty;
-
-      if (!poisoned) {
-        const cacheKeyStr = `cache:${createCacheKey(url, {
-          formats: options.formats,
-          proxy: options.proxy,
-          extractSchema: options.extractSchema,
-        })}`;
-        await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
-      }
+    // The cache key includes `extractSchema` (and includeEvidence when set)
+    // so different requests never collide. A failed extraction (block page,
+    // provider outage, nothing found) is never cached: it would mask the
+    // failure on every later call for the cacheTtl window.
+    if (options.cacheTtl && options.cacheTtl > 0 && extraction?.status !== 'failed') {
+      const cacheKeyStr = `cache:${createCacheKey(url, {
+        formats: options.formats,
+        proxy: options.proxy,
+        extractSchema: options.extractSchema,
+        includeEvidence: includeEvidence || undefined,
+      })}`;
+      await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
     }
 
     await redis.set(`result:${jobId}`, JSON.stringify(result), 'EX', 3600);
@@ -211,8 +325,10 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     scrapeDuration.observe({ tier: String(rr.tierUsed) }, rr.latencyMs / 1000);
     scrapeCost.observe({ tier: String(rr.tierUsed) }, totalCost);
     if (llmCost > 0) llmCostTotal.inc(llmCost);
+    observeStages(trace);
+    observeTierAttempts(trace);
 
-    // ── Stage 6: Webhook delivery ──────────────────────
+    // ── Stage 5: Webhook delivery ──────────────────────
     if (options.webhookUrl) {
       deliverWebhook(
         options.webhookUrl,
@@ -227,16 +343,22 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     await job.updateProgress(100);
 
     console.log(
-      `[${jobId}] Completed in ${rr.latencyMs}ms (Tier ${rr.tierUsed}, proxy ${rr.proxyTier}, quality ${quality.score}, llm $${llmCost.toFixed(6)})`,
+      `[${jobId}] Completed in ${trace.totalMs}ms (Tier ${rr.tierUsed}, proxy ${rr.proxyTier}, quality ${quality.score}, llm $${llmCost.toFixed(6)})`,
     );
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[${jobId}] Failed:`, errorMessage);
     scrapeRequestsTotal.inc({ tier: '0', status: 'failed', domain: new URL(url).hostname });
+    const trace = tracer.snapshot();
+    observeStages(trace);
+    observeTierAttempts(trace);
 
-    const permanent = /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|private.*address|All tiers exhausted/i.test(errorMessage);
-
+    // Retrying cannot help: bad hosts, blocked (private) destinations, exhausted tiers.
+    const permanent =
+      /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|OUTBOUND_BLOCKED|Blocked by SSRF guard|DNS lookup failed|private.*address|All tiers exhausted/i.test(
+        errorMessage,
+      );
 
     const failResult: ScrapeResult = {
       jobId,
@@ -250,6 +372,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
         cached: false,
         qualityScore: 0,
         costBreakdown: { compute: 0, proxy: 0, captcha: 0, llm: 0, total: 0 },
+        timings: { stages: trace.stages, attempts: trace.attempts, totalMs: trace.totalMs },
       },
       error: errorMessage,
     };
@@ -316,6 +439,12 @@ console.log(
 async function shutdown() {
   console.log('Shutting down workers...');
   await Promise.all(workers.map((w) => w.close()));
+  // Background recipe learning writes to Redis: let it finish (bounded)
+  // before the connection closes.
+  await Promise.race([
+    flushRecipeLearning(),
+    new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
+  ]);
   await browserPool.shutdown();
   await redis.quit();
   await pg.end();

@@ -165,6 +165,8 @@ export interface FieldEvidence {
   grounded: boolean;
   /** Value is an inference (summary, sentiment), not a verbatim fact. */
   derived?: boolean;
+  /** Why the evidence is weaker than it looks (e.g. the value was found outside the cited block). */
+  note?: string;
 }
 
 export type MissingReason =

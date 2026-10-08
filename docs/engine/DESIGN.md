@@ -30,9 +30,10 @@ Source plan: "ScrapeForge: engine research and implementation brief" (7 Oct 2026
 | `schema/` | Customer schema → `NormalizedSchema` (JSON Schema or shorthand), limits on size/depth/refs/patterns | `normalizeSchema(input): NormalizedSchema` (throws `SchemaError`) |
 | `validate/` | Ajv validation with bounded compiled-validator cache; value normalization in code; grounding checks | `validateOutput`, `normalizeValue`, `checkGrounding` |
 | `structured/` | Deterministic mapping of JSON-LD / microdata / embedded JSON / meta to schema fields | `extractFromStructuredData(doc, schema)` |
-| `recipe/` | Recipe validation, safe interpreter, Redis store with candidate→active lifecycle and drift invalidation, LLM recipe proposal | `validateRecipe`, `runRecipe`, `RecipeStore`, `proposeRecipe` |
+| `recipe/` | Recipe validation, safe interpreter, Redis store with candidate→active lifecycle and drift invalidation, deterministic induction, LLM recipe proposal prompt/parser | `validateRecipe`, `runRecipe`, `RecipeStore`, `induceRecipe`, `buildRecipePrompt`, `parseRecipeResponse` |
 | `llm/` | Provider adapters, capability registry, error classification, circuit breaker, budget/deadline, prompt + response protocol, fake providers for tests | `ModelClient`, `buildExtractionPrompt`, `parseExtractionResponse` |
-| `engine.ts` | Orchestrates the stages and assembles `ExtractionOutcome` | `extractStructured(req, deps)` |
+| `engine.ts` | Orchestrates the stages and assembles `ExtractionOutcome`; challenge-page detection; recipe learning | `extractStructured(req, deps)`, `flushRecipeLearning()` |
+| `index.ts` | Public barrel used by the worker | engine entry point and public types |
 
 Outbound guard lives in `packages/shared/src/net.ts` (used by API and worker).
 Stage tracing lives in `apps/worker/src/tracing.ts`.
@@ -52,11 +53,136 @@ raw HTML ─► buildSourceDocument ─► blocked/challenge page? ──yes─�
      LLM extraction over annotated blocks (raw values + block citations)
                 │
                 ▼
-     normalize in code ─► grounding check ─► Ajv validate ─► outcome
+     grounding check ─► normalize in code ─► Ajv validate ─► outcome
                 │
-                └─► (async, best effort) propose recipe → candidate; promote after
+                └─► (async, best effort) induce (or propose) recipe → candidate; promote after
                     agreeing with grounded LLM results on ≥ 2 more distinct snapshots
 ```
+
+### Engine stages (engine.ts)
+
+`extractStructured(req, deps)` never throws for page or model problems; it
+throws `TypeError` only for a malformed request/deps object. Stage times go to
+`deps.tracer` (the worker's per-job `StageTracer`) and to `outcome.timings`:
+`schema`, `document`, `structured`, `recipe`, `llm`, `validate`, `learn`
+(awaited learning only).
+
+1. **Schema**: `normalizeSchema`; a `SchemaError` → `failed`, warning
+   `invalid_schema:<code>: <message>`, no other work.
+2. **Document**: `buildSourceDocument`, text prepared once for grounding.
+   `<html lang>` sets the decimal separator for ambiguous "1.234".
+3. **Blocked page**: `deps.sourceBlocked` (the worker sets it from the quality
+   report: bot-wall indicators with HTTP 403/429/503, or challenge-specific
+   indicators with a near-zero score) or the engine's own detector: at most
+   2,000 chars of visible text and two of {challenge title, challenge text,
+   challenge markup such as `cdn-cgi/challenge-platform`, `cf-turnstile`,
+   `captcha-delivery.com`} (one suffices under 500 chars). → `failed`,
+   `source_page_blocked:<reason>`, no model call.
+4. **Structured data**: raw values are normalized in code. Visible values are
+   *verified* and final; non-visible ones (and schema.org enumeration URLs for
+   text fields) are *unverified*, kept only as a fallback. Listings use
+   structured records only when every record fills every field visibly.
+   `auto` schemas follow the mapper's object/list decision.
+5. **Recipe**: only an **active** recipe for
+   `(tenant, host, templateSignature, schemaHash)` is used. Its values are
+   normalized, `checkInvariants` decides, `recordUse(ok)` counts. Object
+   recipes fill the fields they cover; listing recipes are used only when they
+   cover every field (records are never merged across sources).
+6. **LLM**, only for unresolved fields (a reduced schema): the input budget is
+   `planInputBudget(primary model)` with output reserved at ~40 tokens per
+   field per expected record (largest record group or table), min 1,024,
+   clamped to the model's output limit. `renderBlocks` fills it; a cut sets
+   `scope.truncated` and `input_truncated`. One shared `Budget` (request
+   deadline, `maxCostUsd`). `parse_error` → one repair call;
+   `output_truncated`/`input_too_large` → one retry with half the input;
+   other failures stop. Every attempt (failed ones too) is in `outcome.llm`.
+7. **Grounding + normalization** of each model value: cited block / its
+   attributes / its record → accepted; elsewhere on the page → accepted with
+   `citation_mismatch:<path>` and an evidence `note`; nowhere →
+   `rejected_ungrounded` (value null). `x-derived` fields skip grounding and
+   are labelled. Then `normalizeValue`: `ambiguous` → missing `ambiguous`;
+   unparseable/type mismatch → `not_found` with detail.
+8. **Merge** (objects): verified structured > recipe > grounded LLM. A field
+   asked because its structured value was unverified takes the LLM value
+   (`conflict:<field>` when they differ) or, when the LLM has none, the
+   unverified value (`structured_value_not_visible:<field>`, grounded false).
+9. **Output**: JSON pointers into the final data (wrapper kept:
+   `/items/3/price`). Null values are kept for nullable or required fields
+   and left out for optional non-nullable ones (null would be schema-invalid).
+   Listing records without any value are dropped. Ajv validation last.
+10. **Learning** (`deps.learning`: `background` default, `await`, `off`; also
+    `disable: ['recipe-learning']`): only after an LLM run whose requested,
+    non-derived values were all cleanly grounded and normalized, not
+    truncated, with no active recipe in play. An existing candidate is run on
+    the snapshot and compared (`recordAgreement` / `recordDisagreement`);
+    otherwise `induceRecipe` from the raw model values (record group of the
+    cited blocks as `recordSelector`), saved as a candidate only if it
+    reproduces this result. With `EXTRACT_RECIPE_PROPOSE=1`, a failed
+    induction asks the model for a recipe (one more call, within the
+    request's remaining spend cap). Background learning starts after the
+    answer, is bounded (4 in flight per process), and only logs failures;
+    `flushRecipeLearning()` drains it (worker shutdown, tests).
+
+### Outcome semantics
+
+* `complete`: `schemaValid`, not truncated, and every `missing` entry is
+  `not_found` on a field that may be null or absent per the schema.
+* `partial`: data, but anything else missing (`rejected_ungrounded`,
+  `ambiguous`, `provider_failure`, `truncated`, `not_processed`), truncated
+  input, or schema-invalid data.
+* `failed`: `data` is null (blocked page, invalid schema, nothing usable,
+  an object with no non-null field, a listing with no record).
+  `method` is then `none` and `schemaValid` false.
+* `method`: where the returned values came from (`structured-data`,
+  `recipe`, `llm`, or `mixed`).
+* `evidence` is always computed but returned only with `includeEvidence`.
+
+### Worker and API integration
+
+* The worker builds one `ModelClient` (`createDefaultModelClient(env)`) and a
+  `RecipeStore` over its Redis at startup. Per job: `fetch` (router, with
+  tier attempts) → quality score → content extraction (`content`, Piscina
+  pool) and structured extraction (`extract`) **concurrently**. Deadline =
+  job start + `timeout` − min(2 s, 10 %). Spend cap = min(request
+  `maxLlmCostUsd`, `EXTRACT_MAX_COST_USD`, default $0.05).
+* `content.json` = outcome data (omitted when null); `metadata.extraction` =
+  status, method, schemaValid, schemaErrors, missing, warnings, scope,
+  `llm {calls, tokens, costUsd, models}`, evidence (on request);
+  `metadata.timings` = tracer snapshot. Failed extractions are not cached.
+* API: `includeEvidence` (default false) and `maxLlmCostUsd` (0–1) on
+  `/v1/extract` and `/v1/scrape`; schemas over 64 KB or 10 levels → 400
+  before queueing. Sync jobs: 2 attempts, fixed 250 ms; webhook jobs: 3
+  attempts, exponential backoff. Unreachable/private destinations are
+  unrecoverable (no retry).
+* Configuration (`.env.example`): `EXTRACT_MODELS`, `EXTRACT_MODEL_CAPS`,
+  `EXTRACT_MAX_COST_USD`, `EXTRACT_LLM_TIMEOUT_MS`, `EXTRACT_RECIPE_PROPOSE`,
+  provider keys.
+
+### Measuring
+
+* `tests/engine/engine-corpus.test.ts`: every corpus fixture through the
+  engine with a gold-oracle fake model (`tests/engine/oracle.ts`, answers
+  from the prompt text only) plus adversarial models (invented values, wrong
+  citations, injection-obeying, small context).
+* `tests/eval/run-extraction-eval.ts`: the same corpus against real models
+  (`OPENROUTER_API_KEY`), per-model precision/recall, status accuracy,
+  latency percentiles, cost per correct field. See `tests/eval/README.md`.
+
+### Known limitations (Phase 1)
+
+* Booleans are read from availability/yes-no wording; a phrase such as
+  "On-site" for `remote: false` is not converted (mark such fields
+  `x-derived` or accept `partial`).
+* A value present only in an attribute (`class="star-rating Three"`, `href`)
+  must be cited from its own block; it cannot be verified elsewhere.
+* Visible text that contains an injected instruction is still page text: a
+  model that obeys it can return grounded but wrong values (the hidden
+  injection text never reaches the model).
+* Listing pages whose records do not fit one call are partial (Phase 2).
+* The input budget is planned for the primary model; a fallback with a
+  smaller context window is skipped for an input that does not fit it.
+* Document building, grounding and recipe induction run on the worker's main
+  thread (induction is bounded to ~2 s per learning run, 4 runs in flight).
 
 ### LLM response protocol
 
@@ -84,7 +210,9 @@ warning when weak. Derived fields are exempt but labelled.
 
 ### Outcome status
 
-* `complete` — schema-valid, no missing required fields, not truncated.
+Summarized here; exact rules under "Outcome semantics" above.
+
+* `complete` — schema-valid, nothing missing except genuinely absent optional/nullable values, not truncated.
 * `partial`  — some data, but missing required fields, schema errors, truncation,
   or rejected values. `data` still returned, `schemaValid` tells the truth.
 * `failed`   — no usable data (blocked page, provider failure, nothing found).
@@ -112,7 +240,7 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | Build fixed, stage tracing, reproducible extraction baseline | in progress |
-| 1 | Source-preserving document, deterministic paths, model layer, validation, grounding, recipes | in progress |
+| 1 | Source-preserving document, deterministic paths, model layer, validation, grounding, recipes; engine wired into worker and API | done (live-model benchmark pending an API key) |
 | 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | next |
 | 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | later |
 | 4 | Router: classify failures, engine vs network route, expiring per-template learning | later |
