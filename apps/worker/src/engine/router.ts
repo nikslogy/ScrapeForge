@@ -1,6 +1,6 @@
 import { Redis } from 'ioredis';
 import type { BrowserContext } from 'patchright';
-import type { ScrapeOptions, DomainStrategy } from '@scrapeforge/shared';
+import { isDnsLookupError, isOutboundBlockedError, type ScrapeOptions } from '@scrapeforge/shared';
 import { tier1Fetch, isValidContent } from './tier1-http.js';
 import { tier2Fetch } from './tier2-tls.js';
 import { tier3Fetch, isLightpandaConfigured } from './tier3-light.js';
@@ -13,14 +13,11 @@ import type { AttemptOutcome, StageTracer } from '../tracing.js';
 // Minimum quality score below which a tier's response is treated as a
 // soft-block and escalation continues. Target.com, Bing SERPs, and the
 // first run of Amazon all ship a cloaked 200-OK page that slips past
-// `isValidContent` (no block keywords, normal size) but scores < 0.6
+// `isValidContent` (no block keywords, normal size) but scores < 0.55
 // because the visible text is thin and there's no semantic content.
-//
-// Set as conservatively as possible: legitimate thin pages (example.com)
-// score 0.8 thanks to the short-content carve-out in quality-scorer, so
-// 0.55 is the sweet spot — blocks T1/T2 soft-blocks, allows genuine
-// minimal pages through.
-const MIN_TIER_ACCEPT_QUALITY = 0.55;
+// Small, well-formed pages without block markers (example.com) score 0.9
+// thanks to the short-page rule in quality-scorer.
+export const MIN_TIER_ACCEPT_QUALITY = 0.55;
 
 // On the TERMINAL tier (T5 stealth) we're out of escalation targets, so
 // we accept whatever we get even if low-quality — returning *something*
@@ -96,19 +93,21 @@ function isHardDomain(domain: string): boolean {
   return false;
 }
 
-// Single decision gate used by every tier in the router. Returns either
-// `{ ok: true, score }` if we should accept the tier's response, or
-// `{ ok: false, reason }` if the router should continue escalating.
-//
-// Layered checks:
-//   1. `isValidContent` — fast keyword/structural block detection
-//   2. `calculateQualityScore` — catches cloaked 200-OK pages that slip
-//      past step 1 (empty body wrapped in nav/footer markup)
-//
-// On the terminal tier (T5 stealth) we skip the quality gate because
-// there's nowhere left to escalate to; best-effort is better than
-// "all tiers exhausted".
-function assessTier(
+/**
+ * Single decision gate used by every tier in the router. Returns either
+ * `{ ok: true, score }` if we should accept the tier's response, or
+ * `{ ok: false, reason }` if the router should continue escalating.
+ *
+ * Layered checks:
+ *   1. `isValidContent` — fast keyword/structural block detection
+ *   2. `calculateQualityScore` — catches cloaked 200-OK pages that slip
+ *      past step 1 (empty body wrapped in nav/footer markup, app shells)
+ *
+ * On the terminal tier (T5 stealth) the quality threshold is 0 because
+ * there's nowhere left to escalate to; best-effort is better than
+ * "all tiers exhausted".
+ */
+export function assessTier(
   html: string,
   statusCode: number,
   tier: number,
@@ -135,25 +134,328 @@ function assessTier(
   return { ok: true, score };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Error text
+// ─────────────────────────────────────────────────────────────
+
+// Escalation notes end up in the "All tiers exhausted" error, which API
+// clients see. Fetch-layer messages can carry proxy URLs with credentials.
+const MAX_REASON_CHARS = 120;
+const MAX_RAW_MESSAGE_CHARS = 2_000;
+const MAX_EXHAUSTED_DETAIL_CHARS = 600;
+const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]+@/gi;
+
+/** Strings identifying `proxyUrl` that must not appear in client-visible text. */
+function proxySecrets(proxyUrl: string | undefined): string[] {
+  if (!proxyUrl) return [];
+  const out = new Set<string>([proxyUrl, proxyUrl.replace(/\/+$/, '')]);
+  try {
+    const u = new URL(proxyUrl);
+    if (u.host) out.add(u.host);
+    if (u.hostname.length >= 4) out.add(u.hostname);
+    for (const part of [u.username, u.password]) {
+      if (part.length >= 4) {
+        out.add(part);
+        try {
+          out.add(decodeURIComponent(part));
+        } catch {
+          /* not percent-encoded */
+        }
+      }
+    }
+  } catch {
+    /* unparseable proxy URL: only the literal is redacted */
+  }
+  // Longest first, so a full URL is replaced before its host is.
+  return [...out].filter(Boolean).sort((a, b) => b.length - a.length);
+}
+
+/** Bounded, single-line, credential-free text for an error or rejection. */
+export function redactReason(text: string, proxyUrl?: string): string {
+  let out = text.slice(0, MAX_RAW_MESSAGE_CHARS);
+  // The token cut by that slice may start a credential ("http://user:pa")
+  // that the patterns below no longer recognise without its "@".
+  if (text.length > MAX_RAW_MESSAGE_CHARS) out = out.replace(/\S*$/, '…');
+  for (const secret of proxySecrets(proxyUrl)) out = out.split(secret).join('[proxy]');
+  out = out.replace(URL_USERINFO, '$1***@').replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  return out.slice(0, MAX_REASON_CHARS);
+}
+
 // Tier fetchers throw whatever their libraries throw. Read the message
 // defensively: a thrown string or null must not crash the escalation loop
 // that is meant to absorb tier failures.
-function describeError(err: unknown): string {
+function describeError(err: unknown, proxyUrl?: string): string {
   const message = (err as { message?: unknown } | null)?.message;
-  if (typeof message === 'string') return message.slice(0, 120);
+  if (typeof message === 'string') return redactReason(message, proxyUrl);
   try {
-    return String(err).slice(0, 120);
+    return redactReason(String(err), proxyUrl);
   } catch {
     return 'unprintable error';
   }
 }
 
+/**
+ * Errors that no other tier can fix: the destination (or a redirect hop) is
+ * refused by the SSRF guard, or the hostname does not resolve. Every tier
+ * runs the same checks, so retrying in a browser only re-loads a URL that
+ * points inside our network or wastes seconds on a name that does not exist.
+ */
+function isFatalFetchError(err: unknown): boolean {
+  return isOutboundBlockedError(err) || isDnsLookupError(err);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Domain strategy: per-tier success statistics
+// ─────────────────────────────────────────────────────────────
+//
+// Stored under `domain:{host}` (24 h TTL, refreshed on write). Each tier
+// keeps an exponentially decayed success count: every new outcome multiplies
+// the old counts by SAMPLE_DECAY (so roughly the last 10 outcomes matter) and
+// idle time halves them every HALF_LIFE_MS. A request starts at the cheapest
+// tier with a recent success rate ≥ GOOD_RATE over ≥ ~3 recent samples, so
+// a domain that always ends at T5 stops paying for T1, T2 and T4 after three
+// requests. One request in 20 starts one tier cheaper to find out whether a
+// simpler method works again (and follows up a success, see planStartTier).
+// A tier tried in a request is never fetched again in that request: a miss at
+// the learned tier escalates from the next tier.
+
+export const STRATEGY_TTL_SECONDS = 86_400;
+const SAMPLE_DECAY = 0.9;
+const HALF_LIFE_MS = 6 * 60 * 60 * 1000;
+// 1 + 0.9 + 0.81: three fresh outcomes.
+const MIN_SAMPLE_WEIGHT = 2.5;
+const GOOD_RATE = 0.6;
+export const DEFAULT_REPROBE_RATE = 0.05;
+const LATENCY_EWMA = 0.3;
+const MAX_TIER = 5;
+
+export interface TierStats {
+  /** Decayed number of accepted responses. */
+  ok: number;
+  /** Decayed number of attempts. */
+  total: number;
+  /** Epoch ms of the last attempt (decay reference). */
+  lastAt: number;
+  /** Epoch ms of the last accepted response. */
+  lastOkAt?: number;
+  /** Whether the most recent attempt was accepted. */
+  lastOk?: boolean;
+  /** Moving average latency of accepted responses. */
+  latencyMs?: number;
+}
+
+export interface StoredStrategy {
+  v: 2;
+  tiers: Partial<Record<string, TierStats>>;
+  /** Requests recorded (not decayed). */
+  requests: number;
+  // Summary in the legacy DomainStrategy shape, for dashboards and scripts
+  // that read the key; routing only uses `tiers`.
+  tier: number;
+  successRate: number;
+  sampleSize: number;
+  avgLatencyMs: number;
+  proxyTier: string;
+  lastUpdated: string;
+}
+
+export interface TierOutcome {
+  tier: number;
+  ok: boolean;
+  latencyMs?: number;
+}
+
+function finiteNonNegative(x: unknown): x is number {
+  return typeof x === 'number' && Number.isFinite(x) && x >= 0;
+}
+
+/**
+ * Reads a stored strategy. Values written by older versions (one pooled
+ * success rate) and malformed values yield null: they carry no per-tier
+ * information, so the domain starts learning again and the next write
+ * replaces them.
+ */
+export function parseStrategy(raw: string | null): StoredStrategy | null {
+  if (!raw) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof data !== 'object' || data === null) return null;
+  const obj = data as Record<string, unknown>;
+  if (obj.v !== 2 || typeof obj.tiers !== 'object' || obj.tiers === null) return null;
+
+  const tiers: Partial<Record<string, TierStats>> = {};
+  for (let t = 1; t <= MAX_TIER; t++) {
+    const s = (obj.tiers as Record<string, unknown>)[String(t)] as Record<string, unknown> | undefined;
+    if (!s || typeof s !== 'object') continue;
+    const { ok, total, lastAt, lastOkAt, lastOk, latencyMs } = s;
+    if (!finiteNonNegative(ok) || !finiteNonNegative(total) || !finiteNonNegative(lastAt) || ok > total) continue;
+    // Decay bounds total at 1 / (1 - SAMPLE_DECAY); anything larger is not ours.
+    if (total > 1 / (1 - SAMPLE_DECAY) + 1e-6) continue;
+    tiers[String(t)] = {
+      ok,
+      total,
+      lastAt,
+      ...(finiteNonNegative(lastOkAt) ? { lastOkAt } : {}),
+      ...(typeof lastOk === 'boolean' ? { lastOk } : {}),
+      ...(finiteNonNegative(latencyMs) ? { latencyMs } : {}),
+    };
+  }
+  return {
+    v: 2,
+    tiers,
+    requests: finiteNonNegative(obj.requests) ? Math.floor(obj.requests) : 0,
+    tier: typeof obj.tier === 'number' ? obj.tier : 1,
+    successRate: typeof obj.successRate === 'number' ? obj.successRate : 0,
+    sampleSize: typeof obj.sampleSize === 'number' ? obj.sampleSize : 0,
+    avgLatencyMs: typeof obj.avgLatencyMs === 'number' ? obj.avgLatencyMs : 0,
+    proxyTier: typeof obj.proxyTier === 'string' ? obj.proxyTier : 'datacenter',
+    lastUpdated: typeof obj.lastUpdated === 'string' ? obj.lastUpdated : '',
+  };
+}
+
+/** Stats as of `now`: idle time decays both counts (the rate is unchanged). */
+function decayedStats(s: TierStats | undefined, now: number): { ok: number; total: number } {
+  if (!s) return { ok: 0, total: 0 };
+  const idle = Math.max(0, now - s.lastAt);
+  const f = 0.5 ** (idle / HALF_LIFE_MS);
+  return { ok: s.ok * f, total: s.total * f };
+}
+
+type TierVerdict = 'good' | 'bad' | 'unknown';
+
+function tierVerdict(s: TierStats | undefined, now: number): { verdict: TierVerdict; rate: number } {
+  const { ok, total } = decayedStats(s, now);
+  if (total < MIN_SAMPLE_WEIGHT) return { verdict: 'unknown', rate: total > 0 ? ok / total : 0 };
+  const rate = ok / total;
+  return { verdict: rate >= GOOD_RATE ? 'good' : 'bad', rate };
+}
+
+export type StartReason = 'cold' | 'js-heavy' | 'learned' | 'skip-failing' | 'best-effort' | 'reprobe' | 'confirm';
+
+export interface StartPlanOptions {
+  /** Tiers the router can run, cheapest first (e.g. [1, 2, 4, 5]). */
+  tiers: readonly number[];
+  jsHeavy: boolean;
+  now: number;
+  random: () => number;
+  reprobeRate: number;
+}
+
+/** The learned start tier, without re-probing. */
+function learnedStart(
+  s: StoredStrategy | null,
+  opts: Pick<StartPlanOptions, 'tiers' | 'jsHeavy' | 'now'>,
+): { tier: number; reason: StartReason } {
+  const { tiers, now } = opts;
+  const verdicts = tiers.map((t) => ({ t, ...tierVerdict(s?.tiers[String(t)], now) }));
+  const good = verdicts.find((v) => v.verdict === 'good');
+  if (good) return { tier: good.t, reason: 'learned' };
+
+  if (verdicts.every((v) => v.verdict === 'unknown')) {
+    const start = opts.jsHeavy ? tiers.find((t) => t >= 4) ?? tiers[0] : tiers[0];
+    return { tier: start, reason: opts.jsHeavy ? 'js-heavy' : 'cold' };
+  }
+  // No tier is reliable yet: skip tiers that keep failing.
+  const firstNotBad = verdicts.find((v) => v.verdict !== 'bad');
+  if (firstNotBad) return { tier: firstNotBad.t, reason: 'skip-failing' };
+  // Everything fails more often than not: start where it fails least.
+  let best = verdicts[0];
+  for (const v of verdicts) if (v.rate > best.rate) best = v;
+  return { tier: best.t, reason: 'best-effort' };
+}
+
+/**
+ * Where a request for this domain starts escalating, and why. Once learned,
+ * one request in 1/reprobeRate starts one tier cheaper; while that cheaper
+ * tier keeps succeeding it is tried again on the next request ('confirm'),
+ * so a domain gets back to the simpler method in a few requests instead of
+ * waiting for more lucky draws (between which idle decay would erase the
+ * evidence on a quiet domain). One failure ends the follow-ups.
+ */
+export function planStartTier(
+  s: StoredStrategy | null,
+  opts: StartPlanOptions,
+): { tier: number; reason: StartReason } {
+  const plan = learnedStart(s, opts);
+  const idx = opts.tiers.indexOf(plan.tier);
+  if (idx <= 0 || plan.reason === 'cold' || plan.reason === 'js-heavy') return plan;
+  const cheaper = opts.tiers[idx - 1];
+  const stats = s?.tiers[String(cheaper)];
+  if (stats?.lastOk === true) return { tier: cheaper, reason: 'confirm' };
+  if (opts.random() < opts.reprobeRate) return { tier: cheaper, reason: 'reprobe' };
+  return plan;
+}
+
+/** Folds one request's tier outcomes into the strategy. Pure. */
+export function applyOutcomes(
+  prev: StoredStrategy | null,
+  outcomes: readonly TierOutcome[],
+  now: number,
+  summaryTiers: readonly number[] = [1, 2, 3, 4, 5],
+): StoredStrategy {
+  const tiers: Partial<Record<string, TierStats>> = {};
+  for (const [k, v] of Object.entries(prev?.tiers ?? {})) if (v) tiers[k] = { ...v };
+
+  for (const o of outcomes) {
+    if (!Number.isInteger(o.tier) || o.tier < 1 || o.tier > MAX_TIER) continue;
+    const key = String(o.tier);
+    const cur = tiers[key];
+    const decayed = decayedStats(cur, now);
+    const next: TierStats = {
+      ok: decayed.ok * SAMPLE_DECAY + (o.ok ? 1 : 0),
+      total: decayed.total * SAMPLE_DECAY + 1,
+      lastAt: now,
+      ...(cur?.lastOkAt !== undefined ? { lastOkAt: cur.lastOkAt } : {}),
+      lastOk: o.ok,
+      ...(cur?.latencyMs !== undefined ? { latencyMs: cur.latencyMs } : {}),
+    };
+    if (o.ok) {
+      next.lastOkAt = now;
+      if (finiteNonNegative(o.latencyMs)) {
+        next.latencyMs =
+          next.latencyMs === undefined ? o.latencyMs : next.latencyMs + LATENCY_EWMA * (o.latencyMs - next.latencyMs);
+      }
+    }
+    // Compact JSON; three decimals is far below the decay resolution.
+    next.ok = Math.round(next.ok * 1000) / 1000;
+    next.total = Math.round(next.total * 1000) / 1000;
+    if (next.latencyMs !== undefined) next.latencyMs = Math.round(next.latencyMs);
+    tiers[key] = next;
+  }
+
+  const strategy: StoredStrategy = {
+    v: 2,
+    tiers,
+    requests: (prev?.requests ?? 0) + 1,
+    tier: 1,
+    successRate: 0,
+    sampleSize: 0,
+    avgLatencyMs: 0,
+    proxyTier: prev?.proxyTier ?? 'datacenter',
+    lastUpdated: new Date(now).toISOString(),
+  };
+  const start = learnedStart(strategy, { tiers: summaryTiers, jsHeavy: false, now });
+  const chosen = tiers[String(start.tier)];
+  const d = decayedStats(chosen, now);
+  strategy.tier = start.tier;
+  strategy.successRate = d.total > 0 ? Math.round((d.ok / d.total) * 1000) / 1000 : 0;
+  strategy.sampleSize = strategy.requests;
+  strategy.avgLatencyMs = chosen?.latencyMs ?? 0;
+  return strategy;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Router
+// ─────────────────────────────────────────────────────────────
+
 // Router tracing: every tier attempt is logged with its duration (on the
 // tracer's clock, from the start of the attempt including browser-context
 // acquisition) and how it ended. `outcome` reflects the acceptance gate; the
-// terminal tier's response may still be returned when rejected. If bookkeeping
-// after a decision throws, the router treats the tier as failed (unchanged
-// behavior) and a second 'error' entry for that tier records why.
+// terminal tier's response may still be returned when rejected.
 function attemptStart(tracer: StageTracer | undefined): number {
   return tracer ? tracer.now() : 0;
 }
@@ -168,15 +470,78 @@ function traceAttempt(
   tracer?.recordAttempt({ tier, ms: tracer.now() - t0, outcome, reason });
 }
 
+interface TierResponse {
+  html: string;
+  statusCode: number;
+  latencyMs: number;
+  screenshot?: string;
+}
+
+/** A browser context could not be acquired: the pool's problem, not the tier's. */
+class ContextAcquireError extends Error {
+  constructor(readonly original: unknown) {
+    super('browser context unavailable');
+  }
+}
+
+type AttemptResult =
+  | { kind: 'response'; r: TierResponse; ok: boolean }
+  | { kind: 'error'; error: unknown; acquire: boolean };
+
+/** Per-request state shared by the tier attempts. */
+interface RequestContext {
+  url: string;
+  domain: string;
+  options: ScrapeOptions;
+  proxy: SelectedProxy | null;
+  tracer?: StageTracer;
+  /** Escalation notes for the "All tiers exhausted" error. */
+  notes: string[];
+  /** Outcomes to fold into the domain strategy once the request is done. */
+  outcomes: TierOutcome[];
+}
+
+export interface SmartRouterOptions {
+  /** Wall clock (epoch ms) for strategy statistics. */
+  now?: () => number;
+  /** Uniform [0, 1) source deciding re-probes. */
+  random?: () => number;
+  /** Share of learned-tier requests that start one tier cheaper. */
+  reprobeRate?: number;
+  /** A slower strategy read is abandoned and the request starts cold. */
+  strategyReadTimeoutMs?: number;
+  logger?: Pick<Console, 'warn'>;
+}
+
+// Strategy writes queued while Redis is slow or down are dropped beyond this.
+const MAX_PENDING_STRATEGY_WRITES = 1_000;
+const DEFAULT_STRATEGY_READ_TIMEOUT_MS = 500;
+
 export class SmartRouter {
   private proxyManager: ProxyManager;
+  private readonly now: () => number;
+  private readonly random: () => number;
+  private readonly reprobeRate: number;
+  private readonly strategyReadTimeoutMs: number;
+  private readonly logger: Pick<Console, 'warn'>;
+  // Writes for one domain are chained so this process never loses its own
+  // updates; separate workers can still interleave (statistics tolerate it).
+  private readonly writeChains = new Map<string, Promise<void>>();
+  private readonly pendingWrites = new Set<Promise<void>>();
+  private droppedWrites = 0;
 
   constructor(
     private redis: Redis,
     private getBrowserContext: () => Promise<BrowserContext>,
     private releaseBrowserContext: (ctx: BrowserContext) => void,
+    options: SmartRouterOptions = {},
   ) {
     this.proxyManager = new ProxyManager(redis);
+    this.now = options.now ?? Date.now;
+    this.random = options.random ?? Math.random;
+    this.reprobeRate = options.reprobeRate ?? DEFAULT_REPROBE_RATE;
+    this.strategyReadTimeoutMs = options.strategyReadTimeoutMs ?? DEFAULT_STRATEGY_READ_TIMEOUT_MS;
+    this.logger = options.logger ?? console;
   }
 
   /**
@@ -185,168 +550,108 @@ export class SmartRouter {
    */
   async route(url: string, options: ScrapeOptions, tracer?: StageTracer): Promise<RouterResult> {
     const domain = new URL(url).hostname;
-    const requiresBrowser =
-      options.screenshot || options.waitFor || options.mobile;
+    const requiresBrowser = Boolean(options.screenshot || options.waitFor || options.mobile);
+    // Known-hard domains go straight to the browser tier: these sites
+    // (Cloudflare Enterprise, DataDome, aggressive Akamai) materially only
+    // succeed at T4+. Their outcomes are still recorded so the statistics
+    // reflect reality.
+    const browserOnly = requiresBrowser || isHardDomain(domain);
 
-    if (requiresBrowser) {
-      const proxy = await this.resolveProxy(domain, options.proxy);
-      return this.executeBrowser(url, options, domain, proxy, tracer);
+    // One proxy per request, resolved alongside the strategy read.
+    const [proxy, strategy] = await Promise.all([
+      this.resolveProxy(domain, options.proxy),
+      browserOnly ? Promise.resolve(null) : this.loadStrategy(domain),
+    ]);
+    const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], outcomes: [] };
+
+    try {
+      if (browserOnly) return await this.executeBrowser(c);
+      const tiers = this.availableTiers();
+      const plan = planStartTier(strategy, {
+        tiers,
+        jsHeavy: isJsHeavyDomain(domain),
+        now: this.now(),
+        random: this.random,
+        reprobeRate: this.reprobeRate,
+      });
+      return await this.escalate(c, plan.tier);
+    } finally {
+      // A forced browser request (screenshot, waitFor, mobile) says nothing
+      // about whether a cheaper tier would have worked, so it is not learned.
+      if (!requiresBrowser) this.recordOutcomes(domain, c.outcomes);
     }
+  }
 
-    // Known-hard domains: go straight to the browser tier and don't let the
-    // adaptive cache fool us with a lucky T2 success into pinning a flaky
-    // tier. These sites (Cloudflare Enterprise, DataDome, aggressive Akamai)
-    // materially only succeed at T4+, so the 30s of T1→T2→T3 timeout is pure
-    // waste. Cache updates still happen so metrics reflect reality.
-    if (isHardDomain(domain)) {
-      const proxy = await this.resolveProxy(domain, options.proxy);
-      return this.executeBrowser(url, options, domain, proxy, tracer);
-    }
+  /** Resolves once every strategy write started so far has settled. */
+  async drainStrategyWrites(): Promise<void> {
+    while (this.pendingWrites.size > 0) await Promise.allSettled([...this.pendingWrites]);
+  }
 
-    const cached = await this.getDomainStrategy(domain);
-    // Trust the cached tier once we've seen it succeed ≥50% of the time over
-    // at least 3 samples. The previous 0.8 bar meant a domain like wikipedia,
-    // which blocks our T1 fingerprint every time, never got to cache T4 and
-    // kept paying the full-escalation cost on every request.
-    if (cached && cached.successRate >= 0.5 && cached.sampleSize >= 3) {
-      return this.executeAtTier(cached.tier, url, options, domain, tracer);
-    }
-
-    // Cold-start shortcut: well-known JS-heavy domains skip T1/T2 but
-    // still fall back to T5/stealth if the browser is blocked.
-    const skipHttpTiers = !cached && isJsHeavyDomain(domain);
-    return this.escalate(url, options, domain, { skipHttpTiers }, tracer);
+  private availableTiers(): number[] {
+    return isLightpandaConfigured() ? [1, 2, 3, 4, 5] : [1, 2, 4, 5];
   }
 
   // ── Full escalation chain ──────────────────────────────
 
-  private async escalate(
-    url: string,
-    options: ScrapeOptions,
-    domain: string,
-    flags: { skipHttpTiers?: boolean } = {},
-    tracer?: StageTracer,
-  ): Promise<RouterResult> {
-    const proxy = await this.resolveProxy(domain, options.proxy);
-    const proxyUrl = proxy?.url;
+  /**
+   * Runs tiers from `startTier` upward and never goes back: a tier tried in
+   * this request is not fetched again.
+   */
+  private async escalate(c: RequestContext, startTier: number): Promise<RouterResult> {
+    const { url, options, proxy } = c;
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
-
-    // Each tier pushes a short diagnostic string so the final error tells us
-    // why every attempt failed instead of the opaque "All tiers exhausted".
-    const attempts: string[] = [];
-    const note = (tier: number, msg: string) => {
-      attempts.push(`T${tier}:${msg}`);
-    };
+    const httpTimeout = Math.min(options.timeout || 15_000, 15_000);
 
     // ─── Tier 1: plain HTTP with impit defaults ───
-    if (!flags.skipHttpTiers) {
-      let t0 = attemptStart(tracer);
-      try {
-        const r = await tier1Fetch(url, {
-          headers: options.headers,
-          timeout: Math.min(options.timeout || 15_000, 15_000),
-        });
-        const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
-        if (v.ok) {
-          traceAttempt(tracer, 1, t0, 'accepted');
-          await this.updateDomainStrategy(domain, 1, true, r.latencyMs);
-          return { ...r, tierUsed: 1, ...proxyMeta };
-        }
-        note(1, v.reason);
-        traceAttempt(tracer, 1, t0, 'rejected', v.reason);
-        await this.updateDomainStrategy(domain, 1, false, r.latencyMs);
-      } catch (err) {
-        const msg = describeError(err);
-        note(1, `threw ${msg}`);
-        traceAttempt(tracer, 1, t0, 'error', msg);
-      }
+    if (startTier <= 1) {
+      const a = await this.attempt(c, 1, () =>
+        tier1Fetch(url, { headers: options.headers, timeout: httpTimeout }),
+      );
+      if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 1, ...proxyMeta };
+    }
 
-      // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
-      t0 = attemptStart(tracer);
-      try {
-        const r = await tier2Fetch(url, {
-          headers: options.headers,
-          timeout: Math.min(options.timeout || 15_000, 15_000),
-          proxy: proxyUrl,
-        });
-        const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
-        if (v.ok) {
-          traceAttempt(tracer, 2, t0, 'accepted');
-          await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
-          if (proxy) await this.proxyManager.recordResult(proxy, domain, true, r.latencyMs);
-          return { ...r, tierUsed: 2, ...proxyMeta };
-        }
-        note(2, v.reason);
-        traceAttempt(tracer, 2, t0, 'rejected', v.reason);
-        await this.updateDomainStrategy(domain, 2, false, r.latencyMs);
-        if (proxy) await this.proxyManager.recordResult(proxy, domain, false, r.latencyMs);
-      } catch (err) {
-        const msg = describeError(err);
-        note(2, `threw ${msg}`);
-        traceAttempt(tracer, 2, t0, 'error', msg);
+    // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
+    if (startTier <= 2) {
+      const a = await this.attempt(c, 2, () =>
+        tier2Fetch(url, { headers: options.headers, timeout: httpTimeout, proxy: proxy?.url }),
+      );
+      if (a.kind === 'response') {
+        if (proxy) this.recordProxyResult(proxy, c.domain, a.ok, a.r.latencyMs);
+        if (a.ok) return { ...a.r, tierUsed: 2, ...proxyMeta };
       }
     }
 
     // ─── Tier 3: Lightpanda lightweight browser ───
-    if (isLightpandaConfigured()) {
-      const t0 = attemptStart(tracer);
-      try {
-        const r = await tier3Fetch(url, {
-          waitFor: options.waitFor,
-          timeout: options.timeout,
-          proxy: proxyUrl,
-        });
-        if (r) {
-          const v = assessTier(r.html, r.statusCode, 3, r.latencyMs, url);
-          if (v.ok) {
-            traceAttempt(tracer, 3, t0, 'accepted');
-            await this.updateDomainStrategy(domain, 3, true, r.latencyMs);
-            return { ...r, tierUsed: 3, ...proxyMeta };
-          }
-          note(3, v.reason);
-          traceAttempt(tracer, 3, t0, 'rejected', v.reason);
-        } else {
-          // tier3Fetch swallows its own failures and returns null.
-          note(3, 'no result');
-          traceAttempt(tracer, 3, t0, 'error', 'no result');
-        }
-      } catch (err) {
-        const msg = describeError(err);
-        note(3, `threw ${msg}`);
-        traceAttempt(tracer, 3, t0, 'error', msg);
-      }
+    if (startTier <= 3 && isLightpandaConfigured()) {
+      const a = await this.attempt(c, 3, () =>
+        tier3Fetch(url, { waitFor: options.waitFor, timeout: options.timeout, proxy: proxy?.url }),
+      );
+      if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 3, ...proxyMeta };
     }
 
     // ─── Tier 4: full Patchright headless browser ───
-    let context: BrowserContext | null = null;
-    let t4Result: { html: string; statusCode: number; latencyMs: number; screenshot?: string } | null = null;
-    let t0 = attemptStart(tracer);
-    try {
-      context = await this.acquireContext(tracer);
-      const r = await tier4Fetch(url, context, {
-        waitFor: options.waitFor,
-        timeout: options.timeout,
-        blockResources: options.blockResources,
-        mobile: options.mobile,
-        screenshot: options.screenshot,
-      });
-      t4Result = r;
-      const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
-      if (v.ok) {
-        traceAttempt(tracer, 4, t0, 'accepted');
-        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
-        return { ...r, tierUsed: 4, ...proxyMeta };
+    let t4Result: TierResponse | null = null;
+    if (startTier <= 4) {
+      const a = await this.attempt(c, 4, () =>
+        this.withContext(c, (ctx) =>
+          tier4Fetch(url, ctx, {
+            waitFor: options.waitFor,
+            timeout: options.timeout,
+            blockResources: options.blockResources,
+            mobile: options.mobile,
+            screenshot: options.screenshot,
+          }),
+        ),
+      );
+      if (a.kind === 'response') {
+        if (a.ok) return { ...a.r, tierUsed: 4, ...proxyMeta };
+        t4Result = a.r;
+      } else if (a.acquire) {
+        // The stealth tier needs a context from the same pool; waiting for it
+        // again would only double the delay.
+        c.notes.push('T5:skipped (no browser context)');
+        throw new Error(this.exhaustedMessage(c));
       }
-      note(4, v.reason);
-      traceAttempt(tracer, 4, t0, 'rejected', v.reason);
-      await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
-    } catch (err) {
-      const msg = describeError(err);
-      note(4, `threw ${msg}`);
-      traceAttempt(tracer, 4, t0, 'error', msg);
-    } finally {
-      if (context) this.releaseBrowserContext(context);
-      context = null;
     }
 
     // ─── Tier 5 (stealth): anti-detect patches — TERMINAL ───
@@ -354,164 +659,124 @@ export class SmartRouter {
     // Last stop. The quality gate is relaxed here so we always return
     // *something* rather than throwing "all tiers exhausted"; the caller
     // can decide based on qualityScore whether the result is usable.
-    // If T5 itself throws, we still want to fall back to T4's data if
-    // we captured it — otherwise the caller gets nothing at all.
-    t0 = attemptStart(tracer);
-    try {
-      // Escalate proxy if current one failed at browser tier
-      const stealthProxy = proxy
-        ? (await this.proxyManager.escalate(domain, proxy.tier)) || proxy
-        : null;
-
-      context = await this.acquireContext(tracer);
-      const r = await tier4StealthFetch(url, context, {
-        waitFor: options.waitFor,
-        timeout: options.timeout,
-        blockResources: options.blockResources,
-        screenshot: options.screenshot,
-      });
-      const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
-      if (v.ok) {
-        traceAttempt(tracer, 5, t0, 'accepted');
-        await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
-        return {
-          ...r,
-          tierUsed: 5,
-          proxyTier: stealthProxy?.tier || proxy?.tier || 'none',
-          proxyCost: stealthProxy?.cost || proxy?.cost || 0,
-        };
-      }
-      note(5, v.reason);
-      traceAttempt(tracer, 5, t0, 'rejected', v.reason);
-    } catch (err) {
-      const msg = describeError(err);
-      note(5, `threw ${msg}`);
-      traceAttempt(tracer, 5, t0, 'error', msg);
-    } finally {
-      if (context) this.releaseBrowserContext(context);
-    }
-
-    // Last-resort: return T4's body with a zero quality flag baked in via
-    // the quality scorer downstream, instead of throwing. This is what the
-    // user wants 99% of the time (they already paid for the browser fetch,
-    // returning empty markdown is strictly better than 500-ing the API).
-    if (t4Result) {
+    let stealthProxy: SelectedProxy | null = null;
+    const a5 = await this.attempt(
+      c,
+      5,
+      async () => {
+        // Escalate proxy if current one failed at browser tier
+        stealthProxy = proxy ? (await this.proxyManager.escalate(c.domain, proxy.tier)) || proxy : null;
+        return this.withContext(c, (ctx) =>
+          tier4StealthFetch(url, ctx, {
+            waitFor: options.waitFor,
+            timeout: options.timeout,
+            blockResources: options.blockResources,
+            screenshot: options.screenshot,
+          }),
+        );
+      },
+      true,
+    );
+    if (a5.kind === 'response' && a5.ok) {
+      const sp = stealthProxy as SelectedProxy | null;
       return {
-        ...t4Result,
-        tierUsed: 4,
-        ...proxyMeta,
+        ...a5.r,
+        tierUsed: 5,
+        proxyTier: sp?.tier || proxy?.tier || 'none',
+        proxyCost: sp?.cost || proxy?.cost || 0,
       };
     }
 
-    throw new Error(`All tiers exhausted for ${domain} — ${attempts.join(' | ')}`);
+    // Last-resort: return T4's body with a low quality flag baked in via
+    // the quality scorer downstream, instead of throwing. This is what the
+    // user wants 99% of the time (they already paid for the browser fetch,
+    // returning empty markdown is strictly better than 500-ing the API).
+    if (t4Result) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+
+    throw new Error(this.exhaustedMessage(c));
   }
 
-  // ── Cached-tier fast path ──────────────────────────────
-
-  private async executeAtTier(
-    tier: number,
-    url: string,
-    options: ScrapeOptions,
-    domain: string,
-    tracer?: StageTracer,
-  ): Promise<RouterResult> {
-    const proxy = await this.resolveProxy(domain, options.proxy);
-    const proxyUrl = proxy?.url;
-    const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
-
-    if (tier <= 1) {
-      const t0 = attemptStart(tracer);
-      try {
-        const r = await tier1Fetch(url, { headers: options.headers });
-        const v = assessTier(r.html, r.statusCode, 1, r.latencyMs, url);
-        if (v.ok) {
-          traceAttempt(tracer, 1, t0, 'accepted');
-          await this.updateDomainStrategy(domain, tier, true, r.latencyMs);
-          return { ...r, tierUsed: tier, ...proxyMeta };
-        }
-        traceAttempt(tracer, 1, t0, 'rejected', v.reason);
-      } catch (err) {
-        traceAttempt(tracer, 1, t0, 'error', describeError(err));
-      }
-      return this.escalate(url, options, domain, {}, tracer);
-    }
-
-    if (tier === 2) {
-      const t0 = attemptStart(tracer);
-      try {
-        const r = await tier2Fetch(url, { headers: options.headers, proxy: proxyUrl });
-        const v = assessTier(r.html, r.statusCode, 2, r.latencyMs, url);
-        if (v.ok) {
-          traceAttempt(tracer, 2, t0, 'accepted');
-          await this.updateDomainStrategy(domain, 2, true, r.latencyMs);
-          return { ...r, tierUsed: 2, ...proxyMeta };
-        }
-        traceAttempt(tracer, 2, t0, 'rejected', v.reason);
-      } catch (err) {
-        traceAttempt(tracer, 2, t0, 'error', describeError(err));
-      }
-      return this.escalate(url, options, domain, {}, tracer);
-    }
-
-    // Tiers 3-5 use browser
-    return this.executeBrowser(url, options, domain, proxy, tracer);
-  }
-
-  private async executeBrowser(
-    url: string,
-    options: ScrapeOptions,
-    domain: string,
-    proxy: SelectedProxy | null,
-    tracer?: StageTracer,
-  ): Promise<RouterResult> {
+  /** Browser-only path: T4, then T5 whose response is returned even when rejected. */
+  private async executeBrowser(c: RequestContext): Promise<RouterResult> {
+    const { url, options, proxy } = c;
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
 
     // ── T4: Patchright browser ──
     // Acquisition failures propagate (no stealth fallback), as before.
-    let t0 = attemptStart(tracer);
-    let context = await this.acquireForAttempt(tracer, 4, t0);
-    try {
-      const r = await tier4Fetch(url, context, options);
-      const v = assessTier(r.html, r.statusCode, 4, r.latencyMs, url);
-      if (v.ok) {
-        traceAttempt(tracer, 4, t0, 'accepted');
-        await this.updateDomainStrategy(domain, 4, true, r.latencyMs);
-        return { ...r, tierUsed: 4, ...proxyMeta };
-      }
-      traceAttempt(tracer, 4, t0, 'rejected', v.reason);
-      await this.updateDomainStrategy(domain, 4, false, r.latencyMs);
-    } catch (err) {
-      traceAttempt(tracer, 4, t0, 'error', describeError(err));
-      /* fall through to stealth */
-    } finally {
-      this.releaseBrowserContext(context);
-    }
+    const a4 = await this.attempt(c, 4, () => this.withContext(c, (ctx) => tier4Fetch(url, ctx, options)));
+    if (a4.kind === 'response' && a4.ok) return { ...a4.r, tierUsed: 4, ...proxyMeta };
+    if (a4.kind === 'error' && a4.acquire) throw a4.error;
 
     // ── T5: stealth (terminal — accept whatever we get) ──
-    t0 = attemptStart(tracer);
-    context = await this.acquireForAttempt(tracer, 5, t0);
+    const a5 = await this.attempt(
+      c,
+      5,
+      () =>
+        this.withContext(c, (ctx) =>
+          tier4StealthFetch(url, ctx, {
+            waitFor: options.waitFor,
+            timeout: options.timeout,
+            blockResources: options.blockResources,
+            screenshot: options.screenshot,
+          }),
+        ),
+      true,
+    );
+    if (a5.kind === 'error') throw a5.error;
+    return { ...a5.r, tierUsed: 5, ...proxyMeta };
+  }
+
+  /**
+   * One tier attempt: fetch, acceptance gate, trace entry, escalation note
+   * and strategy outcome. SSRF refusals and DNS failures are rethrown at
+   * once (no further tier may try the URL). Any other error is returned with
+   * the original error object (`acquire` marks browser-pool failures, which
+   * are not held against the tier).
+   */
+  private async attempt(
+    c: RequestContext,
+    tier: number,
+    fetch: () => Promise<TierResponse | null>,
+    terminal = false,
+  ): Promise<AttemptResult> {
+    const t0 = attemptStart(c.tracer);
+    let r: TierResponse | null;
     try {
-      const r = await tier4StealthFetch(url, context, {
-        waitFor: options.waitFor,
-        timeout: options.timeout,
-        blockResources: options.blockResources,
-        screenshot: options.screenshot,
-      });
-      const v = assessTier(r.html, r.statusCode, 5, r.latencyMs, url, true);
-      if (v.ok) {
-        traceAttempt(tracer, 5, t0, 'accepted');
-        await this.updateDomainStrategy(domain, 5, true, r.latencyMs);
-      } else {
-        traceAttempt(tracer, 5, t0, 'rejected', v.reason);
-        await this.updateDomainStrategy(domain, 5, false, r.latencyMs);
-      }
-      return { ...r, tierUsed: 5, ...proxyMeta };
+      r = await fetch();
     } catch (err) {
-      traceAttempt(tracer, 5, t0, 'error', describeError(err));
-      throw err;
-    } finally {
-      this.releaseBrowserContext(context);
+      const acquire = err instanceof ContextAcquireError;
+      const error = acquire ? err.original : err;
+      const msg = describeError(error, c.proxy?.url);
+      traceAttempt(c.tracer, tier, t0, 'error', msg);
+      if (isFatalFetchError(error)) throw error;
+      c.notes.push(`T${tier}:threw ${msg}`);
+      if (!acquire) c.outcomes.push({ tier, ok: false });
+      return { kind: 'error', error, acquire };
     }
+
+    if (!r) {
+      // tier3Fetch swallows its own failures and returns null.
+      traceAttempt(c.tracer, tier, t0, 'error', 'no result');
+      c.notes.push(`T${tier}:no result`);
+      c.outcomes.push({ tier, ok: false });
+      return { kind: 'error', error: new Error('no result'), acquire: false };
+    }
+
+    const v = assessTier(r.html, r.statusCode, tier, r.latencyMs, c.url, terminal);
+    c.outcomes.push({ tier, ok: v.ok, latencyMs: r.latencyMs });
+    if (v.ok) {
+      traceAttempt(c.tracer, tier, t0, 'accepted');
+    } else {
+      traceAttempt(c.tracer, tier, t0, 'rejected', v.reason);
+      c.notes.push(`T${tier}:${v.reason}`);
+    }
+    return { kind: 'response', r, ok: v.ok };
+  }
+
+  private exhaustedMessage(c: RequestContext): string {
+    let detail = c.notes.join(' | ');
+    if (detail.length > MAX_EXHAUSTED_DETAIL_CHARS) detail = `${detail.slice(0, MAX_EXHAUSTED_DETAIL_CHARS - 1)}…`;
+    return `All tiers exhausted for ${c.domain} — ${detail}`;
   }
 
   // ── Browser contexts ───────────────────────────────────
@@ -524,18 +789,17 @@ export class SmartRouter {
       : this.getBrowserContext();
   }
 
-  // For call sites where an acquisition failure escapes the tier's own
-  // try/catch: record the failed attempt, then rethrow unchanged.
-  private async acquireForAttempt(
-    tracer: StageTracer | undefined,
-    tier: number,
-    t0: number,
-  ): Promise<BrowserContext> {
+  private async withContext<T>(c: RequestContext, run: (ctx: BrowserContext) => Promise<T>): Promise<T> {
+    let context: BrowserContext;
     try {
-      return await this.acquireContext(tracer);
+      context = await this.acquireContext(c.tracer);
     } catch (err) {
-      traceAttempt(tracer, tier, t0, 'error', describeError(err));
-      throw err;
+      throw new ContextAcquireError(err);
+    }
+    try {
+      return await run(context);
+    } finally {
+      this.releaseBrowserContext(context);
     }
   }
 
@@ -548,37 +812,72 @@ export class SmartRouter {
     return this.proxyManager.select(domain, (preference || 'auto') as any);
   }
 
-  // ── Domain strategy cache ──────────────────────────────
-
-  private async getDomainStrategy(domain: string): Promise<DomainStrategy | null> {
-    const data = await this.redis.get(`domain:${domain}`);
-    return data ? JSON.parse(data) : null;
+  private recordProxyResult(proxy: SelectedProxy, domain: string, success: boolean, latencyMs: number): void {
+    this.background(`proxy stats for ${domain}`, () =>
+      this.proxyManager.recordResult(proxy, domain, success, latencyMs),
+    );
   }
 
-  private async updateDomainStrategy(
-    domain: string,
-    tier: number,
-    success: boolean,
-    latencyMs: number,
-  ): Promise<void> {
-    const key = `domain:${domain}`;
-    const existing = await this.getDomainStrategy(domain);
+  // ── Domain strategy cache ──────────────────────────────
 
-    const sampleSize = (existing?.sampleSize || 0) + 1;
-    const successCount =
-      (existing ? existing.successRate * existing.sampleSize : 0) + (success ? 1 : 0);
+  private async loadStrategy(domain: string): Promise<StoredStrategy | null> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const raw = await Promise.race([
+        this.redis.get(`domain:${domain}`),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timed out after ${this.strategyReadTimeoutMs} ms`)),
+            this.strategyReadTimeoutMs,
+          );
+        }),
+      ]);
+      return parseStrategy(raw);
+    } catch (err) {
+      // Without statistics the request simply escalates from the bottom.
+      this.logger.warn(`[router] domain strategy read failed for ${domain}: ${describeError(err)}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
-    const strategy: DomainStrategy = {
-      tier: (success ? Math.min(tier, 4) : Math.min(tier + 1, 4)) as 1 | 2 | 3 | 4,
-      proxyTier: existing?.proxyTier || 'datacenter',
-      successRate: successCount / sampleSize,
-      avgLatencyMs: existing
-        ? Math.round((existing.avgLatencyMs * (sampleSize - 1) + latencyMs) / sampleSize)
-        : latencyMs,
-      sampleSize,
-      lastUpdated: new Date().toISOString(),
-    };
+  /** Fire-and-forget: the response never waits for Redis. */
+  private recordOutcomes(domain: string, outcomes: readonly TierOutcome[]): void {
+    if (outcomes.length === 0) return;
+    const prev = this.writeChains.get(domain) ?? Promise.resolve();
+    const next = this.background(`domain strategy write for ${domain}`, async () => {
+      await prev;
+      const key = `domain:${domain}`;
+      const now = this.now();
+      const updated = applyOutcomes(parseStrategy(await this.redis.get(key)), outcomes, now, this.availableTiers());
+      await this.redis.set(key, JSON.stringify(updated), 'EX', STRATEGY_TTL_SECONDS);
+    });
+    if (!next) return;
+    this.writeChains.set(domain, next);
+    void next.then(() => {
+      if (this.writeChains.get(domain) === next) this.writeChains.delete(domain);
+    });
+  }
 
-    await this.redis.set(key, JSON.stringify(strategy), 'EX', 86400);
+  /** Runs `task` off the critical path; failures are logged, never thrown. */
+  private background(what: string, task: () => Promise<unknown>): Promise<void> | null {
+    if (this.pendingWrites.size >= MAX_PENDING_STRATEGY_WRITES) {
+      if (this.droppedWrites++ % 100 === 0) {
+        this.logger.warn(`[router] ${this.pendingWrites.size} bookkeeping writes pending; dropping ${what}`);
+      }
+      return null;
+    }
+    const p = Promise.resolve()
+      .then(task)
+      .then(
+        () => undefined,
+        (err) => {
+          this.logger.warn(`[router] ${what} failed: ${describeError(err)}`);
+        },
+      );
+    this.pendingWrites.add(p);
+    void p.then(() => this.pendingWrites.delete(p));
+    return p;
   }
 }

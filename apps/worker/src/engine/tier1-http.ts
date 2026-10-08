@@ -96,12 +96,74 @@ const CONTENT_HEAVY_DOMAINS = [
   'x.com',
 ];
 
+// Phrases and markers that only block/challenge pages carry. Matched
+// case-insensitively anywhere in small responses.
+const BLOCK_INDICATORS = [
+  'cf-browser-verification',
+  'challenge-platform',
+  '_cf_chl_opt',
+  'ddos-protection',
+  'captcha-delivery',
+  'access denied',
+  'please verify you are human',
+  'just a moment',
+  'enable javascript and cookies to continue',
+  'attention required! | cloudflare',
+  'sorry, you have been blocked',
+  'to discuss automated access to amazon data',
+  'errors/validatecaptcha',
+  'unusual traffic from your computer network',
+  'our systems have detected unusual traffic',
+  'robot or human',
+  'blocked.gif',
+  'px-captcha',
+  'pxcaptcha',
+  'perimeterx',
+  'datadome',
+  'shieldsquare',
+  '_incapsula_resource',
+  'request unsuccessful. incapsula',
+  'pardon our interruption',
+  'sec-if-cpt',
+];
+
+// Structural (script src, element ids) rather than prose: safe to look for in
+// the <head> of large pages too.
+const STRUCTURAL_MARKERS = [
+  'cf-browser-verification',
+  'challenge-platform',
+  '_cf_chl_opt',
+  'captcha-delivery',
+  'errors/validatecaptcha',
+  'px-captcha',
+  'pxcaptcha',
+  '_incapsula_resource',
+];
+
+// Real block pages are almost always under ~10 KB; prose mentions of these
+// words in long articles must not count.
+const SMALL_PAGE_BYTES = 10_000;
+const LARGE_PAGE_HEAD_BYTES = 4_000;
+const CLOAKED_STUB_BYTES = 1_000;
+
+function isContentHeavyHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    return CONTENT_HEAVY_DOMAINS.some((d) => host === d || host.endsWith('.' + d));
+  } catch {
+    return false; // bad URL: skip the heuristic
+  }
+}
+
 /**
  * Returns false if the page looks like a bot-detection challenge
  * rather than real content.
  *
  * `url` is optional — when supplied, enables a short-body check for
  * content-heavy domains (walmart's block page is a 423-char 200 OK).
+ *
+ * This is the fast first gate; calculateQualityScore (quality-scorer.ts)
+ * judges how much real content a page that passes here carries.
  */
 export function isValidContent(
   html: string,
@@ -112,55 +174,24 @@ export function isValidContent(
   if (statusCode >= 500) return false;
   // No length floor here. Legitimate tiny pages (example.com = 167 bytes)
   // were being flagged as blocked and re-routed all the way to the browser
-  // tier. Status codes + block-phrase matches below are sufficient.
-  if (!html) return false;
-
-  const blockIndicators = [
-    'cf-browser-verification',
-    'challenge-platform',
-    'ddos-protection',
-    'captcha-delivery',
-    'access denied',
-    'please verify you are human',
-    'just a moment',
-    'enable javascript and cookies to continue',
-    'to discuss automated access to amazon data',
-    'errors/validatecaptcha',
-    'unusual traffic from your computer network',
-    'our systems have detected unusual traffic',
-    'robot or human',
-    'blocked.gif',
-    'px-captcha',
-    'pxcaptcha',
-    'perimeterx',
-    'datadome',
-    'shieldsquare',
-  ];
+  // tier. Status codes + block-phrase matches below are sufficient. A body of
+  // nothing but whitespace is not a page, though.
+  if (!html || !/\S/.test(html)) return false;
 
   // Keyword-based block detection is only reliable on SMALL responses.
   // Long-form articles legitimately mention vendor names ("DataDome",
   // "PerimeterX"), CAPTCHA, and phrases like "access denied" — Wikipedia's
-  // "Web scraping" article is the canonical example. Real block pages are
-  // almost always under ~10 KB, so we gate the heuristic on size.
-  if (html.length < 10_000) {
+  // "Web scraping" article is the canonical example.
+  if (html.length < SMALL_PAGE_BYTES) {
     const lowerHtml = html.toLowerCase();
-    if (blockIndicators.some((indicator) => lowerHtml.includes(indicator))) {
+    if (BLOCK_INDICATORS.some((indicator) => lowerHtml.includes(indicator))) {
       return false;
     }
   } else {
     // On large pages, still catch the obvious Cloudflare / DataDome challenge
-    // markers that appear in page <head> regardless of body size. These are
-    // structural (script src, meta tags) rather than prose mentions.
-    const head = html.slice(0, 4000).toLowerCase();
-    const structuralMarkers = [
-      'cf-browser-verification',
-      'challenge-platform',
-      'captcha-delivery',
-      'errors/validatecaptcha',
-      'px-captcha',
-      'pxcaptcha',
-    ];
-    if (structuralMarkers.some((m) => head.includes(m))) {
+    // markers that appear in page <head> regardless of body size.
+    const head = html.slice(0, LARGE_PAGE_HEAD_BYTES).toLowerCase();
+    if (STRUCTURAL_MARKERS.some((m) => head.includes(m))) {
       return false;
     }
   }
@@ -169,13 +200,8 @@ export function isValidContent(
   // when they suspect automation (walmart, google SERP). If the URL's host
   // matches a known content-heavy domain and the body is <1KB, treat it as
   // a block so the router escalates.
-  if (url && html.length < 1000) {
-    try {
-      const host = new URL(url).hostname.toLowerCase();
-      if (CONTENT_HEAVY_DOMAINS.some((d) => host === d || host.endsWith('.' + d))) {
-        return false;
-      }
-    } catch { /* bad URL — skip the heuristic */ }
+  if (url && html.length < CLOAKED_STUB_BYTES && isContentHeavyHost(url)) {
+    return false;
   }
 
   return true;

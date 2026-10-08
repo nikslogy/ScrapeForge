@@ -137,18 +137,15 @@ describe('QueueHarness', () => {
     }
   }, 60_000);
 
-  it('surfaces the router escalation of the classic example.com page (browser disabled)', async () => {
+  it('accepts the classic example.com page at T1 (browser disabled)', async () => {
+    // Regression guard for the Phase 0 finding: the quality gate used to score
+    // this 1,256-byte page 0.50 and escalate it through every tier.
     await admin.del('domain:127.0.0.1');
     const harness = await QueueHarness.open(options({ mode: 'full', url: `${fixture.baseUrl}/small` }));
     try {
-      // worker.ts marks "All tiers exhausted" unrecoverable: one attempt, no backoff.
-      const t0 = performance.now();
-      await expect(harness.trip()).rejects.toThrow(/T1:low quality 0\.50.*T2:low quality 0\.50/);
-      expect(performance.now() - t0).toBeLessThan(900);
-      const [failedJob] = await harness.queue.getFailed(0, 0);
-      expect(failedJob?.attemptsMade).toBe(1);
-      const stored = await admin.get(`result:${failedJob?.id}`);
-      expect(JSON.parse(stored ?? '{}')).toMatchObject({ status: 'failed' });
+      const sample = await harness.trip();
+      expect(sample.proc.tierUsed).toBe(1);
+      expect(sample.proc.attempts).toEqual([expect.objectContaining({ tier: 1, outcome: 'accepted' })]);
     } finally {
       await harness.close();
     }

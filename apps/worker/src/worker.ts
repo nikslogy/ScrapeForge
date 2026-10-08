@@ -439,10 +439,10 @@ console.log(
 async function shutdown() {
   console.log('Shutting down workers...');
   await Promise.all(workers.map((w) => w.close()));
-  // Background recipe learning writes to Redis: let it finish (bounded)
-  // before the connection closes.
+  // Background recipe learning and domain-strategy writes go to Redis: let
+  // them finish (bounded) before the connection closes.
   await Promise.race([
-    flushRecipeLearning(),
+    Promise.all([flushRecipeLearning(), router.drainStrategyWrites()]),
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   await browserPool.shutdown();

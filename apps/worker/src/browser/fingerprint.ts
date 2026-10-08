@@ -80,6 +80,18 @@ export function generateFingerprint(): BrowserFingerprint {
 /**
  * Returns Patchright-compatible context options
  * for applying a fingerprint to a new browser context.
+ *
+ * `serviceWorkers: 'block'` is deliberately NOT set. Playwright implements it
+ * with an init script that stubs navigator.serviceWorker.register, and stops
+ * routing service-worker requests through context.route() because none should
+ * exist. Under Patchright (1.59.4) that init script is dropped once
+ * page.route() is installed (the outbound guard), so workers still register,
+ * and their requests then skip the context-level SSRF guard: with 'block', a
+ * worker's install/activate/fetch handlers reached a private address; with
+ * the default ('allow') all of them were refused. Workers therefore stay
+ * allowed and routed, and the pool retires any context that picked one up
+ * (browser/pool.ts). Test: test/fetch/readiness.test.ts ("a service worker
+ * ... cannot reach the internal network").
  */
 export function toContextOptions(fp: BrowserFingerprint) {
   return {

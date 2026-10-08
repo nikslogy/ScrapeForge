@@ -6,6 +6,17 @@ import {
   installOutboundGuard,
   monitorOutbound,
 } from '../browser/outbound-guard.js';
+import { envMs, readinessFor, settlePage, trackRequests } from './tier4-browser.js';
+
+// Optional pause after the page loads, for sites that score instant readers
+// as bots. Off by default: it is pure latency. STEALTH_HUMAN_DELAY_MS=600
+// waits 300-600 ms.
+const MAX_HUMAN_DELAY_MS = 10_000;
+
+export function humanDelayMs(random: () => number = Math.random): number {
+  const base = envMs('STEALTH_HUMAN_DELAY_MS', 0, MAX_HUMAN_DELAY_MS);
+  return base > 0 ? Math.round(base / 2 + random() * (base / 2)) : 0;
+}
 
 /**
  * Tier 4+: Stealth browser mode with deep anti-detection.
@@ -57,6 +68,8 @@ export async function tier4StealthFetch(
     timeout?: number;
     blockResources?: boolean;
     screenshot?: boolean;
+    /** Cap for the readiness wait after load (default BROWSER_READY_TIMEOUT_MS or 2.5 s). */
+    readyTimeoutMs?: number;
   } = {},
 ): Promise<{
   html: string;
@@ -71,8 +84,10 @@ export async function tier4StealthFetch(
   await ensureContextOutboundGuard(context);
   const page = await context.newPage();
   const monitor = monitorOutbound(page);
+  const tracker = trackRequests(page);
 
   try {
+    // Dropped by Patchright once page.route() follows (see tier4-browser.ts).
     await applyStealthPatches(page);
 
     // Always installed: blockResources only toggles tracker/media blocking,
@@ -95,16 +110,15 @@ export async function tier4StealthFetch(
     // spending any more time on the page.
     await assertNavigationAllowed(response, page.url());
 
-    // Small random delay to look human
-    await page.waitForTimeout(300 + Math.floor(Math.random() * 700));
+    const delay = humanDelayMs();
+    if (delay > 0) await page.waitForTimeout(delay);
 
     if (options.waitFor) {
       await page.waitForSelector(options.waitFor, {
         timeout: Math.min(options.timeout || 10_000, 10_000),
       });
-    } else {
-      await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => {});
     }
+    await settlePage(page, tracker, readinessFor(options, start));
 
     // Flatten Shadow DOM so extraction can see hidden content
     await page.evaluate(`
@@ -147,6 +161,7 @@ export async function tier4StealthFetch(
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    tracker.dispose();
     monitor.dispose();
     await page.close();
   }
