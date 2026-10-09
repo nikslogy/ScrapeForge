@@ -77,6 +77,52 @@ export function parseExtractionResponse(
   return { records, warnings: warnings.list() };
 }
 
+const ENVELOPE_START = /\{\s*"records"\s*:\s*\[/;
+const LEADING_FENCE = /^\s*(?:```[A-Za-z0-9_-]{0,20})?\s*/;
+
+/**
+ * The complete records of an answer that was cut off (output_truncated,
+ * e.g. LlmCallError.partialText): every record object of the "records"
+ * array (or a bare top-level array) that closed before the cut. The record
+ * being written when the output stopped is dropped. Never throws.
+ */
+export function salvageTruncatedRecords(text: string, schema: NormalizedSchema): ParseResult {
+  const warnings = new Warnings();
+  const input = stripReasoning(typeof text === 'string' ? text.replace(/^\uFEFF/, '') : '', warnings);
+  const head = LEADING_FENCE.exec(input)?.[0].length ?? 0;
+  let i = -1;
+  if (input.charCodeAt(head) === 0x5b) {
+    i = head + 1;
+  } else {
+    const m = ENVELOPE_START.exec(input);
+    if (m) i = m.index + m[0].length;
+  }
+  const raw: unknown[] = [];
+  while (i >= 0 && i < input.length) {
+    const c = input.charCodeAt(i);
+    if (c === 0x2c || c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) {
+      i++;
+      continue;
+    }
+    // ']' would mean the array was complete; anything else is not a record.
+    if (c !== 0x7b) break;
+    const scan = scanValue(input, i);
+    if (scan.kind !== 'complete') break;
+    const parsed = parseLenient(input.slice(i, scan.end));
+    if (!parsed.ok) break;
+    raw.push(parsed.value);
+    i = scan.end;
+  }
+  const fields = new FieldResolver(schema);
+  const records: ParsedRecord[] = [];
+  for (const r of raw) {
+    const record = readRecord(r, fields, warnings);
+    if (record) records.push(record);
+  }
+  if (records.length > 0) warnings.add(`kept ${records.length} complete record${records.length === 1 ? '' : 's'} of a truncated answer`);
+  return { records, warnings: warnings.list() };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Locating the JSON
 // ─────────────────────────────────────────────────────────────

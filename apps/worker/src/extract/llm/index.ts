@@ -36,7 +36,7 @@ export {
   type LlmErrorDetails,
 } from './errors.js';
 export { isStrictCompatible } from './json-schema.js';
-export { buildRepairPrompt, parseExtractionResponse, type ParsedCell, type ParsedRecord, type ParseResult, type ParseSource } from './parse.js';
+export { buildRepairPrompt, parseExtractionResponse, salvageTruncatedRecords, type ParsedCell, type ParsedRecord, type ParseResult, type ParseSource } from './parse.js';
 export { buildExtractionPrompt, buildResponseSchema, neutralizePageTags, type ExtractionPrompt, type ExtractionPromptArgs } from './prompt.js';
 export {
   estimateCostUsd,

@@ -381,7 +381,9 @@ export class BrowserPool {
    * origin storage (localStorage, IndexedDB, Cache Storage, service worker
    * registrations, ...) of every origin the context requested anything
    * from. Partitioned storage of third-party frames is cleared with its
-   * origin. sessionStorage ends with its page. Throws if any step fails.
+   * origin. sessionStorage ends with its page. The context's HTTP cache too:
+   * a response cached while serving one tenant (personalized by its headers
+   * or cookies) must not be served to the next. Throws if any step fails.
    */
   private async clean(pooled: PooledContext): Promise<void> {
     const { context } = pooled;
@@ -391,13 +393,16 @@ export class BrowserPool {
     await context.clearCookies();
     const origins = [...pooled.origins];
     if (origins.length === 0) return;
-    // CDP Storage commands act on the storage of the page's browser context.
+    // CDP Storage and Network commands act on the page's browser context only.
     const page = await context.newPage();
     try {
       const cdp = await context.newCDPSession(page);
       await Promise.all(
         origins.map((origin) => cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })),
       );
+      // Not an origin storage type. Test doubles' sessions (no event API,
+      // which a real CDP session always has) implement only the Storage command.
+      if (typeof (cdp as { on?: unknown }).on === 'function') await cdp.send('Network.clearBrowserCache');
       await cdp.detach().catch(() => {});
     } finally {
       await page.close().catch(() => {});

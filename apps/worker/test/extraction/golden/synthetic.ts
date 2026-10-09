@@ -190,6 +190,29 @@ ${para(2, 'After: ')}
       html: `<!doctype html><html><head><title>Plaintext</title></head><body><article>${para(3)}<plaintext><b>PLAIN</b> &amp; <i>text`,
     },
     {
+      // Inline elements wrapping blocks, as WYSIWYG editors and CMSes write
+      // them. Readability wraps the inline element in a new <p>; an HTML
+      // parser reading that back closes the outer <p> and repeats the
+      // formatting in each paragraph.
+      id: 'inline-wrapped-blocks',
+      url: 'https://cms.example.com/story',
+      html: `<!doctype html><html><head><title>Story</title></head><body><article><h1>Story</h1>${para(2)}
+<div><em><p>Editor's note: this story was updated.</p><p>Corrections appear below.</p></em></div>
+<div><font face="Arial"><b><p>Bold paragraph from a WYSIWYG editor.</p></b></font></div>
+<div>Before upgrading: <strong><p>Back up the database first.</p><p>Version 2 changes the config format.</p></strong></div>
+<div>Lead text <span><h3>Heading inside a span</h3></span> tail text.</div>
+${para(1, 'After: ')}</article></body></html>`,
+    },
+    {
+      // Under 500 characters: Readability's first pass is too short, so it
+      // re-parses the page from its cached innerHTML and tries again.
+      id: 'short-article-retry',
+      url: 'https://short.example.com/',
+      html: `<!doctype html><html><head><title>Short</title></head><body><div class="content">
+<p>Shipping rules: an order with Price &gt; 10 ships free, and orders under that pay a flat fee. Returns are accepted within thirty days of delivery when items are unused, and the same rules apply here.</p>
+<xmp><b>XMP</b> &amp; raw</xmp><p>Second paragraph &amp; the end.</p></div></body></html>`,
+    },
+    {
       id: 'long-ordered-list',
       url: 'https://list.example.com/',
       html: `<!doctype html><html><head><title>Long list</title></head><body><article><h1>Steps</h1><ol start="5">${Array.from({ length: 300 }, (_, i) => `<li>Step ${i} does something useful</li>`).join('')}</ol></article></body></html>`,

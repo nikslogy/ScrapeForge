@@ -63,12 +63,20 @@ export function geminiFromEnv(env: NodeJS.ProcessEnv, fetchImpl?: typeof fetch):
   return new GeminiProvider({ apiKey, baseUrl: env.GEMINI_BASE_URL?.trim() || undefined, fetchImpl });
 }
 
+// Models whose thinking can be switched off with thinkingBudget 0 (2.5 Pro
+// cannot; 2.0 models do not think).
+const NO_THINKING = /^(?:models\/)?gemini-2\.5-flash/;
+
 /** Request body for generateContent. Exported for tests. */
 export function buildGeminiBody(caps: ModelCapabilities, req: LlmRequest): Record<string, unknown> {
   const generationConfig: Record<string, unknown> = {
     temperature: req.temperature ?? 0,
     maxOutputTokens: effectiveMaxOutput(caps, req.maxOutputTokens),
   };
+  // Gemini 2.5 Flash thinks by default and its thinking tokens count against
+  // maxOutputTokens, so a small extraction limit can be spent before any
+  // answer (MAX_TOKENS, no text). Copying values needs no thinking.
+  if (NO_THINKING.test(caps.model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
   if (caps.jsonMode !== 'none') {
     generationConfig.responseMimeType = 'application/json';
     if (caps.jsonMode === 'json_schema' && req.responseSchema) {

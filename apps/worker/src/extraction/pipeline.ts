@@ -161,12 +161,13 @@ export interface ExtractionPoolConfig {
    */
   maxInputBytes: number;
   /**
-   * EXTRACTION_MAX_INPUT_ELEMENTS (100000): HTML with more start tags is cut
-   * before the next one in the thread; the result has `truncated: true`.
-   * Parse memory and time follow the element count (~3 KB of heap and up to
-   * ~0.1 ms per element), which the byte limit alone does not bound: 10 MB
-   * of tiny elements needs more than a 512 MB heap. Realistic pages stay far
-   * below (a 10 MB article page has ~55,000).
+   * EXTRACTION_MAX_INPUT_ELEMENTS (100000): the thread's HTML parser stops
+   * once it has created more elements than this (implied and reconstructed
+   * ones count, so markup cannot get around it); the result has
+   * `truncated: true`. Parse memory and time follow the element count
+   * (~3 KB of heap and up to ~0.1 ms per element), which the byte limit
+   * alone does not bound: 10 MB of tiny elements needs more than a 512 MB
+   * heap. Realistic pages stay far below (a 10 MB article page has ~55,000).
    */
   maxInputElements: number;
   /** EXTRACTION_MAX_QUEUE (64): extractions waiting for a thread; more are rejected. */

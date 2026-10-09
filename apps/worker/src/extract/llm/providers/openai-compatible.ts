@@ -113,6 +113,9 @@ export function openAICompatibleFromEnv(
   });
 }
 
+// OpenAI o-series and GPT-5 models, directly or as "openai/…" on a router.
+const REASONING_MODEL = /^(?:openai\/)?(?:o\d|gpt-5)/i;
+
 /** Request body for /chat/completions. Exported for tests. */
 export function buildChatBody(name: OpenAICompatibleName, caps: ModelCapabilities, req: LlmRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -121,8 +124,9 @@ export function buildChatBody(name: OpenAICompatibleName, caps: ModelCapabilitie
       { role: 'system', content: req.system },
       { role: 'user', content: req.user },
     ],
-    temperature: req.temperature ?? 0,
   };
+  // OpenAI reasoning models reject any temperature but the default (HTTP 400).
+  if (!REASONING_MODEL.test(caps.model)) body.temperature = req.temperature ?? 0;
   body[name === 'openai' ? 'max_completion_tokens' : 'max_tokens'] = effectiveMaxOutput(caps, req.maxOutputTokens);
 
   const format = responseFormat(caps, req);

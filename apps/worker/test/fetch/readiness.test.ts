@@ -204,10 +204,30 @@ describe.skipIf(!chromiumPath)('browser readiness with a real Chromium', () => {
   async function settleOn(path: string, opts: Partial<SettleOptions> = {}) {
     const page: Page = await context.newPage();
     const tracker = trackRequests(page);
+    // DOM samples settlePage took, and the time spent waiting on the browser
+    // for them (load-dependent: slow while the suite runs in parallel).
+    const sampling = { samples: 0, browserMs: 0 };
+    const counted = new Proxy(page, {
+      get(target, prop) {
+        if (prop === 'evaluate') {
+          return async (...args: Parameters<Page['evaluate']>) => {
+            const t0 = performance.now();
+            try {
+              return await target.evaluate(...args);
+            } finally {
+              sampling.samples++;
+              sampling.browserMs += performance.now() - t0;
+            }
+          };
+        }
+        const value = Reflect.get(target, prop, target) as unknown;
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
     try {
       await page.goto(`${site.origin}${path}`, { waitUntil: 'domcontentloaded' });
-      const report = await settlePage(page, tracker, { capMs: DEFAULT_READY_CAP_MS, challengeCapMs: DEFAULT_CHALLENGE_CAP_MS, ...opts });
-      return { report, html: await page.content(), page };
+      const report = await settlePage(counted, tracker, { capMs: DEFAULT_READY_CAP_MS, challengeCapMs: DEFAULT_CHALLENGE_CAP_MS, ...opts });
+      return { report, sampling, html: await page.content(), page };
     } finally {
       tracker.dispose();
       await page.close();
@@ -221,14 +241,33 @@ describe.skipIf(!chromiumPath)('browser readiness with a real Chromium', () => {
   }
 
   it('a page without scripts is ready at once', async () => {
-    const { report } = await settleOn('/static');
+    // Asserted on the readiness path, not on wall time (the browser's round
+    // trips slow down while the suite runs in parallel): 'static' returns as
+    // soon as the network has been quiet for one window, with no DOM-quiet
+    // window (QUIET_MS = 300) and no cap. That is at most 3 DOM samples
+    // (100 ms polls); a DOM-quiet window would need at least 4.
+    const { report, sampling } = await settleOn('/static');
     expect(report.reason).toBe('static');
-    expect(report.ms).toBeLessThan(200);
+    expect(sampling.samples).toBeLessThanOrEqual(3);
+    // Our own waiting (polls), apart from the browser's evaluation time, ends
+    // before the 'stable' path could even fire (~100 ms here).
+    expect(report.ms - sampling.browserMs).toBeLessThan(300);
 
+    // End to end, compared with a bare navigation measured under the same
+    // load: readiness adds ~100-150 ms. The fixed networkidle + 400 ms +
+    // scroll waits added ~900 ms (~1,065 ms in all).
+    const bare = await timed(async () => {
+      const p = await context.newPage();
+      try {
+        await p.goto(`${site.origin}/static`, { waitUntil: 'domcontentloaded' });
+        return await p.content();
+      } finally {
+        await p.close();
+      }
+    });
     const { value, ms } = await timed(() => tier4Fetch(`${site.origin}/static`, context));
     expect(value.html).toContain(MARKERS.static);
-    // Was ~1,065 ms with the fixed networkidle + 400 ms + scroll waits.
-    expect(ms).toBeLessThan(800);
+    expect(ms - bare.ms).toBeLessThan(400);
   });
 
   it('a small page with an inline script is ready after a short quiet window, not at the cap', async () => {

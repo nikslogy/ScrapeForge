@@ -7,11 +7,14 @@ import {
   monitorOutbound,
 } from '../browser/outbound-guard.js';
 import {
+  assertNoRefusedNavigation,
   capturePage,
   closePage,
   envMs,
   fetchDeadline,
+  navigationFailure,
   readinessFor,
+  trackNavigationHops,
   trackNavigationStatus,
   trackRequests,
 } from './tier4-browser.js';
@@ -96,6 +99,7 @@ export async function tier4StealthFetch(
   const monitor = monitorOutbound(page);
   const tracker = trackRequests(page);
   const navigation = trackNavigationStatus(page);
+  const hops = trackNavigationHops(page);
 
   try {
     // Dropped by Patchright once page.route() follows (see tier4-browser.ts).
@@ -113,9 +117,13 @@ export async function tier4StealthFetch(
       'Sec-Ch-Ua-Platform': '"Windows"',
     });
 
-    const response = await deadline.run('navigation', () =>
-      page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation') }),
-    );
+    const response = await deadline
+      .run('navigation', () =>
+        page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation') }),
+      )
+      .catch((err: unknown) => {
+        throw navigationFailure(err, hops);
+      });
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
     await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
@@ -139,6 +147,7 @@ export async function tier4StealthFetch(
       settle: readinessFor({ ...options, timeout: deadline.timeoutMs }, start),
       screenshot: Boolean(options.screenshot),
     });
+    assertNoRefusedNavigation(page, hops);
 
     return {
       html: capture.html,
@@ -147,6 +156,7 @@ export async function tier4StealthFetch(
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    hops.dispose();
     navigation.dispose();
     tracker.dispose();
     monitor.dispose();

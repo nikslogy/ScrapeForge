@@ -1,0 +1,16 @@
+{
+ "id": "synthetic-short-article-retry",
+ "source": "synthetic",
+ "url": "https://short.example.com/",
+ "inputBytes": 378,
+ "all": {
+  "extractionMethod": "readability",
+  "title": "Short",
+  "markdown": "# Short\n\nShipping rules: an order with Price > 10 ships free, and orders under that pay a flat fee. Returns are accepted within thirty days of delivery when items are unused, and the same rules apply here.\n\n<b>XMP</b> &amp; raw\n\nSecond paragraph & the end.",
+  "text": "Shipping rules: an order with Price > 10 ships free, and orders under that pay a flat fee. Returns are accepted within thirty days of delivery when items are unused, and the same rules apply here.\n<b>XMP</b> &amp; rawSecond paragraph & the end.",
+  "html": "<!DOCTYPE html><html><head><title>Short</title></head><body><div class=\"content\">\n<p>Shipping rules: an order with Price &gt; 10 ships free, and orders under that pay a flat fee. Returns are accepted within thirty days of delivery when items are unused, and the same rules apply here.</p>\n<xmp><b>XMP</b> &amp; raw</xmp><p>Second paragraph &amp; the end.</p></div></body></html>"
+ },
+ "htmlOnly": {
+  "title": "Short"
+ }
+}

@@ -70,6 +70,20 @@ describe('guardHtmlNesting', () => {
     expect(r.html).toBe(html);
   });
 
+  it('reads comment forms as the HTML tokenizer does (no skip-to-end bypass)', () => {
+    // "<!-->", "<!--->" are complete empty comments and "--!>" ends one; a
+    // scanner that waits for "-->" would treat the deep tail as comment text.
+    for (const prefix of ['<!-->', '<!--->', '<!-- a --!>', '<!-- a -->']) {
+      const html = `<html><body>${prefix}${'<div>'.repeat(5_000)}x${'</div>'.repeat(5_000)}</body></html>`;
+      const r = guardHtmlNesting(html, LIMIT);
+      expect(r.rewritten, prefix).toBe(true);
+      expect(r.maxDepth, prefix).toBeGreaterThan(LIMIT);
+    }
+    // An unterminated comment really is comment text to the end.
+    const open = guardHtmlNesting(`<body><!-- ${'<div>'.repeat(5_000)}`, LIMIT);
+    expect(open.rewritten).toBe(false);
+  });
+
   it('flattens adversarial nesting beyond the limit while keeping all text', () => {
     const html = `<html><body>${nested(20_000)}<p>tail paragraph</p></body></html>`;
     const r = guardHtmlNesting(html, LIMIT);

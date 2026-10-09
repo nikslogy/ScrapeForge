@@ -1,5 +1,5 @@
 import type { BrowserContext, Page, Request, Response } from 'patchright';
-import { assertPublicUrl } from '@scrapeforge/shared';
+import { assertPublicUrl, type OutboundBlockedError } from '@scrapeforge/shared';
 import {
   assertNavigationAllowed,
   ensureContextOutboundGuard,
@@ -7,6 +7,7 @@ import {
   monitorOutbound,
   type OutboundMonitor,
 } from '../browser/outbound-guard.js';
+import { egressRefusal } from '../net/egress.js';
 
 const FLATTEN_SHADOW_DOM_SCRIPT = `
   (function() {
@@ -256,6 +257,69 @@ export function trackNavigationStatus(page: Page): NavigationStatus {
 function withoutFragment(url: string): string {
   const i = url.indexOf('#');
   return i === -1 ? url : url.slice(0, i);
+}
+
+/**
+ * Main-frame navigation requests of the page (every redirect hop and later
+ * script navigations). Chromium reports an HTTPS hop the egress guard refused
+ * at CONNECT only as net::ERR_TUNNEL_CONNECTION_FAILED; the guard records
+ * each refusal by host and port, so a failed navigation whose hop matches one
+ * is reported as the OutboundBlockedError it is (no other tier can fetch it,
+ * and it must not be retried) rather than a page error that escalates.
+ */
+export interface NavigationHops {
+  /** The guard's recent refusal of one of the hops (latest first), if any. */
+  refusal(): OutboundBlockedError | undefined;
+  dispose(): void;
+}
+
+const MAX_TRACKED_HOPS = 50;
+
+export function trackNavigationHops(page: Page): NavigationHops {
+  const urls: string[] = [];
+  const onRequest = (r: Request) => {
+    try {
+      if (urls.length < MAX_TRACKED_HOPS && r.isNavigationRequest() && r.frame() === page.mainFrame()) urls.push(r.url());
+    } catch {
+      // Service worker requests have no frame.
+    }
+  };
+  page.on('request', onRequest);
+  return {
+    refusal() {
+      for (let i = urls.length - 1; i >= 0; i--) {
+        let url: URL;
+        try {
+          url = new URL(urls[i]);
+        } catch {
+          continue;
+        }
+        const refused = egressRefusal(url);
+        if (refused) return refused;
+      }
+      return undefined;
+    },
+    dispose() {
+      page.off('request', onRequest);
+      urls.length = 0;
+    },
+  };
+}
+
+/** A failed navigation's error, or the guard's refusal that caused it (network errors only). */
+export function navigationFailure(err: unknown, hops: NavigationHops): unknown {
+  if (err instanceof BrowserFetchTimeoutError || !(err instanceof Error) || !/net::ERR_/.test(err.message)) return err;
+  return hops.refusal() ?? err;
+}
+
+/**
+ * After the page was read: a later navigation (a page script) that the guard
+ * refused left Chrome's error page in place of the document.
+ */
+export function assertNoRefusedNavigation(page: Page, hops: NavigationHops): void {
+  if (!page.url().startsWith('chrome-error://')) return;
+  const refused = hops.refusal();
+  if (refused) throw refused;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
@@ -577,6 +641,7 @@ export async function tier4Fetch(
   const monitor = monitorOutbound(page);
   const tracker = trackRequests(page);
   const navigation = trackNavigationStatus(page);
+  const hops = trackNavigationHops(page);
 
   try {
     // Apply fingerprint patches before anything navigates. Patchright
@@ -604,9 +669,13 @@ export async function tier4Fetch(
       await page.addInitScript(MOBILE_INIT_SCRIPT);
     }
 
-    const response = await deadline.run('navigation', () =>
-      page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation', 20_000) }),
-    );
+    const response = await deadline
+      .run('navigation', () =>
+        page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation', 20_000) }),
+      )
+      .catch((err: unknown) => {
+        throw navigationFailure(err, hops);
+      });
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
     await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
@@ -627,6 +696,7 @@ export async function tier4Fetch(
       settle: readinessFor({ ...options, timeout: deadline.timeoutMs }, start),
       screenshot: Boolean(options.screenshot),
     });
+    assertNoRefusedNavigation(page, hops);
 
     return {
       html: capture.html,
@@ -635,6 +705,7 @@ export async function tier4Fetch(
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    hops.dispose();
     navigation.dispose();
     tracker.dispose();
     monitor.dispose();

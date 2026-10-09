@@ -133,8 +133,7 @@ export function guardHtmlNesting(html: string, maxDepth: number): NestingGuardRe
 
     // Comments, doctype, CDATA, processing instructions.
     if (next === 33 /* ! */ || next === 63 /* ? */) {
-      const close = html.startsWith('<!--', lt) ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
-      i = close === -1 ? n : close + (html.startsWith('<!--', lt) ? 3 : 1);
+      i = html.startsWith('<!--', lt) ? commentEnd(html, lt) : bogusCommentEnd(html, lt);
       continue;
     }
 
@@ -215,6 +214,27 @@ export function guardHtmlNesting(html: string, maxDepth: number): NestingGuardRe
   if (!out) return { html, maxDepth: deepest, rewritten: false, droppedTags: 0 };
   (out as string[]).push(html.slice(copiedUpTo));
   return { html: (out as string[]).join(''), maxDepth: deepest, rewritten: true, droppedTags: dropped };
+}
+
+/**
+ * Index just past a comment starting at `lt` ("<!--"), as the HTML tokenizer
+ * reads it: "<!-->" and "<!--->" are complete empty comments, "-->" and
+ * "--!>" both end a comment, and an unterminated comment runs to the end.
+ */
+function commentEnd(html: string, lt: number): number {
+  if (html.startsWith('<!-->', lt)) return lt + 5;
+  if (html.startsWith('<!--->', lt)) return lt + 6;
+  const a = html.indexOf('-->', lt + 4);
+  const b = html.indexOf('--!>', lt + 4);
+  if (a === -1 && b === -1) return html.length;
+  if (b === -1 || (a !== -1 && a < b)) return a + 3;
+  return b + 4;
+}
+
+/** "<!DOCTYPE ...>", "<![CDATA[...]]>" outside foreign content and "<?...>" end at the first ">". */
+function bogusCommentEnd(html: string, lt: number): number {
+  const gt = html.indexOf('>', lt + 2);
+  return gt === -1 ? html.length : gt + 1;
 }
 
 function isNameChar(c: number): boolean {

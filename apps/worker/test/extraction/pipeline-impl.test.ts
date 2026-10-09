@@ -3,7 +3,7 @@
 // text, base URLs), and inputs that used to throw or take seconds.
 import * as cheerio from 'cheerio';
 import { describe, expect, it } from 'vitest';
-import { extractContent, internals, truncateToElementBudget } from '../../src/extraction/pipeline-impl.js';
+import { extractContent, internals } from '../../src/extraction/pipeline-impl.js';
 import { largePage } from '../../../../tests/latency/lib/fixtures.js';
 import { randomDocument } from './random-html.js';
 import { syntheticCases } from './golden/synthetic.js';
@@ -167,13 +167,81 @@ describe('inline style parsing (Readability visibility)', () => {
     ['content: "x;display:none"', undefined],
     ['nonsense', undefined],
     ['', undefined],
+    // Comments as the CSS tokenizer reads them: not inside strings, and an
+    // unterminated one runs to the end of the input.
+    ['content: "/*"; display:none', 'none'],
+    ['content: "/* "; display: none; content: " */"', 'none'],
+    ["content: '\\'/*'; display:none", 'none'],
+    ['display:none; /* display:block', 'none'],
+    ['display:none /* unterminated', 'none'],
+    ['/* a */ dis/**/play: no/* b */ne', 'none'],
   ])('%j → display %j', (style, display) => {
     expect(internals.inlineStyle(style).get('display')).toBe(display);
+  });
+
+  it('reads comments and strings like a tokenizer-order regex on random styles', () => {
+    // Strings (escapes, possibly unterminated) are kept; comments outside them go.
+    const reference = (s: string) =>
+      s.replace(/("(?:\\[\s\S]|[^"\\])*"?|'(?:\\[\s\S]|[^'\\])*'?)|\/\*[\s\S]*?(?:\*\/|$)/g, (m, str: string | undefined) => str ?? '');
+    const alphabet = ['/', '*', '"', "'", '\\', 'a', ';', ':', 'display:none', ' '];
+    let seed = 7;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    for (let n = 0; n < 3_000; n++) {
+      const style = Array.from({ length: Math.floor(rand() * 24) }, () => alphabet[Math.floor(rand() * alphabet.length)]).join('');
+      const expected = new Map<string, string>();
+      // Declarations parsed from the reference's comment-free text by the same splitter.
+      for (const [k, v] of internals.inlineStyle(reference(style).replace(/\/\*/g, '\u0000'))) expected.set(k.replace(/\u0000/g, '/*'), v.replace(/\u0000/g, '/*'));
+      expect({ style, decls: [...internals.inlineStyle(style)] }).toEqual({ style, decls: [...expected] });
+    }
+  });
+
+  it('strips comments in linear time (a lazy regex was quadratic on unterminated "/*")', () => {
+    for (const style of ['/* '.repeat(200_000), `display:none;${'"/*'.repeat(100_000)}`, '/**/'.repeat(200_000)]) {
+      const t0 = performance.now();
+      internals.inlineStyle(style);
+      expect(performance.now() - t0).toBeLessThan(500); // 200,000 "/* " took ~60 s
+    }
   });
 });
 
 const PAGE_URL = 'https://site.example.com/a/b/page.html';
 const LOREM = 'Tide pools are rocky depressions along the shore that hold seawater when the tide recedes. '.repeat(3);
+
+describe("markdown from Readability's article", () => {
+  const page = (inner: string) =>
+    `<html><head><title>T</title></head><body><article><p>${LOREM}</p>${inner}<p>${LOREM}</p></article></body></html>`;
+
+  // Readability wraps the inline element in a new <p>; read back, the <p>
+  // closes at the inner block and the formatting repeats in each paragraph.
+  it.each([
+    ["<div><em><p>Editor's note: this story was updated.</p><p>Corrections appear below.</p></em></div>", "_Editor's note: this story was updated._\n\n_Corrections appear below._"],
+    ['<div><font face="Arial"><b><p>Bold paragraph from a WYSIWYG editor.</p></b></font></div>', '**Bold paragraph from a WYSIWYG editor.**'],
+    ['<div>Before upgrading: <strong><p>Back up the database.</p><p>Version 2 changes the config.</p></strong></div>', 'Before upgrading:\n\n**Back up the database.**\n\n**Version 2 changes the config.**'],
+    ['<div>Steps <span><ul><li>one</li><li>two</li></ul></span></div>', 'Steps\n\n*   one\n*   two'],
+  ])('repeats inline formatting in each block it wraps: %s', async (inner, expected) => {
+    const r = await extractContent(page(inner), PAGE_URL, ['markdown']);
+    expect(r.extractionMethod).toBe('readability');
+    expect(r.markdown).toContain(expected);
+    expect(r.markdown).not.toMatch(/^\s*(\*\*|_)\s*$/m);
+  });
+
+  it('reads raw-text elements back as text', async () => {
+    const r = await extractContent(page('<div>Note: <em><p>Wrapped.</p></em><xmp><b>XMP</b> &amp; raw</xmp></div>'), PAGE_URL, ['markdown']);
+    expect(r.markdown).toContain('_Wrapped._');
+    expect(r.markdown).toContain('<b>XMP</b> &amp; raw');
+  });
+
+  it('matches turndown converting the article HTML on random pages', () => {
+    let compared = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const r = internals.readabilityMarkdown(randomDocument(seed), PAGE_URL);
+      if (!r) continue;
+      compared++;
+      if (r.markdown !== r.reference) expect({ seed, markdown: r.markdown }).toEqual({ seed, markdown: r.reference });
+    }
+    expect(compared).toBeGreaterThan(300);
+  });
+});
 
 describe('extractContent', () => {
   it('keeps hidden text out of markdown and text', async () => {
@@ -261,10 +329,16 @@ describe('extractContent', () => {
       ['a 2 MB attribute value', `<html><body><div data-x="${'x'.repeat(2_000_000)}"><p>${LOREM}</p><p>${LOREM}</p></div></body></html>`, (r) => {
         expect(r.markdown).toContain('Tide pools');
       }],
+      ['a 400 KB style attribute of unterminated comments', `<html><body><article><div style="${'/* '.repeat(130_000)}"><p>${LOREM}</p></div><p>${LOREM}</p></article></body></html>`, (r) => {
+        expect(r.extractionMethod).toBe('readability');
+        expect(r.markdown).toContain('Tide pools');
+      }],
     ];
 
     it.each(cases)('%s', async (_name, html, check) => {
+      const t0 = performance.now();
       const r = await extractContent(html, PAGE_URL, ['markdown', 'text', 'html']);
+      expect(performance.now() - t0).toBeLessThan(8_000);
       expect(r.html).toBeTypeOf('string');
       check(r);
     });
@@ -280,19 +354,42 @@ describe('extractContent', () => {
     expect(r.markdown).toContain('<b>NOEMBED</b>'); // text, as parse5 reads it, not bold markup
   });
 
-  it('repairs only templates when the two parsers disagree on raw-text elements', async () => {
+  it('gives each raw-text element its parse5 text even where the two parsers disagree on namespaces', async () => {
     // <foreignObject> holds HTML in parse5, so its <noembed> is an HTML
-    // raw-text element; linkedom puts it in the SVG namespace. With the lists
-    // unpaired no element gets another's text: the plain <noembed> keeps
-    // linkedom's markup reading (bold N), and the template still goes.
+    // raw-text element; linkedom puts it in the SVG namespace. The elements
+    // are matched by marker attributes, not by document order, so both
+    // hold their parse5 text (as in JSDOM), the template still goes, and a
+    // page cannot forge a marker.
     const html = `<html><head><title>t</title></head><body><article><p>${LOREM}</p>
 <svg><foreignObject><noembed><b>F</b></noembed></foreignObject></svg><noembed><b>N</b></noembed>
-<template><p>TEMPLATE-TEXT</p></template><p>${LOREM}</p></article></body></html>`;
+<template><p>TEMPLATE-TEXT</p></template><p data-scrapeforge-inert="t">FORGED-MARKER ${LOREM}</p><p>${LOREM}</p></article></body></html>`;
     const r = await extractContent(html, PAGE_URL, ['markdown', 'text']);
+    expect(r.extractionMethod).toBe('readability');
     expect(r.markdown).toContain('Tide pools');
-    expect(r.markdown).toContain('**N**');
-    expect(r.markdown).not.toContain('<b>');
+    expect(r.markdown).toContain('<b>N</b>');
+    expect(r.markdown).not.toContain('**N**');
     expect(r.markdown).not.toContain('TEMPLATE-TEXT');
+    expect(r.markdown).toContain('FORGED-MARKER');
+  });
+
+  it("keeps the raw-text and text-node repairs through Readability's retries", async () => {
+    // Under 500 characters, Readability re-parses the body from its
+    // innerHTML for each further attempt, and the attempt it returns can be
+    // one of those.
+    const html = `<!doctype html><html><head><title>Short</title></head><body><div class="content">
+<p>Shipping rules: an order with Price &gt; 10 ships free, and orders under that pay a flat fee. Returns are accepted within thirty days of delivery when unused.</p>
+<xmp><b>XMP</b> &amp; raw</xmp><noembed><i>NOEMBED</i></noembed><template><p>TEMPLATE-TEXT</p></template><p>Second paragraph &amp; the end.</p></div></body></html>`;
+    const r = await extractContent(html, PAGE_URL, ['markdown', 'text']);
+    expect(r.extractionMethod).toBe('readability');
+    expect(r.text).toContain('<b>XMP</b> &amp; raw');
+    expect(r.text).toContain('<i>NOEMBED</i>');
+    expect(r.markdown).toContain('Price > 10');
+    expect(r.markdown).toContain('<b>XMP</b> &amp; raw');
+    for (const out of [r.text!, r.markdown!]) {
+      expect(out).not.toContain('&lt;');
+      expect(out).not.toContain('TEMPLATE-TEXT');
+      expect(out).not.toContain('data-scrapeforge');
+    }
   });
 
   it('extracts a frameset document (the JSDOM pipeline threw in turndown)', async () => {
@@ -301,14 +398,22 @@ describe('extractContent', () => {
   });
 
   it('leaves trees deeper than browsers build (512 levels) to the linear strategies', async () => {
-    const nested = (depth: number) =>
-      `<html><body>${'<div>'.repeat(depth)}<p>${'word '.repeat(80)}</p><p>${'more '.repeat(80)}</p>${'</div>'.repeat(depth)}</body></html>`;
-    expect((await extractContent(nested(400), PAGE_URL, ['markdown'])).extractionMethod).toBe('readability');
-    const t0 = performance.now();
-    const deep = await extractContent(nested(5_000), PAGE_URL, ['markdown', 'text']);
-    expect(performance.now() - t0).toBeLessThan(5_000); // Readability alone took 9 s here
-    expect(deep.extractionMethod).toBe('paragraph-density');
-    expect(deep.text).toBe(`${'word '.repeat(80)}${'more '.repeat(80)}`.trim());
+    const nested = (open: string, close: string, n: number) =>
+      `<html><body>${open.repeat(n)}<div><p>${'word '.repeat(80)}</p><p>${'more '.repeat(80)}</p></div>${close.repeat(n)}</body></html>`;
+    expect((await extractContent(nested('<div>', '</div>', 400), PAGE_URL, ['markdown'])).extractionMethod).toBe('readability');
+    // The parse flattens nesting past 512 open elements (nesting.test.ts),
+    // but not table cells: those keep the tree 5,000 levels deep (and the
+    // elements in them flat, so no block holds both paragraphs).
+    for (const [html, method] of [
+      [nested('<div>', '</div>', 5_000), 'paragraph-density'],
+      [nested('<table><tr><td>', '</td></tr></table>', 1_250), 'fallback'],
+    ]) {
+      const t0 = performance.now();
+      const deep = await extractContent(html!, PAGE_URL, ['markdown', 'text']);
+      expect(performance.now() - t0).toBeLessThan(5_000); // Readability alone took 9 s on 5,000 levels
+      expect(deep.extractionMethod).toBe(method);
+      expect(deep.text).toBe(`${'word '.repeat(80)}${'more '.repeat(80)}`.trim());
+    }
   });
 
   it('leaves pages over Readability\'s cost limits to the linear strategies', async () => {
@@ -346,69 +451,30 @@ describe('extractContent', () => {
 });
 
 describe('element budget', () => {
-  // Reference count for the random documents, whose only raw text is <script>/<style>.
-  const startTags = (html: string) =>
-    (html
-      .replace(/<!--[\s\S]*?(?:-->|$)/g, '')
-      .replace(/(<(script|style)\b[^>]*>)[\s\S]*?(?:<\/\2|$)/gi, '$1')
-      .match(/<[A-Za-z]/g) ?? []).length;
+  const elements = (root: unknown) => cheerio.load(root as string).root().find('*').length;
 
-  it('cuts before the first start tag over the budget', () => {
-    const html = '<p>a</p><p>b</p><p>c</p>';
-    expect(truncateToElementBudget(html, 3)).toEqual({ html, truncated: false });
-    expect(truncateToElementBudget(html, 2)).toEqual({ html: '<p>a</p><p>b</p>', truncated: true });
-    expect(truncateToElementBudget(html, 0)).toEqual({ html: '', truncated: true });
-    expect(truncateToElementBudget('', 0)).toEqual({ html: '', truncated: false });
-    expect(truncateToElementBudget('no markup < 3 and a<', 0)).toEqual({ html: 'no markup < 3 and a<', truncated: false });
-  });
-
-  it('counts like a tokenizer: not inside comments, raw text or after <plaintext>', () => {
+  it('counts the elements parse5 creates and stops after the token that passes the budget', () => {
+    const html = '<p>a</p><p>b</p><p>c</p>'; // html, head and body are implied
+    expect(internals.parseHtml(html, 6).truncated).toBe(false);
+    const cut = internals.parseHtml(html, 5);
+    expect(cut.truncated).toBe(true);
+    expect(cheerio.load(cut.document as never).html()).toBe('<html><head></head><body><p>a</p><p>b</p><p></p></body></html>');
+    expect(internals.parseHtml('no markup < 3 and a<', 3).truncated).toBe(false);
+    const empty = internals.parseHtml('', 2);
+    expect(empty.truncated).toBe(true);
+    expect(elements(empty.document)).toBe(3); // the EOF token creates all three
+    // Comments, raw text and <noscript> (scripting enabled, as in cheerio) hold no elements.
     const tags = '<b>x</b>'.repeat(5);
-    const cases: Array<[string, number]> = [
+    for (const [inner, count] of [
       [`<!-- ${tags} -->`, 0],
       [`<script>var s = "${tags}";</script>`, 1],
-      [`<SCRIPT type="x">${tags}</ScRiPt ><i>`, 2],
-      [`<style>${tags}</style>`, 1],
-      [`<textarea>${tags}</textarea><title>${tags}</title>`, 2],
-      [`<xmp>${tags}</xmp><iframe>${tags}</iframe><noembed>${tags}</noembed><noframes>${tags}</noframes>`, 4],
+      [`<textarea>${tags}</textarea><title>${tags}</title><xmp>${tags}</xmp><noscript>${tags}</noscript>`, 4],
       [`<plaintext>${tags}`, 1],
-      [`<script>${tags}`, 1], // unclosed: the rest is script text
-      [`<!-- ${tags}`, 0], // unclosed comment
-      [`<scripts>${tags}</scripts>`, 6], // not <script>
-      [`<noscript>${tags}</noscript>`, 6], // markup (scripting disabled)
-      ['<!doctype html><?xml x?><a><', 1],
-    ];
-    for (const [html, count] of cases) {
-      expect(truncateToElementBudget(html, count), html).toEqual({ html, truncated: false });
-      if (count > 0) expect(truncateToElementBudget(html, count - 1).truncated, html).toBe(true);
-    }
-  });
-
-  it('never keeps more start tags than the budget on random documents', () => {
-    for (let seed = 1; seed <= 200; seed++) {
-      const html = randomDocument(seed);
-      const total = startTags(html);
-      for (const budget of [0, 1, 7, Math.floor(total / 2), total]) {
-        const { html: cut, truncated } = truncateToElementBudget(html, budget);
-        expect(html.startsWith(cut)).toBe(true);
-        expect(startTags(cut)).toBeLessThanOrEqual(budget);
-        expect(truncated).toBe(cut !== html);
-        if (truncated) expect(html[cut.length]).toBe('<');
-      }
-    }
-  });
-
-  it('runs in linear time on adversarial input', () => {
-    for (const html of [
-      '<a'.repeat(2_000_000),
-      `<script>${'</'.repeat(2_000_000)}`,
-      `<!--${'<a>'.repeat(1_000_000)}`,
-      `<${'a'.repeat(4_000_000)}`,
-      '<<<<'.repeat(1_000_000),
-    ]) {
-      const t0 = performance.now();
-      truncateToElementBudget(html, 10);
-      expect(performance.now() - t0).toBeLessThan(1_000);
+      [`<scripts>${tags}</scripts>`, 6],
+    ] as const) {
+      const html = `<html><head></head><body>${inner}</body></html>`;
+      expect(internals.parseHtml(html, count + 3).truncated, inner).toBe(false);
+      expect(internals.parseHtml(html, count + 2).truncated, inner).toBe(true);
     }
   });
 

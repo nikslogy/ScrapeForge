@@ -159,8 +159,10 @@ paths:
           see `schemaErrors`).
         * `status: failed` — no usable data: blocked/challenge page, invalid
           schema, provider failure with nothing else to go on, or nothing
-          found. `content.json` is omitted. Failed extractions are never
-          cached.
+          found. `content.json` is omitted.
+        Only `complete` extractions are cached (see `cacheTtl`): a partial or
+        failed one may come from this request's spend cap, timeout or a
+        transient provider problem.
         `missing` lists each absent value with its JSON pointer and reason;
         `warnings` are machine-readable notes (e.g. `citation_mismatch:/price`,
         `structured_value_not_visible:sku`, `source_page_blocked:challenge_page`,
@@ -374,12 +376,20 @@ components:
             Proxy tier. `auto` lets the router pick based on domain history.
         headers:
           type: object
-          description: Extra HTTP headers to send with the request.
+          description: |
+            Extra HTTP headers to send with the request. Sent by the plain
+            HTTP fetch tiers only: when the page is rendered in a browser
+            tier, they are not applied. Part of the cache key (as a hash; see
+            `cacheTtl`).
           additionalProperties:
             type: string
         cookies:
           type: array
-          description: Cookies to set before navigation.
+          description: |
+            Cookies for the request. **Known limitation:** they are accepted
+            and validated but currently not applied by any fetch tier, so the
+            page is fetched without them. Part of the cache key (as a hash;
+            see `cacheTtl`).
           items:
             type: object
             required: [name, value]
@@ -407,7 +417,16 @@ components:
           minimum: 0
           maximum: 2592000
           default: 3600
-          description: Cache TTL in seconds. Set to 0 to skip cache entirely.
+          description: |
+            Cache TTL in seconds. Set to 0 to skip the cache entirely (it is
+            neither read nor written). A cached result is served only to the
+            same account for the same request: the key covers the URL,
+            `formats`, `proxy`, `screenshot`, `mobile`, `waitFor`,
+            `blockResources`, the extraction schema, `includeEvidence`,
+            `maxLlmCostUsd` (with a schema) and a hash of `headers` and
+            `cookies` (their values are never stored in the key); `timeout`
+            and `webhookUrl` do not count. Plain scrapes are cached; an
+            extraction only when its status is `complete`.
         webhookUrl:
           type: string
           format: uri

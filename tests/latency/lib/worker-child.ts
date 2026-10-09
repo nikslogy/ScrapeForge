@@ -6,7 +6,7 @@
 
 import { UnrecoverableError, Worker, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { createCacheKey, type ScrapeJobData, type ScrapeResult } from '@scrapeforge/shared';
+import { isCacheableResult, resultCacheKey, type ScrapeJobData, type ScrapeResult } from '@scrapeforge/shared';
 import { SseEmitter } from '../../../apps/worker/src/delivery/sse-emitter.js';
 import { wallNow } from './clock.js';
 import { scrapeResult } from './fixtures.js';
@@ -79,15 +79,16 @@ async function loadFullDeps(
 }
 
 /** The Redis writes worker.ts makes after a successful scrape (cache + result). */
+/**
+ * worker.ts's stage 4: the shared tenant-scoped cache key, and only results
+ * that may be cached (an extraction only when complete; neither processor
+ * here runs one, so a job with a schema is never cached).
+ */
 async function storeResult(redis: Redis, job: ScrapeJobData, result: ScrapeResult | Record<string, unknown>): Promise<void> {
   const { options } = job;
-  if (options.cacheTtl && options.cacheTtl > 0) {
-    const cacheKeyStr = `cache:${createCacheKey(job.url, {
-      formats: options.formats,
-      proxy: options.proxy,
-      extractSchema: options.extractSchema,
-    })}`;
-    await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
+  const extraction = (result.metadata as { extraction?: { status?: string } } | undefined)?.extraction;
+  if (options.cacheTtl && isCacheableResult(options, extraction?.status)) {
+    await redis.set(resultCacheKey(job.userId, job.url, options), JSON.stringify(result), 'EX', options.cacheTtl);
   }
   await redis.set(`result:${job.jobId}`, JSON.stringify(result), 'EX', 3600);
 }
@@ -140,8 +141,15 @@ function redisSimProcessor(redis: Redis, sse: SseEmitter, resultBytes: number): 
   };
 }
 
-// worker.ts's classification of errors that must not be retried.
-const PERMANENT_ERROR = /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|private.*address|All tiers exhausted/i;
+// worker.ts's classification of errors that must not be retried
+// (isPermanentFailure): exhausted tiers only when not all failures were transient.
+const PERMANENT_ERROR = /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|OUTBOUND_BLOCKED|Blocked by SSRF guard|DNS lookup failed|private.*address/i;
+
+function isPermanentFailure(error: unknown, message: string): boolean {
+  const e = error as { code?: unknown; transient?: unknown } | null;
+  if (e?.code === 'TIERS_EXHAUSTED') return e.transient !== true;
+  return PERMANENT_ERROR.test(message);
+}
 
 /**
  * worker.ts's failure path: store a failed result, emit the SSE error, and
@@ -167,7 +175,7 @@ async function failJob(redis: Redis, sse: SseEmitter, job: ScrapeJobData, error:
   };
   await redis.set(`result:${job.jobId}`, JSON.stringify(failResult), 'EX', 3600);
   await sse.emitError(job.jobId, message);
-  if (PERMANENT_ERROR.test(message)) throw new UnrecoverableError(message);
+  if (isPermanentFailure(error, message)) throw new UnrecoverableError(message);
   throw error;
 }
 

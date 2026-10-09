@@ -10,9 +10,16 @@
 // that are only part of an element's text get a regex transform anchored on
 // the neighbouring words ("Price: £51.77" → "Price:\s*(£\d[\d.,]*)").
 //
+// When the first match of the best selector is the wrong element in some
+// records (a sale card's struck-through "was" price before the current one),
+// the selector is refined with what tells the two apart: a class or ancestor
+// the wrong element has (":not(.was)", ":not(del *)", a line-through style)
+// or the value's position (":last-child").
+//
 // The induced recipe is validated and run on the same page; coverage is the
-// fraction of non-null sample values it reproduces. Below 90% no recipe is
-// returned.
+// fraction of non-null sample values it reproduces. The engine trusts a
+// recipe only on exact agreement, so anything short of full coverage returns
+// no recipe.
 
 import * as cheerio from 'cheerio';
 import type { ExtractionRecipe, RecipeField, RecipeTransform } from '../types.js';
@@ -44,7 +51,8 @@ export interface InduceResult {
   notes: string[];
 }
 
-export const MIN_INDUCTION_COVERAGE = 0.9;
+/** Every non-empty sample value must be reproduced (exact agreement decides later anyway). */
+export const MIN_INDUCTION_COVERAGE = 1;
 
 /** Elements examined per scope. */
 const MAX_SCAN_ELEMENTS = 20_000;
@@ -63,6 +71,10 @@ const MAX_EVALUATIONS_PER_FIELD = 600;
 const MAX_TOTAL_EVALUATIONS = 6_000;
 const MAX_SAMPLES = 20;
 const MAX_ATTR_SOURCE_CHARS = 2_000;
+/** Candidates kept as bases for refinement, records probed per base, matches read per record. */
+const MAX_REFINE_BASES = 12;
+const MAX_REFINE_RECORDS = 3;
+const MAX_REFINE_MATCHES = 20;
 
 const URL_ATTRS = new Set(['href', 'src', 'data-src', 'data-original', 'data-lazy-src', 'poster', 'action']);
 const VALUE_ATTRS = new Set(['href', 'src', 'content', 'alt', 'title', 'datetime', 'value', 'aria-label', 'poster', 'label']);
@@ -123,9 +135,11 @@ export function induceRecipe(args: InduceArgs): InduceResult {
   const checked = validateRecipe(candidate, fieldNames);
   if (!checked.ok) return fail(notes, `induced recipe is invalid: ${checked.errors.join('; ')}`);
 
-  const coverage = measureCoverage($, checked.recipe, samples, fieldNames, args.baseUrl);
-  if (coverage < MIN_INDUCTION_COVERAGE) {
-    notes.push(`coverage ${coverage.toFixed(2)} is below ${MIN_INDUCTION_COVERAGE}`);
+  const { reproduced, total } = measureCoverage($, checked.recipe, samples, fieldNames, args.baseUrl);
+  const coverage = total === 0 ? 0 : reproduced / total;
+  // Compared as counts: a ratio such as 39/40 must never round up to full coverage.
+  if (total === 0 || reproduced < total * MIN_INDUCTION_COVERAGE) {
+    notes.push(`coverage ${coverage.toFixed(3)} (${reproduced} of ${total} sample values) is below ${MIN_INDUCTION_COVERAGE}`);
     return { recipe: null, coverage, notes };
   }
   return { recipe: checked.recipe, coverage, notes };
@@ -177,7 +191,7 @@ function measureCoverage(
   samples: Array<Record<string, string | null>>,
   fieldNames: string[],
   baseUrl: string,
-): number {
+): { reproduced: number; total: number } {
   // Only the sampled records are compared; the rest of a long listing need not run.
   const run = runRecipe(recipe, { $ }, { baseUrl, maxRecords: samples.length });
   const records: Array<Record<string, unknown>> = Array.isArray(run.data) ? run.data : [run.data];
@@ -193,7 +207,7 @@ function measureCoverage(
       if (got !== undefined && sameValue(got as RecipeValue, want)) reproduced++;
     }
   });
-  return total === 0 ? 0 : reproduced / total;
+  return { reproduced, total };
 }
 
 function sameValue(got: RecipeValue | RecipeValue[], want: string): boolean {
@@ -648,24 +662,135 @@ function induceField(
   // Derive candidates from the first record that has a value.
   const home = values.findIndex((v) => v !== null);
   const sources = findSources(scanScope(scopes[home]), values[home] as string, ctx);
-  let best: { candidate: Candidate; score: Score } | null = null;
-  let evaluations = 0;
-  const tried = new Set<string>();
-  for (const source of sources) {
+  const search: FieldSearch = { best: null, evaluations: 0, tried: new Set(), wanted };
+  const bases: Candidate[] = [];
+  search: for (const source of sources) {
     for (const candidate of candidatesFor(source, scopes[home])) {
       const key = JSON.stringify(candidate);
-      if (tried.has(key)) continue;
-      tried.add(key);
-      if (++evaluations > MAX_EVALUATIONS_PER_FIELD || exhausted(budget)) return finishField(best);
+      if (search.tried.has(key)) continue;
+      search.tried.add(key);
+      if (++search.evaluations > MAX_EVALUATIONS_PER_FIELD || exhausted(budget)) break search;
       budget.evaluations++;
+      if (bases.length < MAX_REFINE_BASES && candidate.selector !== '') bases.push(candidate);
       // Cheap check on the home record before evaluating every sample.
       if (!reproduces($, scopes[home], candidate, values[home] as string, ctx)) continue;
-      const score = scoreCandidate($, scopes, values, candidate, ctx);
-      if (!best || better(score, best.score)) best = { candidate, score };
-      if (score.matched === wanted && score.extras === 0) return finishField(best);
+      if (consider($, scopes, values, candidate, ctx, search)) return finishField(search.best);
     }
   }
-  return finishField(best);
+  refine($, scopes, values, bases, ctx, budget, search);
+  return finishField(search.best);
+}
+
+interface FieldSearch {
+  best: { candidate: Candidate; score: Score } | null;
+  evaluations: number;
+  tried: Set<string>;
+  /** Non-null sample values of the field. */
+  wanted: number;
+}
+
+/** Scores `candidate` on every sample; true once a candidate reproduces them all. */
+function consider($: cheerio.CheerioAPI, scopes: DomNode[], values: Array<string | null>, candidate: Candidate, ctx: TransformContext, search: FieldSearch): boolean {
+  const score = scoreCandidate($, scopes, values, candidate, ctx);
+  if (!search.best || better(score, search.best.score)) search.best = { candidate, score };
+  return perfect(search.best.score, search.wanted);
+}
+
+function perfect(score: Score, wanted: number): boolean {
+  return score.matched === wanted && score.extras === 0;
+}
+
+/**
+ * When no candidate reproduces every sample, the value is often a later
+ * match of a good selector in some records (a sale card lists the struck
+ * "was" price first). For each base candidate, records whose first match is
+ * wrong but a later match holds the value are compared with that first
+ * match, and the selector is narrowed by what sets them apart.
+ */
+function refine(
+  $: cheerio.CheerioAPI,
+  scopes: DomNode[],
+  values: Array<string | null>,
+  bases: Candidate[],
+  ctx: TransformContext,
+  budget: SearchBudget,
+  search: FieldSearch,
+): void {
+  if (search.best && perfect(search.best.score, search.wanted)) return;
+  for (const base of bases) {
+    const suffixes = new Set<string>();
+    let probed = 0;
+    for (let i = 0; i < scopes.length && probed < MAX_REFINE_RECORDS; i++) {
+      const want = values[i];
+      if (want === null) continue;
+      const matches = allMatches($, scopes[i], base.selector);
+      if (matches.length < 2 || sameAs(readCandidate(matches[0], base, ctx), want)) continue;
+      const target = matches.slice(1).find((el) => sameAs(readCandidate(el, base, ctx), want));
+      if (!target) continue;
+      probed++;
+      for (const s of distinguishingSuffixes(matches[0], target)) suffixes.add(s);
+    }
+    for (const suffix of suffixes) {
+      const candidate: Candidate = { ...base, selector: `${base.selector}${suffix}` };
+      const key = JSON.stringify(candidate);
+      if (search.tried.has(key)) continue;
+      search.tried.add(key);
+      if (checkSelector(candidate.selector, { relative: true }) !== null) continue;
+      if (++search.evaluations > MAX_EVALUATIONS_PER_FIELD || exhausted(budget)) return;
+      budget.evaluations++;
+      if (consider($, scopes, values, candidate, ctx, search)) return;
+    }
+  }
+}
+
+const LINE_THROUGH = '[style*="line-through" i]';
+
+/**
+ * Pseudo-classes that keep `target` and drop `wrong` (two matches of one
+ * selector in a record), most meaningful first: the wrong element's own
+ * classes, steps of its ancestors that the target's branch lacks (a <del>,
+ * a "was-price" wrapper), a line-through style, then the target's position.
+ */
+function distinguishingSuffixes(wrong: DomElement, target: DomElement): string[] {
+  const out: string[] = [];
+  const targetClasses = new Set(stableClasses(target));
+  for (const c of stableClasses(wrong)) if (!targetClasses.has(c)) out.push(`:not(.${c})`);
+
+  const common = lowestCommonAncestor([wrong, target]);
+  const branch = (el: DomElement): DomElement[] => {
+    const out: DomElement[] = [];
+    for (let n: DomNode | null = el; isElement(n) && n !== common; n = n.parent) out.push(n);
+    return out;
+  };
+  const wrongBranch = branch(wrong);
+  const targetBranch = branch(target);
+  const targetSteps = new Set(targetBranch.flatMap((el) => stepVariants(el)));
+  for (const ancestor of wrongBranch.slice(1)) {
+    for (const step of stepVariants(ancestor)) if (!targetSteps.has(step)) out.push(`:not(${step} *)`);
+  }
+  const struck = (el: DomElement): boolean => /line-through/i.test(el.attribs.style ?? '');
+  if (!targetBranch.some(struck)) {
+    if (struck(wrong)) out.push(`:not(${LINE_THROUGH})`);
+    if (wrongBranch.slice(1).some(struck)) out.push(`:not(${LINE_THROUGH} *)`);
+  }
+  const siblings = (el: DomElement): DomElement[] => ((el.parent as (DomNode & { children?: DomNode[] }) | null)?.children ?? []).filter(isElement);
+  const targetSiblings = siblings(target);
+  if (targetSiblings[targetSiblings.length - 1] === target) out.push(':last-child');
+  if (targetSiblings.filter((s) => s.name === target.name).pop() === target) out.push(':last-of-type');
+  return [...new Set(out)];
+}
+
+/** Matches of `selector` inside `scope` in document order (at most MAX_REFINE_MATCHES). */
+function allMatches($: cheerio.CheerioAPI, scope: DomNode, selector: string): DomElement[] {
+  try {
+    return ($(scope as never).find(selector).toArray() as unknown as DomElement[]).slice(0, MAX_REFINE_MATCHES);
+  } catch {
+    return [];
+  }
+}
+
+function sameAs(got: RecipeValue, want: string): boolean {
+  return got !== null && norm(String(got)) === norm(want);
 }
 
 function finishField(best: { candidate: Candidate; score: Score } | null): RecipeField | null {
@@ -750,7 +875,11 @@ function extractOne($: cheerio.CheerioAPI, scope: DomNode, candidate: Candidate,
       return null;
     }
   }
-  if (!el) return null;
+  return el ? readCandidate(el, candidate, ctx) : null;
+}
+
+/** The value `candidate` reads from `el` (attribute or text, then transforms). */
+function readCandidate(el: DomElement, candidate: Candidate, ctx: TransformContext): RecipeValue {
   const raw = candidate.attr === undefined ? elementText(el, 100_000).text : readAttribute(el, candidate.attr);
   if (raw === null) return null;
   const value = applyTransforms(raw, compiled(candidate.transforms), ctx, []);

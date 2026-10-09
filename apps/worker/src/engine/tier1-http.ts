@@ -126,9 +126,14 @@ const BLOCK_INDICATORS = [
   'blocked.gif',
   'px-captcha',
   'pxcaptcha',
-  'perimeterx',
-  'datadome',
-  'shieldsquare',
+  // Vendor names alone are not markers: their passive tag scripts
+  // (js.datadome.co/tags.js, client.perimeterx.net, cdn.perfdrive.com) sit on
+  // normal pages too. Only challenge markup counts (DataDome's captcha and
+  // interstitial load from captcha-delivery.com, above).
+  'captcha.px-cdn.net',
+  'title="datadome captcha"',
+  'validate.perfdrive.com',
+  'shieldsquare captcha',
   '_incapsula_resource',
   'request unsuccessful. incapsula',
   'pardon our interruption',
@@ -145,6 +150,8 @@ const STRUCTURAL_MARKERS = [
   'errors/validatecaptcha',
   'px-captcha',
   'pxcaptcha',
+  'captcha.px-cdn.net',
+  'validate.perfdrive.com',
   '_incapsula_resource',
 ];
 

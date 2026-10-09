@@ -22,7 +22,9 @@
 // output limit is lowered to fit; a model that cannot fit even a minimal
 // answer is skipped, and when no model fits the run fails with
 // budget_exhausted before calling. Models without registry rates cannot be
-// checked in advance (their reported cost is still charged afterwards).
+// checked in advance (their reported cost is still charged afterwards). A
+// call abandoned at the deadline reports no usage but may still be billed,
+// so it is charged at its worst case.
 
 import {
   LlmError,
@@ -192,7 +194,8 @@ export class ModelClient {
           attemptNote = note ? `${note}; ${lowered}` : lowered;
         }
         state.budgetStop = undefined;
-        const outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote);
+        const inputEstimate = this.#inputEstimate(effective, req, opts, state);
+        const outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote, inputEstimate);
         state.attempts.push(outcome.record);
         opts.budget.charge(outcome.record.costUsd);
         if (outcome.ok) return { response: outcome.response, model: effective, attempts: state.attempts };
@@ -332,22 +335,29 @@ export class ModelClient {
     return { ok: true, maxOutputTokens: Math.min(requested, fits) };
   }
 
-  /** The caller's input estimate, else one computed from the request (plus the schema in json_schema mode). */
+  /**
+   * Input tokens to price: the request's own estimate (plus the schema when
+   * this model is sent one), or the caller's when that is larger. A caller
+   * sizes its estimate for the primary model, which may not send the schema.
+   */
   #inputEstimate(caps: ModelCapabilities, req: LlmRequest, opts: CompleteOptions, state: RunState): number {
     const given = opts.estimatedInputTokens;
-    if (given !== undefined && Number.isFinite(given) && given > 0) return given;
+    const callerEstimate = given !== undefined && Number.isFinite(given) && given > 0 ? given : 0;
     state.promptTokens ??= estimateTokens(req.system) + estimateTokens(req.user) + MESSAGE_OVERHEAD_TOKENS;
-    if (caps.jsonMode !== 'json_schema' || !req.responseSchema) return state.promptTokens;
-    if (state.schemaTokens === undefined) {
-      let json = '';
-      try {
-        json = JSON.stringify(req.responseSchema) ?? '';
-      } catch {
-        // A schema that cannot be serialized cannot be sent either.
+    let own = state.promptTokens;
+    if (caps.jsonMode === 'json_schema' && req.responseSchema) {
+      if (state.schemaTokens === undefined) {
+        let json = '';
+        try {
+          json = JSON.stringify(req.responseSchema) ?? '';
+        } catch {
+          // A schema that cannot be serialized cannot be sent either.
+        }
+        state.schemaTokens = estimateTokens(json);
       }
-      state.schemaTokens = estimateTokens(json);
+      own += state.schemaTokens;
     }
-    return state.promptTokens + state.schemaTokens;
+    return Math.max(callerEstimate, own);
   }
 
   #checkBudget(budget: Budget, caps: ModelCapabilities, state: RunState): void {
@@ -367,9 +377,11 @@ export class ModelClient {
     req: LlmRequest,
     opts: CompleteOptions,
     note: string | undefined,
+    inputEstimate: number,
   ): Promise<Outcome> {
     const budgetSignal = opts.budget.signal(this.#perCallTimeoutMs);
     const signal = req.signal ? AbortSignal.any([req.signal, budgetSignal]) : budgetSignal;
+    const sent = !signal.aborted;
     const base: ClientAttemptRecord = {
       provider: caps.provider,
       model: caps.model,
@@ -426,12 +438,24 @@ export class ModelClient {
       const d = errorDetails(error);
       const inputTokens = tokenCount(d.inputTokens);
       const outputTokens = tokenCount(d.outputTokens);
+      let costUsd = validCost(d.costUsd) ?? estimateCostUsd(caps, inputTokens, outputTokens);
+      const noUsage = d.costUsd === undefined && d.inputTokens === undefined && d.outputTokens === undefined;
+      if (error.category === 'timeout' && sent && signal.aborted && noUsage) {
+        // A non-streaming call keeps running (and is billed) after the client
+        // gives up on it; count its worst case so retries stay within the cap.
+        const worst = estimateCostUsd(caps, inputEstimate, effectiveMaxOutput(caps, req.maxOutputTokens));
+        if (worst > 0) {
+          costUsd = worst;
+          const charged = `usage unknown after timeout: worst-case cost $${worst.toFixed(6)} counted`;
+          base.note = base.note ? `${base.note}; ${charged}` : charged;
+        }
+      }
       const record: ClientAttemptRecord = {
         ...base,
         errorCategory: error.category,
         inputTokens,
         outputTokens,
-        costUsd: validCost(d.costUsd) ?? estimateCostUsd(caps, inputTokens, outputTokens),
+        costUsd,
         latencyMs: Math.max(0, this.#now() - started),
       };
       if (d.finishReason) record.finishReason = d.finishReason;

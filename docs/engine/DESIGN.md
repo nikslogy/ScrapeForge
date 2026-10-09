@@ -151,7 +151,12 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
     the snapshot and compared (`recordAgreement` / `recordDisagreement`);
     otherwise `induceRecipe` from the raw model values of the first 20
     records (record group of the cited blocks as `recordSelector`), saved as
-    a candidate only if it reproduces this result. Agreement is exact and
+    a candidate only if it reproduces this result. Induction itself already
+    requires every non-empty sample value to be reproduced; when a selector's
+    first match is wrong in some records (a struck-through "was" price before
+    the current one), it is narrowed by what tells the two apart (a class or
+    ancestor of the wrong one such as `:not(.was)` or `:not(del *)`, a
+    line-through style, or position) instead of being accepted at 90%. Agreement is exact and
     covers every grounded record of the run: the same record count, and
     every compared value equal (`compareOutputs` over the list, then record
     by record). A single wrong value (a sale card's struck-through price)
@@ -182,18 +187,30 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
 * The worker builds one `ModelClient` (`createDefaultModelClient(env)`) and a
   `RecipeStore` over its Redis at startup. Per job: `fetch` (router, with
   tier attempts) → quality score → content extraction (`content`, Piscina
-  pool) and structured extraction (`extract`) **concurrently**. Deadline =
-  job start + `timeout` − min(2 s, 10 %). Spend cap = min(request
+  pool) and structured extraction (`extract`) **concurrently**. Extraction
+  deadline = job start + `timeout` − min(2 s, 10 %). Spend cap = min(request
   `maxLlmCostUsd`, `EXTRACT_MAX_COST_USD`, default $0.05).
+* Job deadline: every job ends by `timeout` + 2 s, whatever the router does
+  (it gives each browser tier the full `timeout`). Past it the job fails
+  with a timeout error, the content extraction is aborted, the job's
+  browser pages are closed (their contexts go back to the pool) and no
+  further context is handed to the job.
 * `content.json` = outcome data (omitted when null); `metadata.extraction` =
   status, method, schemaValid, schemaErrors, missing, warnings, scope,
   `llm {calls, tokens, costUsd, models}`, evidence (on request);
-  `metadata.timings` = tracer snapshot. Failed extractions are not cached.
+  `metadata.timings` = tracer snapshot. Only `complete` extractions are
+  cached (plain scrapes always, when `cacheTtl` > 0): a partial or failed
+  one may come from this request's spend cap, deadline or a transient
+  provider failure. Key and contents: see "Caches".
 * API: `includeEvidence` (default false) and `maxLlmCostUsd` (0–1) on
   `/v1/extract` and `/v1/scrape`; schemas over 64 KB or 10 levels → 400
   before queueing. Sync jobs: 2 attempts, fixed 250 ms; webhook jobs: 3
-  attempts, exponential backoff. Unreachable/private destinations are
-  unrecoverable (no retry).
+  attempts, exponential backoff. Not retried (unrecoverable): private or
+  otherwise blocked destinations (including a redirect hop or page
+  navigation the egress guard refused), unresolvable hosts, and exhausted
+  tiers when some tier got a block or unusable page. Exhausted tiers that
+  all failed transiently (network errors, timeouts, 408/429/5xx without
+  block markers) and a missed job deadline are retried.
 * Configuration (`.env.example`): `EXTRACT_MODELS`, `EXTRACT_MODEL_CAPS`,
   `EXTRACT_MAX_COST_USD`, `EXTRACT_LLM_TIMEOUT_MS`, `EXTRACT_RECIPE_PROPOSE`,
   provider keys.
@@ -231,6 +248,10 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   smaller context window is skipped for an input that does not fit it.
 * Document building, grounding and recipe induction run on the worker's main
   thread (induction is bounded to ~2 s per learning run, 4 runs in flight).
+* Request `cookies` are validated and enter the cache key, but no fetch
+  tier applies them yet (a gap that predates this package): the page is
+  fetched without them. Custom `headers` are sent by the HTTP tiers (T1,
+  T2) only, not by Lightpanda (T3) or the browser tiers (T4, T5).
 
 ### LLM response protocol
 
@@ -284,7 +305,21 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 
 ### Caches
 
-* Fetch/result cache (existing `cache:*` keys) — unchanged in this package.
+* Result cache — `cache:<hash>`, written by the worker and read by the API
+  with the same function (`resultCacheKey` in `packages/shared`), so the two
+  keys cannot drift. The hash covers the tenant, the URL, `formats`,
+  `proxy`, the fetch-shaping options (`screenshot`, `mobile`, `waitFor`,
+  `blockResources`), `extractSchema`, `includeEvidence`, `maxLlmCostUsd`
+  (with a schema only) and a SHA-256 digest of the custom `headers` and
+  `cookies` (order- and header-case-independent; the values themselves
+  never enter the key). `timeout`, `cacheTtl` and `webhookUrl` do not.
+  Only cacheable results are written (`isCacheableResult`: plain scrapes,
+  and extractions whose status is `complete`), for `cacheTtl` seconds;
+  `cacheTtl: 0` neither reads nor writes.
+* Browser contexts — pooled and reused across tenants, so before reuse the
+  pool closes leftover pages and clears cookies, the origin storage of
+  every origin the fetch touched (localStorage, IndexedDB, Cache Storage,
+  service workers) and the context's HTTP cache.
 * Extraction recipes — `recipe:v1:{tenant}:{host}:{template}:{schemaHash}`.
 * Compiled Ajv validators — in-process LRU by schema hash.
 
