@@ -35,6 +35,11 @@ export class Budget {
     return this.#spentUsd;
   }
 
+  /** Spend still allowed (never negative); Infinity without a cap. */
+  remainingUsd(): number {
+    return this.maxCostUsd === undefined ? Number.POSITIVE_INFINITY : Math.max(0, this.maxCostUsd - this.#spentUsd);
+  }
+
   /** Adds spend. Non-finite or negative amounts (bad usage data) count as 0. */
   charge(usd: number): void {
     if (Number.isFinite(usd) && usd > 0) this.#spentUsd += usd;

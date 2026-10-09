@@ -163,8 +163,25 @@ function isEnvelope(v: unknown): boolean {
   return isPlainObject(v) && Object.hasOwn(v, 'records');
 }
 
+// Reasoning models without a separate reasoning channel (raw mode) put their
+// thinking before the answer. Braces in it are prose, not a cut-off answer.
+const REASONING_OPEN = /^\s*<(think|thinking|reasoning)>/i;
+
+function stripReasoning(text: string, warnings: Warnings): string {
+  const open = REASONING_OPEN.exec(text);
+  if (!open) return text;
+  // The tag name comes from the fixed alternation above, so it is regex-safe.
+  const closeTag = new RegExp(`</${open[1]}>`, 'gi');
+  closeTag.lastIndex = open[0].length;
+  const close = closeTag.exec(text);
+  // Unclosed: leave it to the scan (an answer cut off inside reasoning is unbalanced).
+  if (!close) return text;
+  warnings.add('ignored a reasoning block before the JSON');
+  return text.slice(close.index + close[0].length);
+}
+
 function extractJson(input: string, warnings: Warnings, src: ParseSource): unknown {
-  const text = input.replace(/^\uFEFF/, '');
+  const text = stripReasoning(input.replace(/^\uFEFF/, ''), warnings);
   if (text.trim() === '') throw fail('model returned no text', 'empty_output', src);
 
   // Fast path: the whole text is JSON.

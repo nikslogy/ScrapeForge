@@ -190,14 +190,26 @@ function readGeminiResponse(
   // Thought summaries (thought: true) are not part of the answer.
   const text = parts.map((p) => (isRecord(p) && typeof p.text === 'string' && p.thought !== true ? p.text : '')).join('');
 
-  const inputTokens = nonNegativeInt(usage.promptTokenCount) ?? estimateTokens(req.system) + estimateTokens(req.user);
-  // Thinking tokens are billed as output.
+  const reportedInput = nonNegativeInt(usage.promptTokenCount);
   const reportedOutput = nonNegativeInt(usage.candidatesTokenCount);
-  const outputTokens = (reportedOutput ?? estimateTokens(text)) + (nonNegativeInt(usage.thoughtsTokenCount) ?? 0);
+  const thoughts = nonNegativeInt(usage.thoughtsTokenCount);
+
+  // An error in the body is charged only for the usage Gemini reports, never an estimate.
+  if (isRecord(json.error)) {
+    const reported: LlmErrorDetails = { resolvedModel };
+    if (reportedInput !== undefined || reportedOutput !== undefined || thoughts !== undefined) {
+      reported.inputTokens = reportedInput ?? 0;
+      reported.outputTokens = (reportedOutput ?? 0) + (thoughts ?? 0);
+      reported.costUsd = estimateCostUsd(caps, reported.inputTokens, reported.outputTokens);
+    }
+    throw embeddedError(json.error, result, ctx, LABEL, reported);
+  }
+
+  const inputTokens = reportedInput ?? estimateTokens(req.system) + estimateTokens(req.user);
+  // Thinking tokens are billed as output.
+  const outputTokens = (reportedOutput ?? estimateTokens(text)) + (thoughts ?? 0);
   const costUsd = estimateCostUsd(caps, inputTokens, outputTokens);
   const details: LlmErrorDetails = { inputTokens, outputTokens, costUsd, resolvedModel };
-
-  if (isRecord(json.error)) throw embeddedError(json.error, result, ctx, LABEL, details);
 
   let finishReason = mapGeminiFinishReason(candidate?.finishReason);
   // A blocked prompt has no candidates, only promptFeedback.blockReason.

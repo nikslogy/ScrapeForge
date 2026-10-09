@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Worker, Job, UnrecoverableError } from 'bullmq';
 import { Redis } from 'ioredis';
+import type { BrowserContext } from 'patchright';
 import { Pool } from 'pg';
 import {
   ScrapeJobData,
@@ -68,12 +70,105 @@ const browserPool = new BrowserPool(
 );
 await browserPool.initialize();
 
+// --- Job deadline ---
+//
+// Every job ends by options.timeout plus a small margin, whatever the router
+// does: it gives each browser tier the full timeout (T1 + T2 + 2 × timeout
+// for a page that hangs the browser). Past the deadline the job fails at once
+// and what can be stopped is stopped: the content extraction is aborted, the
+// pages of the job's browser contexts are closed (the tier fetch then fails
+// and its context goes back to the pool), and no further context is handed
+// to the job. Structured extraction stops at its own deadline (before
+// options.timeout). The HTTP tiers end on their own timeouts.
+
+// Leaves room for structured extraction, which may finish a recipe run up to
+// ~1 s past its own deadline.
+const JOB_DEADLINE_MARGIN_MS = 2_000;
+
+class JobTimeoutError extends Error {
+  readonly code = 'JOB_TIMEOUT' as const;
+
+  constructor(timeoutMs: number, stage: string) {
+    super(`Timeout: job timed out after ${timeoutMs} ms (+${JOB_DEADLINE_MARGIN_MS} ms margin) during ${stage}`);
+    this.name = 'JobTimeoutError';
+  }
+}
+
+interface JobScope {
+  signal: AbortSignal;
+  /** Browser contexts the job's router call holds right now. */
+  contexts: Set<BrowserContext>;
+}
+
+// The router runs inside its job's scope, so the context callbacks below
+// know which job asks (AsyncLocalStorage follows the router's awaits).
+const jobScopes = new AsyncLocalStorage<JobScope>();
+
+function acquireForJob(): Promise<BrowserContext> {
+  const scope = jobScopes.getStore();
+  if (!scope) return browserPool.acquire();
+  const { signal } = scope;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<BrowserContext>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    browserPool.acquire().then(
+      (ctx) => {
+        signal.removeEventListener('abort', onAbort);
+        // Granted after the job gave up waiting: straight back to the pool.
+        if (signal.aborted) return browserPool.release(ctx);
+        scope.contexts.add(ctx);
+        resolve(ctx);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+function releaseForJob(ctx: BrowserContext): void {
+  jobScopes.getStore()?.contexts.delete(ctx);
+  browserPool.release(ctx);
+}
+
+/** Ends what the job's browser contexts are doing; the tier fetch then releases them. */
+function closeJobPages(scope: JobScope): void {
+  for (const ctx of scope.contexts) {
+    let pages: { close(): Promise<void> }[] = [];
+    try {
+      pages = ctx.pages();
+    } catch {
+      /* context already closed */
+    }
+    for (const page of pages) void page.close().catch(() => {});
+  }
+}
+
+/** `work`, or a rejection with the deadline error as soon as `signal` aborts. */
+function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  // Whatever `work` does after the deadline must not become an unhandled rejection.
+  work.catch(() => {});
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 // --- Smart Router ---
-const router = new SmartRouter(
-  redis,
-  () => browserPool.acquire(),
-  (ctx) => browserPool.release(ctx),
-);
+const router = new SmartRouter(redis, acquireForJob, releaseForJob);
 
 // --- Structured extraction engine + SSE ---
 // One model client per process (its circuit breaker is process-wide). Its
@@ -167,19 +262,47 @@ function llmSpendCap(options: ScrapeOptions): number {
     : MAX_LLM_COST_USD;
 }
 
+/**
+ * Failures a retry cannot fix: bad hosts, blocked (private) destinations,
+ * and exhausted tiers when some tier got a block or unusable page. Tiers that
+ * all failed transiently (target briefly down, timeouts, rate limits) are
+ * retried, as is a missed job deadline. The router's TiersExhaustedError is
+ * matched by its code, like the pool error, so another module copy counts.
+ */
+function isPermanentFailure(error: unknown, message: string): boolean {
+  const e = error as { code?: unknown; transient?: unknown } | null;
+  if (e?.code === 'TIERS_EXHAUSTED') return e.transient !== true;
+  return /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|OUTBOUND_BLOCKED|Blocked by SSRF guard|DNS lookup failed|private.*address/i.test(
+    message,
+  );
+}
+
 // --- Job Processor ---
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
   const { jobId, url, options, userId, apiKeyId } = job.data;
   const jobStart = Date.now();
   const tracer = new StageTracer();
+  const timeoutMs = options.timeout ?? 60_000;
 
   console.log(`[${jobId}] Processing: ${url}`);
   await job.updateProgress(10);
   await sseEmitter.emit(jobId, 'started', { url, jobId });
 
+  // Fetch + content + structured extraction end by timeout + margin.
+  const deadline = new AbortController();
+  const scope: JobScope = { signal: deadline.signal, contexts: new Set() };
+  let stage = 'fetch';
+  const deadlineTimer = setTimeout(() => {
+    deadline.abort(new JobTimeoutError(timeoutMs, stage));
+    closeJobPages(scope);
+  }, Math.max(0, jobStart + timeoutMs + JOB_DEADLINE_MARGIN_MS - Date.now()));
+
   try {
     // ── Stage 1: Scrape ────────────────────────────────
-    const rr = await tracer.time('fetch', () => router.route(url, options, tracer));
+    const rr = await tracer.time('fetch', () =>
+      beforeDeadline(deadline.signal, jobScopes.run(scope, () => router.route(url, options, tracer))),
+    );
+    stage = 'content and structured extraction';
     await job.updateProgress(40);
     await sseEmitter.emitHeaders(jobId, rr.statusCode, {});
 
@@ -192,13 +315,14 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     );
 
     // ── Stage 2: content + structured extraction (both only need rr.html) ──
-    const timeoutMs = options.timeout ?? 60_000;
     const deadlineMs = jobStart + timeoutMs - Math.min(DEADLINE_SAFETY_MARGIN_MS, timeoutMs * 0.1);
     const includeEvidence = options.includeEvidence === true;
     const sourceBlocked = blockedFromQualitySignals(quality, rr.statusCode);
 
-    const [extracted, outcome] = await Promise.all([
-      tracer.time('content', () => extractContent(rr.html, url, options.formats || ['markdown'])),
+    const [extracted, outcome] = await beforeDeadline(deadline.signal, Promise.all([
+      tracer.time('content', () =>
+        extractContent(rr.html, url, options.formats || ['markdown'], { signal: deadline.signal }),
+      ),
       wantsExtraction(options)
         ? tracer.time('extract', async (): Promise<ExtractionOutcome | null> => {
             try {
@@ -221,7 +345,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
             }
           })
         : Promise.resolve(null),
-    ]);
+    ]));
+    clearTimeout(deadlineTimer);
     await job.updateProgress(80);
 
     const firstFormat = Object.keys(extracted)[0] as string | undefined;
@@ -341,7 +466,10 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       `[${jobId}] Completed in ${trace.totalMs}ms (Tier ${rr.tierUsed}, proxy ${rr.proxyTier}, quality ${quality.score}, llm $${llmCost.toFixed(6)})`,
     );
     return result;
-  } catch (error) {
+  } catch (caught) {
+    clearTimeout(deadlineTimer);
+    // Past the deadline, whatever the aborted work threw is a consequence of it.
+    const error: unknown = deadline.signal.aborted ? deadline.signal.reason : caught;
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[${jobId}] Failed:`, errorMessage);
     scrapeRequestsTotal.inc({ tier: '0', status: 'failed', domain: new URL(url).hostname });
@@ -349,11 +477,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     observeStages(trace);
     observeTierAttempts(trace);
 
-    // Retrying cannot help: bad hosts, blocked (private) destinations, exhausted tiers.
-    const permanent =
-      /ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|SSRF|OUTBOUND_BLOCKED|Blocked by SSRF guard|DNS lookup failed|private.*address|All tiers exhausted/i.test(
-        errorMessage,
-      );
+    const permanent = isPermanentFailure(error, errorMessage);
 
     const failResult: ScrapeResult = {
       jobId,

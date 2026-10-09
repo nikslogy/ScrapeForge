@@ -1,4 +1,5 @@
-import { chromium, Browser, BrowserContext, type LaunchOptions } from 'patchright';
+import { chromium, Browser, BrowserContext, type LaunchOptions, type Request } from 'patchright';
+import { egressProxyUrl } from '../net/egress.js';
 import { generateFingerprint, toContextOptions } from './fingerprint.js';
 
 interface PooledContext {
@@ -6,8 +7,12 @@ interface PooledContext {
   useCount: number;
   createdAt: number;
   inUse: boolean;
-  /** Being cleaned (cookies cleared) after a release; not available yet. */
+  /** Being cleaned after a release; not available yet. */
   cleaning: boolean;
+  /** Origins the context requested anything from since it was last cleaned. */
+  origins: Set<string>;
+  /** Set once more than MAX_TRACKED_ORIGINS were seen: retired instead of cleaned. */
+  tooManyOrigins: boolean;
 }
 
 interface Waiter {
@@ -38,12 +43,17 @@ export interface BrowserPoolOptions {
   executablePath?: string;
   /** Launcher override (tests). */
   launch?: (options: LaunchOptions) => Promise<Browser>;
+  /** Proxy Chromium connects through; default the worker's egress guard (net/egress.ts). */
+  egressProxy?: () => Promise<string>;
   logger?: Pick<Console, 'log' | 'warn'>;
 }
 
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_WAITERS = 100;
 const CLEAN_TIMEOUT_MS = 5_000;
+// Beyond this many origins in one use, a context is replaced rather than
+// cleaned origin by origin.
+const MAX_TRACKED_ORIGINS = 200;
 
 function hasServiceWorkers(context: BrowserContext): boolean {
   try {
@@ -51,6 +61,30 @@ function hasServiceWorkers(context: BrowserContext): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Record the origin of every request the context makes (its pages, popups,
+ * frames, workers): any of them may have stored something.
+ */
+function trackOrigins(pooled: PooledContext): void {
+  // Test doubles have no event API; a real context always has one.
+  if (typeof pooled.context.on !== 'function') return;
+  pooled.context.on('request', (request: Request) => {
+    const url = request.url();
+    // Other schemes have no storage of their own (data:) or share their
+    // creator's origin, which is tracked already (blob:, about:).
+    if (!url.startsWith('http:') && !url.startsWith('https:')) return;
+    let origin: string;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      return;
+    }
+    if (pooled.origins.has(origin)) return;
+    if (pooled.origins.size >= MAX_TRACKED_ORIGINS) pooled.tooManyOrigins = true;
+    else pooled.origins.add(origin);
+  });
 }
 
 function envInt(name: string, fallback: number): number {
@@ -69,8 +103,12 @@ function envInt(name: string, fallback: number): number {
  *   at once; both fail with a BrowserPoolError instead of hanging.
  * - Contexts are recycled after `maxUsesPerContext` uses or `maxAgeMs`, also
  *   when they expire while idle, and as soon as a page left a service worker
- *   behind. Cookies are cleared before a context is reused.
+ *   behind. Before a context is reused, pages left open are closed and its
+ *   cookies and the storage of every origin it loaded are cleared; one that
+ *   cannot be cleaned is replaced.
  * - If Chromium dies, the next acquire() relaunches it.
+ * - Chromium connects only through the egress guard, which applies the
+ *   outbound policy to every connection it makes (see browser/outbound-guard.ts).
  */
 export class BrowserPool {
   private browser: Browser | null = null;
@@ -84,6 +122,7 @@ export class BrowserPool {
   private readonly maxWaiters: number;
   private readonly executablePath: string | undefined;
   private readonly launcher: (options: LaunchOptions) => Promise<Browser>;
+  private readonly egressProxy: () => Promise<string>;
   private readonly logger: Pick<Console, 'log' | 'warn'>;
 
   constructor(
@@ -99,6 +138,7 @@ export class BrowserPool {
     this.maxWaiters = options.maxWaiters ?? envInt('BROWSER_POOL_MAX_WAITERS', DEFAULT_MAX_WAITERS);
     this.executablePath = options.executablePath ?? (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined);
     this.launcher = options.launch ?? ((o) => chromium.launch(o));
+    this.egressProxy = options.egressProxy ?? egressProxyUrl;
     this.logger = options.logger ?? console;
   }
 
@@ -191,15 +231,20 @@ export class BrowserPool {
       return;
     }
 
-    // Cookies from one fetch must not leak into the next (possibly another
+    if (pooled.tooManyOrigins) {
+      this.retire(pooled);
+      return;
+    }
+
+    // Nothing one fetch stored may reach the next (possibly another
     // customer's) fetch of the same site, so the context is not handed out
-    // until they are gone.
+    // until it is clean.
     pooled.cleaning = true;
     let timer: NodeJS.Timeout | undefined;
     Promise.race([
-      context.clearCookies(),
+      this.clean(pooled),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('clearCookies timed out')), CLEAN_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('cleaning timed out')), CLEAN_TIMEOUT_MS);
       }),
     ])
       .catch(() => {
@@ -317,7 +362,47 @@ export class BrowserPool {
     const browser = await this.ensureBrowser();
     const fp = generateFingerprint();
     const context = await browser.newContext(toContextOptions(fp));
-    return { context, useCount: 0, createdAt: Date.now(), inUse: false, cleaning: false };
+    const pooled: PooledContext = {
+      context,
+      useCount: 0,
+      createdAt: Date.now(),
+      inUse: false,
+      cleaning: false,
+      origins: new Set(),
+      tooManyOrigins: false,
+    };
+    trackOrigins(pooled);
+    return pooled;
+  }
+
+  /**
+   * Remove what a fetch could leave for the next one: pages still open
+   * (popups, which could write again after cleaning), cookies, and the
+   * origin storage (localStorage, IndexedDB, Cache Storage, service worker
+   * registrations, ...) of every origin the context requested anything
+   * from. Partitioned storage of third-party frames is cleared with its
+   * origin. sessionStorage ends with its page. Throws if any step fails.
+   */
+  private async clean(pooled: PooledContext): Promise<void> {
+    const { context } = pooled;
+    // Test doubles have no pages.
+    const leftovers = typeof context.pages === 'function' ? context.pages() : [];
+    await Promise.all(leftovers.map((page) => page.close()));
+    await context.clearCookies();
+    const origins = [...pooled.origins];
+    if (origins.length === 0) return;
+    // CDP Storage commands act on the storage of the page's browser context.
+    const page = await context.newPage();
+    try {
+      const cdp = await context.newCDPSession(page);
+      await Promise.all(
+        origins.map((origin) => cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })),
+      );
+      await cdp.detach().catch(() => {});
+    } finally {
+      await page.close().catch(() => {});
+    }
+    for (const origin of origins) pooled.origins.delete(origin);
   }
 
   /** The running browser, launching (or relaunching after a crash) as needed. */
@@ -326,18 +411,28 @@ export class BrowserPool {
     if (this.launching) return this.launching;
     if (this.closed) return Promise.reject(new BrowserPoolError('closed', 'Browser pool is shut down'));
 
-    const launching = this.launcher({
-      headless: true,
-      ...(this.executablePath ? { executablePath: this.executablePath } : {}),
-      args: [
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-software-rasterizer',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-      ],
-    }).then((browser) => {
+    const launching = this.egressProxy().then((proxyServer) =>
+      this.launcher({
+        headless: true,
+        ...(this.executablePath ? { executablePath: this.executablePath } : {}),
+        args: [
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-software-rasterizer',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          // Every connection (redirect hops, WebSockets, workers, popups)
+          // goes through the egress guard, which refuses blocked addresses
+          // when it connects. "<-loopback>" removes Chromium's implicit
+          // loopback bypass, so the guard decides for loopback too.
+          `--proxy-server=${proxyServer}`,
+          '--proxy-bypass-list=<-loopback>',
+          // WebRTC would otherwise send UDP (STUN/TURN) around the proxy.
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        ],
+      }),
+    ).then((browser) => {
       if (this.browser && this.browser !== browser) this.dropContexts();
       this.browser = browser;
       browser.on('disconnected', () => {

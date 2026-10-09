@@ -1,5 +1,6 @@
 import { Impit, type ImpitResponse } from 'impit';
 import { fetchWithSafeRedirects, headersForHop } from '@scrapeforge/shared';
+import { httpClientProxy, throughEgressGuard } from '../net/egress.js';
 
 export interface FetchResult {
   html: string;
@@ -48,19 +49,26 @@ export async function tier1Fetch(
   } = {},
 ): Promise<FetchResult> {
   const start = performance.now();
-  const client = clientFor(options.proxy);
+  // Every hop is checked before it is sent (fetchWithSafeRedirects); without
+  // an upstream proxy, Impit also connects through the local egress guard,
+  // which checks the address actually connected to (DNS rebinding).
+  const viaGuard = !options.proxy;
+  const client = clientFor(await httpClientProxy(options.proxy));
   const headers = { ...DEFAULT_HEADERS, ...options.headers };
   // One deadline for the whole redirect chain, as before.
   const signal = AbortSignal.timeout(options.timeout || 15_000);
 
   const { response, url: finalUrl } = await fetchWithSafeRedirects(
     url,
-    (hop) =>
-      client.fetch(hop.url.href, {
-        headers: headersForHop(headers, hop),
-        redirect: 'manual',
-        signal,
-      }),
+    (hop) => {
+      const send = () =>
+        client.fetch(hop.url.href, {
+          headers: headersForHop(headers, hop),
+          redirect: 'manual',
+          signal,
+        });
+      return viaGuard ? throughEgressGuard(hop.url, send) : send();
+    },
     { signal, discard: discardImpitBody },
   );
 

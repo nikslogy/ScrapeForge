@@ -191,12 +191,18 @@ function buildCaps(
     const defaulted = (['contextTokens', 'maxOutputTokens', 'jsonMode', 'strictSchema'] as const).filter(
       (f) => override?.[f] === undefined,
     );
+    // Without prices a call is charged $0 unless the provider reports its
+    // cost (only OpenRouter does), and the cost cap cannot be checked before it.
+    const unpriced = override?.inputCostPerMTok === undefined && override?.outputCostPerMTok === undefined;
+    const priceNote = 'no token prices, so the cost cap is not checked before calls (set inputCostPerMTok/outputCostPerMTok)';
     if (defaulted.length > 0) {
       warnings.push(
         `unknown model ${key}: using conservative defaults for ${defaulted
           .map((f) => `${f}=${String(UNKNOWN_MODEL_DEFAULTS[f])}`)
-          .join(', ')} (set EXTRACT_MODEL_CAPS to override)`,
+          .join(', ')} (set EXTRACT_MODEL_CAPS to override)${unpriced ? `; ${priceNote}` : ''}`,
       );
+    } else if (unpriced) {
+      warnings.push(`unknown model ${key}: ${priceNote}`);
     }
   }
   const out: ModelCapabilities = { key, provider, model, ...base, ...override };

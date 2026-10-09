@@ -7,11 +7,12 @@
 // ANY resolved address is private, because the client that actually connects
 // may pick a different address than the one we looked at.
 //
-// Residual risk: most clients (Impit, Chromium) resolve the name again when
-// they connect, so a hostile DNS server can still answer differently between
-// our check and their connect (DNS rebinding). `guardedLookup` closes that gap
-// for clients built on node:net (webhooks); the other clients rely on the
-// check here plus re-checking every redirect hop.
+// The checks above run before a request; a hostile DNS server can answer
+// differently when the client connects (DNS rebinding). The policy is
+// therefore also enforced at connect time, where the address checked is the
+// address connected to: `guardedLookup` for clients built on node:net
+// (webhooks), and `resolveForConnect` in the worker's local egress proxy,
+// which Impit and Chromium connect through (apps/worker/src/net/).
 
 import { promises as dnsPromises, type LookupAddress } from 'node:dns';
 import { isIP, type LookupFunction } from 'node:net';
@@ -592,6 +593,51 @@ export const guardedLookup: LookupFunction = (hostname, options, callback) => {
       },
     );
 };
+
+export interface ResolveForConnectOptions {
+  /** Skip the address and hostname checks (the name is still resolved). Defaults to allowPrivateNetwork(). */
+  allowPrivate?: boolean;
+  /** Abandon the DNS wait when this fires. */
+  signal?: AbortSignal;
+}
+
+/**
+ * The addresses to connect to for `host` (a hostname or IP literal, with or
+ * without IPv6 brackets), checked against the outbound policy. Always
+ * resolves afresh (no cache): connect to exactly these addresses and never
+ * resolve the name again, so the address checked is the address connected
+ * to. Applies the same hostname rules as assertPublicUrl and honours
+ * allowPrivateNetwork() / setOutboundPolicyForTests.
+ *
+ * Throws OutboundBlockedError when the destination is refused and
+ * DnsLookupError when the name cannot be resolved.
+ */
+export async function resolveForConnect(
+  host: string,
+  opts: ResolveForConnectOptions = {},
+): Promise<string[]> {
+  const allowPrivate = opts.allowPrivate ?? allowPrivateNetwork();
+  const name = bareHostname(host);
+  const shown = displayHost(name);
+  // Legacy IPv4 spellings ("127.1", "0x7f.1") are addresses, not names: the
+  // system resolver would turn them into 127.0.0.1 without asking DNS.
+  const v4 = name.includes(':') ? null : parseIPv4Loose(name);
+  const literal =
+    isIP(name) !== 0 ? name : v4 !== null ? [24, 16, 8, 0].map((s) => (v4 >>> s) & 255).join('.') : null;
+  if (literal !== null) {
+    if (!allowPrivate && policy.isBlocked(literal)) {
+      throw new OutboundBlockedError('address', name, `${shown} is a private or reserved address`, literal);
+    }
+    return [literal];
+  }
+  if (!allowPrivate && isBlockedHostname(name)) {
+    throw new OutboundBlockedError('hostname', name, `${shown} is a private or reserved hostname`);
+  }
+  if (name.length > MAX_DNS_NAME_LENGTH) throw new DnsLookupError(name, 'ENOTFOUND');
+  // `host` keeps a trailing dot (fully qualified), as the client would resolve it.
+  const addresses = await withAbort(lookupWithTimeout(policy.lookup, host), opts.signal);
+  return connectableAddresses(host, addresses, 0, allowPrivate);
+}
 
 function connectableAddresses(
   hostname: string,

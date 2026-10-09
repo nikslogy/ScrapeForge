@@ -13,7 +13,12 @@
 
 import { LlmError, type LlmAttemptRecord, type LlmErrorCategory, type ModelCapabilities } from '../types.js';
 
-/** Whether an auth/quota failure affects the whole provider account or one model. */
+/**
+ * Whether an auth/quota failure affects the whole provider account or one
+ * model. On input_too_large, 'model' means a per-minute/per-day token
+ * allowance of this model (Groq's 413), not a context window, so models of
+ * other providers with the same window may still take the input.
+ */
 export type FailureScope = 'provider' | 'model';
 
 export interface LlmErrorDetails {
@@ -30,9 +35,24 @@ export interface LlmErrorDetails {
   resolvedModel?: string;
   resolvedProvider?: string;
   finishReason?: string;
+  /**
+   * output_truncated only: the answer as far as it got (at most
+   * MAX_PARTIAL_TEXT_CHARS), so a caller can salvage the complete records.
+   */
+  partialText?: string;
+  /**
+   * budget_exhausted from the cost cap only: the largest estimated input
+   * (tokens) that a call with the requested output limit could carry within
+   * the remaining spend, on the most affordable model skipped (0: none).
+   * A caller can shrink its input to this and try again.
+   */
+  affordableInputTokens?: number;
   /** Every attempt made by the model client, on errors thrown by the client. */
   attempts?: LlmAttemptRecord[];
 }
+
+/** Bound on LlmErrorDetails.partialText (characters). */
+export const MAX_PARTIAL_TEXT_CHARS = 200 * 1024;
 
 /**
  * LlmError with the details the model client needs. Providers and the client
@@ -49,6 +69,9 @@ export class LlmCallError extends LlmError {
   readonly resolvedProvider?: string;
   readonly finishReason?: string;
   readonly attempts?: LlmAttemptRecord[];
+  readonly affordableInputTokens?: number;
+  // Non-enumerable (set in the constructor): logging the error must not dump model output.
+  declare readonly partialText?: string;
 
   constructor(
     message: string,
@@ -69,6 +92,15 @@ export class LlmCallError extends LlmError {
     this.resolvedProvider = details.resolvedProvider;
     this.finishReason = details.finishReason;
     this.attempts = details.attempts;
+    this.affordableInputTokens = details.affordableInputTokens;
+    if (typeof details.partialText === 'string') {
+      Object.defineProperty(this, 'partialText', {
+        value: details.partialText.slice(0, MAX_PARTIAL_TEXT_CHARS),
+        enumerable: false,
+        writable: false,
+        configurable: true,
+      });
+    }
   }
 }
 
@@ -123,11 +155,61 @@ function quota(body: string, status: number): Classification {
   return { category: 'quota', scope: status === 402 || ACCOUNT_QUOTA_WORDING.test(body) ? 'provider' : 'model' };
 }
 
+function tooLarge(body: string): Classification {
+  return PER_MINUTE_WORDING.test(body) || DAILY_WORDING.test(body) ? { category: 'input_too_large', scope: 'model' } : { category: 'input_too_large' };
+}
+
+// Fields in which providers echo the model's output or the request back
+// (Groq's failed_generation, OpenRouter's moderation flagged_input). That
+// text comes from the page, so classifying on it would let a page's wording
+// ("Unauthorized", "credit") trip the breaker for every request.
+const ECHO_KEYS: ReadonlySet<string> = new Set(['failed_generation', 'flagged_input']);
+const MAX_ECHO_DEPTH = 8;
+const MAX_NESTED_JSON_CHARS = 64 * 1024;
+
+/**
+ * Copy of a parsed error value without echoed content. JSON held in strings
+ * (OpenRouter's metadata.raw carries the upstream body) is cleaned as well.
+ */
+export function withoutEchoes(value: unknown, depth = 0): unknown {
+  if (depth > MAX_ECHO_DEPTH) return undefined;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (!t.startsWith('{') || t.length > MAX_NESTED_JSON_CHARS) return value;
+    try {
+      return withoutEchoes(JSON.parse(t), depth + 1);
+    } catch {
+      return value;
+    }
+  }
+  if (Array.isArray(value)) return value.map((v) => withoutEchoes(v, depth + 1));
+  if (typeof value !== 'object' || value === null) return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (ECHO_KEYS.has(k)) continue;
+    Object.defineProperty(out, k, { value: withoutEchoes(v, depth + 1), enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+
+/** The body as classification should read it: JSON bodies without echoed content. */
+function classificationText(body: string): string {
+  const t = body.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return body;
+  try {
+    return JSON.stringify(withoutEchoes(JSON.parse(t))) ?? body;
+  } catch {
+    return body;
+  }
+}
+
 /**
  * Classifies a failed call from its HTTP status (or the code embedded in a
- * 200 body; 0 when unknown) and body text.
+ * 200 body; 0 when unknown) and body text. Echoed model output in a JSON
+ * body is ignored.
  */
-export function classifyFailure(status: number, body: string): Classification {
+export function classifyFailure(status: number, rawBody: string): Classification {
+  const body = classificationText(rawBody);
   if (status === 401) return { category: 'auth', scope: 'provider' };
   if (status === 403) {
     if (MODERATION_WORDING.test(body)) return { category: 'content_filter' };
@@ -136,7 +218,7 @@ export function classifyFailure(status: number, body: string): Classification {
   }
   if (status === 402) return quota(body, status);
   if (status === 429) return classify429(body);
-  if (status === 413) return { category: 'input_too_large' };
+  if (status === 413) return tooLarge(body);
   if (status === 408 || status >= 500) return { category: 'overloaded' };
 
   // Other 4xx codes, errors inside 200 bodies, and unknown codes: wording.
@@ -144,7 +226,7 @@ export function classifyFailure(status: number, body: string): Classification {
   if (MODERATION_WORDING.test(body)) return { category: 'content_filter' };
   if (RATE_LIMIT_WORDING.test(body)) return classify429(body);
   if (QUOTA_WORDING.test(body)) return quota(body, status);
-  if (TOO_LARGE_WORDING.test(body)) return { category: 'input_too_large' };
+  if (TOO_LARGE_WORDING.test(body)) return tooLarge(body);
   if (UNSUPPORTED_FEATURE_WORDING.test(body)) return { category: 'unsupported_request' };
   if (status === 400 && UNSUPPORTED_GENERIC_WORDING.test(body)) return { category: 'unsupported_request' };
   if (OVERLOADED_WORDING.test(body)) return { category: 'overloaded' };

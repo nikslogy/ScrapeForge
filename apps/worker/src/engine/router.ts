@@ -197,6 +197,38 @@ function describeError(err: unknown, proxyUrl?: string): string {
 }
 
 /**
+ * Every tier failed. `contentRejected` says whether any tier got a definitive
+ * answer from the site: a response the acceptance gate rejected (a block or
+ * challenge page, an empty shell, a thin or error page). Otherwise every tier
+ * only failed transiently (network errors, timeouts, 408/429/5xx without a
+ * block page, no browser context) and the same request can succeed later:
+ * `transient` tells the worker to let the queue retry it.
+ */
+export class TiersExhaustedError extends Error {
+  readonly code = 'TIERS_EXHAUSTED' as const;
+  readonly transient: boolean;
+
+  constructor(
+    message: string,
+    readonly contentRejected: boolean,
+  ) {
+    super(message);
+    this.name = 'TiersExhaustedError';
+    this.transient = !contentRejected;
+  }
+}
+
+/**
+ * A response that says the site cannot answer right now rather than that it
+ * refuses us: 408, 429 or 5xx whose body is empty or carries no block or
+ * challenge markers (a Cloudflare challenge is often served with 503).
+ */
+function isTransientResponse(html: string, statusCode: number): boolean {
+  if (statusCode !== 408 && statusCode !== 429 && statusCode < 500) return false;
+  return !/\S/.test(html) || isValidContent(html, 200);
+}
+
+/**
  * Errors that no other tier can fix: the destination (or a redirect hop) is
  * refused by the SSRF guard, or the hostname does not resolve. Every tier
  * runs the same checks, so retrying in a browser only re-loads a URL that
@@ -548,6 +580,8 @@ interface RequestContext {
   tracer?: StageTracer;
   /** Escalation notes for the "All tiers exhausted" error. */
   notes: string[];
+  /** Some tier got a response the gate rejected for what it is (not a transient failure). */
+  contentRejected: boolean;
   /** Outcomes to fold into the domain strategy once the request is done. */
   outcomes: TierOutcome[];
 }
@@ -613,7 +647,7 @@ export class SmartRouter {
       this.resolveProxy(domain, options.proxy),
       browserOnly ? Promise.resolve(null) : this.loadStrategy(domain),
     ]);
-    const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], outcomes: [] };
+    const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], contentRejected: false, outcomes: [] };
 
     try {
       if (browserOnly) return await this.executeBrowser(c);
@@ -701,10 +735,10 @@ export class SmartRouter {
         // The stealth tier needs a context from the same pool; waiting for it
         // again would only double the delay. A saturated or closed pool is
         // temporary: its own error is thrown, not "All tiers exhausted"
-        // (which the worker fails without retry).
+        // (which the worker fails without retry once a tier got a block page).
         if (isPoolUnavailable(a.error)) throw a.error;
         c.notes.push('T5:skipped (no browser context)');
-        throw new Error(this.exhaustedMessage(c));
+        throw this.exhausted(c);
       }
     }
 
@@ -748,7 +782,7 @@ export class SmartRouter {
     if (t4Result) return { ...t4Result, tierUsed: 4, ...proxyMeta };
     if (a5.kind === 'error' && a5.acquire && isPoolUnavailable(a5.error)) throw a5.error;
 
-    throw new Error(this.exhaustedMessage(c));
+    throw this.exhausted(c);
   }
 
   /** Browser-only path: T4, then T5 whose response is returned even when rejected. */
@@ -829,15 +863,16 @@ export class SmartRouter {
     } else {
       traceAttempt(c.tracer, tier, t0, 'rejected', g.reason);
       c.notes.push(`T${tier}:${g.reason}`);
+      if (!isTransientResponse(r.html, r.statusCode)) c.contentRejected = true;
     }
     const returnable = accepted || (terminal && g.valid && g.score >= TERMINAL_TIER_ACCEPT_QUALITY);
     return { kind: 'response', r, ok: returnable };
   }
 
-  private exhaustedMessage(c: RequestContext): string {
+  private exhausted(c: RequestContext): TiersExhaustedError {
     let detail = c.notes.join(' | ');
     if (detail.length > MAX_EXHAUSTED_DETAIL_CHARS) detail = `${detail.slice(0, MAX_EXHAUSTED_DETAIL_CHARS - 1)}…`;
-    return `All tiers exhausted for ${c.domain} — ${detail}`;
+    return new TiersExhaustedError(`All tiers exhausted for ${c.domain} — ${detail}`, c.contentRejected);
   }
 
   // ── Browser contexts ───────────────────────────────────

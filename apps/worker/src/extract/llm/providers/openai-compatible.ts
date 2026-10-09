@@ -193,18 +193,30 @@ function readChatCompletion(
   const usage = isRecord(json.usage) ? json.usage : {};
   const resolvedModel = typeof json.model === 'string' ? json.model : undefined;
   const resolvedProvider = typeof json.provider === 'string' ? json.provider : undefined;
-  // Providers that omit usage still cost something; estimate rather than record 0.
-  const inputTokens = nonNegativeInt(usage.prompt_tokens) ?? estimateTokens(req.system) + estimateTokens(req.user);
+  const reportedInput = nonNegativeInt(usage.prompt_tokens);
+  const reportedOutput = nonNegativeInt(usage.completion_tokens);
+  const reportedCost = nonNegativeNumber(usage.cost);
   const choices = Array.isArray(json.choices) ? json.choices : [];
   const choice = isRecord(choices[0]) ? choices[0] : undefined;
+
+  // An error in the body (often an upstream failure before any generation) is
+  // charged only for the usage the provider reports, never an estimate.
+  const embedded = isRecord(json.error) ? json.error : choice && isRecord(choice.error) ? choice.error : undefined;
+  if (embedded) {
+    const reported: LlmErrorDetails = { inputTokens: reportedInput, outputTokens: reportedOutput, resolvedModel, resolvedProvider };
+    reported.costUsd =
+      reportedCost ??
+      (reportedInput !== undefined || reportedOutput !== undefined ? estimateCostUsd(caps, reportedInput ?? 0, reportedOutput ?? 0) : undefined);
+    throw embeddedError(embedded, result, ctx, label, reported);
+  }
+
   const message = choice && isRecord(choice.message) ? choice.message : {};
   const text = contentText(message.content);
-  const outputTokens = nonNegativeInt(usage.completion_tokens) ?? estimateTokens(text);
-  const costUsd = nonNegativeNumber(usage.cost) ?? estimateCostUsd(caps, inputTokens, outputTokens);
+  // Providers that omit usage still cost something; estimate rather than record 0.
+  const inputTokens = reportedInput ?? estimateTokens(req.system) + estimateTokens(req.user);
+  const outputTokens = reportedOutput ?? estimateTokens(text);
+  const costUsd = reportedCost ?? estimateCostUsd(caps, inputTokens, outputTokens);
   const details: LlmErrorDetails = { inputTokens, outputTokens, costUsd, resolvedModel, resolvedProvider };
-
-  if (isRecord(json.error)) throw embeddedError(json.error, result, ctx, label, details);
-  if (choice && isRecord(choice.error)) throw embeddedError(choice.error, result, ctx, label, details);
 
   let finishReason = mapFinishReason(choice?.finish_reason);
   // Structured-output refusals come back as message.refusal with no content.

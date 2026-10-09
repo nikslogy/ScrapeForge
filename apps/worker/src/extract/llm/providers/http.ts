@@ -9,6 +9,7 @@ import {
   parseRetryAfter,
   snippet,
   toLlmError,
+  withoutEchoes,
   type LlmErrorDetails,
 } from '../errors.js';
 
@@ -120,8 +121,9 @@ export function embeddedError(
 ): LlmCallError {
   const code = error.code;
   const status = typeof code === 'number' && Number.isInteger(code) ? code : 0;
-  // Classify on the whole error object: OpenRouter puts the upstream text in metadata.raw.
-  const text = safeStringify(error);
+  // Classify on the whole error object (OpenRouter puts the upstream text in
+  // metadata.raw), minus anything that echoes the model's output.
+  const text = safeStringify(withoutEchoes(error));
   const { category, scope } = classifyFailure(status, typeof code === 'string' ? `${code} ${text}` : text);
   const requested = parseRetryAfter(result.headers, text);
   const message = typeof error.message === 'string' ? error.message : text;

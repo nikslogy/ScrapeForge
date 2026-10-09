@@ -1,20 +1,27 @@
 // SSRF guard for browser tiers.
 //
-// Three layers, because Playwright route handlers do not see everything:
+// 0. The pooled Chromium connects only through the local egress guard
+//    (browser/pool.ts, net/egress-proxy.ts), which resolves every destination
+//    itself and refuses blocked addresses when the connection is made. That
+//    covers what the layers below cannot prevent: redirect hops, WebSockets,
+//    workers, popups, and DNS answers that change after a check. Loopback is
+//    not bypassed: the guard decides for it too.
+//
+// The layers below are kept as defence in depth, and so that a page that
+// tried to reach a blocked destination fails the fetch with an
+// OutboundBlockedError instead of returning content:
 //
 // 1. Route handlers (page and context) check every request Chromium hands to
 //    interception and abort the ones aimed at private/reserved destinations.
 //    The page handler settles its page's requests; the context handler covers
 //    what page handlers never see: popups and service worker requests.
 // 2. Redirect hops and WebSockets never reach route handlers. A monitor checks
-//    them as they happen; any violation fails the fetch so nothing the page
-//    loaded from a blocked destination is returned.
+//    them as they happen, on every page of the context (popups included);
+//    any violation fails the fetch. On its own this layer only detects: the
+//    hop or handshake has already been sent when it is seen. Layer 0 is what
+//    keeps it from being sent.
 // 3. The navigation's redirect chain and the final page URL are re-checked
 //    before content is read.
-//
-// Layer 2 detects but cannot prevent: a redirect hop or WebSocket handshake to
-// a blocked address has already been sent when we see it (blind SSRF). Closing
-// that needs an egress proxy that enforces the policy at connect time.
 
 import type { BrowserContext, Page, Request, Response, Route, WebSocket } from 'patchright';
 import { assertPublicUrl, isOutboundBlockedError, OutboundBlockedError } from '@scrapeforge/shared';
@@ -125,14 +132,16 @@ export interface OutboundMonitor {
 
 /**
  * Watch what route handlers cannot intercept: redirect hops of any request in
- * the page's context (Playwright follows them internally) and WebSockets.
- * WebSockets are observed rather than routed: page.routeWebSocket works by
- * replacing window.WebSocket inside the page, which anti-bot scripts can
- * detect and which does not cover workers.
+ * the page's context (Playwright follows them internally) and WebSockets of
+ * the page and of every page opened in its context while the monitor runs
+ * (popups). WebSockets are observed rather than routed:
+ * page.routeWebSocket works by replacing window.WebSocket inside the page,
+ * which anti-bot scripts can detect and which does not cover workers.
  */
 export function monitorOutbound(page: Page): OutboundMonitor {
   const context = page.context();
   const pending = new Set<Promise<void>>();
+  const watched = new Set<Page>();
   let violation: OutboundBlockedError | null = null;
 
   const check = (rawUrl: string) => {
@@ -146,9 +155,17 @@ export function monitorOutbound(page: Page): OutboundMonitor {
     if (request.redirectedFrom()) check(request.url());
   };
   const onWebSocket = (ws: WebSocket) => check(ws.url());
+  const watch = (p: Page) => {
+    if (watched.has(p)) return;
+    watched.add(p);
+    p.on('websocket', onWebSocket);
+  };
 
   context.on('request', onRequest);
-  page.on('websocket', onWebSocket);
+  // Popups and any other page opened while the fetch runs. A pooled context
+  // holds no other page: the pool closes leftovers between fetches.
+  context.on('page', watch);
+  watch(page);
 
   return {
     async assertClean() {
@@ -158,7 +175,9 @@ export function monitorOutbound(page: Page): OutboundMonitor {
     },
     dispose() {
       context.off('request', onRequest);
-      page.off('websocket', onWebSocket);
+      context.off('page', watch);
+      for (const p of watched) p.off('websocket', onWebSocket);
+      watched.clear();
     },
   };
 }
