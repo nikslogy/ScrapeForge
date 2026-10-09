@@ -1,10 +1,11 @@
-import type { BrowserContext, Page, Request } from 'patchright';
+import type { BrowserContext, Page, Request, Response } from 'patchright';
 import { assertPublicUrl } from '@scrapeforge/shared';
 import {
   assertNavigationAllowed,
   ensureContextOutboundGuard,
   installOutboundGuard,
   monitorOutbound,
+  type OutboundMonitor,
 } from '../browser/outbound-guard.js';
 
 const FLATTEN_SHADOW_DOM_SCRIPT = `
@@ -211,6 +212,52 @@ export function trackRequests(page: Page): RequestTracker {
   };
 }
 
+/**
+ * The HTTP status of the response the page's current document came from. A
+ * JS challenge answers 403/503 and then reloads or navigates to the real
+ * page, so the goto() response is not necessarily the one whose DOM is read.
+ */
+export interface NavigationStatus {
+  /** Status of the current document's response; `fallback` when none was seen. */
+  status(fallback: number): number;
+  dispose(): void;
+}
+
+export function trackNavigationStatus(page: Page): NavigationStatus {
+  const responses: Response[] = [];
+  const onResponse = (r: Response) => {
+    try {
+      if (r.request().isNavigationRequest() && r.frame() === page.mainFrame()) responses.push(r);
+    } catch {
+      // Service worker requests have no frame.
+    }
+  };
+  page.on('response', onResponse);
+  return {
+    status(fallback) {
+      // Redirect hops are not documents.
+      const documents = responses.filter((r) => r.request().redirectedTo() === null);
+      // The latest response for the document's URL. A later one for another
+      // URL is a navigation that has not committed (or never will: 204,
+      // download, aborted); a script-rewritten URL (pushState) has none.
+      const current = withoutFragment(page.url());
+      for (let i = documents.length - 1; i >= 0; i--) {
+        if (withoutFragment(documents[i].url()) === current) return documents[i].status();
+      }
+      return documents.at(-1)?.status() ?? fallback;
+    },
+    dispose() {
+      page.off('response', onResponse);
+      responses.length = 0;
+    },
+  };
+}
+
+function withoutFragment(url: string): string {
+  const i = url.indexOf('#');
+  return i === -1 ? url : url.slice(0, i);
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
 
 /** `promise`, or null after `ms` (or when it rejects). Never leaves a rejection unhandled. */
@@ -222,6 +269,89 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Overall deadline
+// ─────────────────────────────────────────────────────────────
+//
+// After navigation every step is a call into the page, and a page whose main
+// thread never yields (a busy loop after DOMContentLoaded) answers none of
+// them: evaluate() and content() have no timeout of their own. Each step is
+// raced against what is left of the caller's timeout; when it runs out the
+// fetch throws and its finally closes the page (which works even with a
+// blocked main thread), so the pooled context is released.
+
+/** Overall budget of a browser fetch whose caller gives no timeout. */
+export const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
+// Part of the overall timeout the readiness wait leaves for reading the page:
+// a fifth of it, between 250 ms and 1 s.
+const READ_RESERVE_SHARE = 0.2;
+const READ_RESERVE_MIN_MS = 250;
+const READ_RESERVE_MAX_MS = 1_000;
+// Closing takes milliseconds even for a hung page; this only guards the finally.
+const PAGE_CLOSE_TIMEOUT_MS = 5_000;
+
+/** The caller's overall timeout ran out during `step`. */
+export class BrowserFetchTimeoutError extends Error {
+  readonly code = 'BROWSER_FETCH_TIMEOUT' as const;
+
+  constructor(
+    readonly timeoutMs: number,
+    readonly step: string,
+  ) {
+    super(`Timeout: browser fetch exceeded its ${timeoutMs} ms budget (${step}; the page stopped responding)`);
+    this.name = 'BrowserFetchTimeoutError';
+  }
+}
+
+export interface FetchDeadline {
+  /** The overall budget in ms. */
+  readonly timeoutMs: number;
+  /** ms left; zero or less once it has passed. */
+  remaining(): number;
+  /** A Playwright `timeout` for `step`: what is left, at most `maxMs`. Throws when nothing is left. */
+  timeoutFor(step: string, maxMs?: number): number;
+  /** Runs `call`, throwing BrowserFetchTimeoutError if the deadline passes first (or already has). */
+  run<T>(step: string, call: () => Promise<T>): Promise<T>;
+}
+
+export function fetchDeadline(start: number, timeoutMs?: number): FetchDeadline {
+  const total = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : DEFAULT_FETCH_TIMEOUT_MS;
+  const end = start + total;
+  const remaining = () => end - performance.now();
+  return {
+    timeoutMs: total,
+    remaining,
+    timeoutFor(step, maxMs = Infinity) {
+      const ms = Math.floor(Math.min(remaining(), maxMs));
+      // 0 means "no timeout" to Playwright.
+      if (ms < 1) throw new BrowserFetchTimeoutError(total, step);
+      return ms;
+    },
+    async run(step, call) {
+      if (remaining() <= 0) throw new BrowserFetchTimeoutError(total, step);
+      const promise = call();
+      // When the deadline wins, the call settles only once the page closes.
+      promise.catch(() => {});
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new BrowserFetchTimeoutError(total, step)), Math.max(0, remaining()));
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+/** Closes `page` without letting the close itself hold the caller up. Never throws. */
+export async function closePage(page: Page): Promise<void> {
+  await within(page.close(), PAGE_CLOSE_TIMEOUT_MS);
 }
 
 export interface SettleOptions {
@@ -423,6 +553,7 @@ export async function tier4Fetch(
   context: BrowserContext,
   options: {
     waitFor?: string;
+    /** Overall budget in ms, page reading included (default DEFAULT_FETCH_TIMEOUT_MS). */
     timeout?: number;
     blockResources?: boolean;
     mobile?: boolean;
@@ -437,6 +568,7 @@ export async function tier4Fetch(
   latencyMs: number;
 }> {
   const start = performance.now();
+  const deadline = fetchDeadline(start, options.timeout);
   // Refuse before spending a page on it. The guards below cover everything
   // the page loads afterwards (see browser/outbound-guard.ts).
   const target = await assertPublicUrl(url);
@@ -444,6 +576,7 @@ export async function tier4Fetch(
   const page = await context.newPage();
   const monitor = monitorOutbound(page);
   const tracker = trackRequests(page);
+  const navigation = trackNavigationStatus(page);
 
   try {
     // Apply fingerprint patches before anything navigates. Patchright
@@ -471,56 +604,95 @@ export async function tier4Fetch(
       await page.addInitScript(MOBILE_INIT_SCRIPT);
     }
 
-    const response = await page.goto(target.href, {
-      waitUntil: 'domcontentloaded',
-      timeout: Math.min(options.timeout || 20_000, 20_000),
-    });
+    const response = await deadline.run('navigation', () =>
+      page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation', 20_000) }),
+    );
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
-    await assertNavigationAllowed(response, page.url());
+    await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
 
-    if (options.waitFor) {
-      await page.waitForSelector(options.waitFor, {
-        timeout: Math.min(options.timeout || 8_000, 8_000),
-      });
-    }
-    await settlePage(page, tracker, readinessFor(options, start));
-
-    // Flatten Shadow DOM so extraction can read hidden content
-    await page.evaluate(FLATTEN_SHADOW_DOM_SCRIPT);
-
-    // Page scripts may have navigated since the initial load.
-    await assertNavigationAllowed(null, page.url());
-    const html = await page.content();
-    const statusCode = response?.status() || 200;
-
-    let screenshot: string | undefined;
-    if (options.screenshot) {
-      const buffer = await page.screenshot({ fullPage: true, type: 'png' });
-      screenshot = buffer.toString('base64');
+    const waitFor = options.waitFor;
+    if (waitFor) {
+      await deadline.run('waitFor', () =>
+        page.waitForSelector(waitFor, { timeout: deadline.timeoutFor('waitFor', 8_000) }),
+      );
     }
 
-    // Nothing is returned if any redirect hop or WebSocket reached a
-    // blocked destination while the page was loading.
-    await monitor.assertClean();
+    const capture = await capturePage(page, {
+      tracker,
+      monitor,
+      navigation,
+      fallbackStatus: response?.status() || 200,
+      deadline,
+      settle: readinessFor({ ...options, timeout: deadline.timeoutMs }, start),
+      screenshot: Boolean(options.screenshot),
+    });
 
     return {
-      html,
-      statusCode,
-      screenshot,
+      html: capture.html,
+      statusCode: capture.statusCode,
+      screenshot: capture.screenshot,
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    navigation.dispose();
     tracker.dispose();
     monitor.dispose();
-    await page.close();
+    await closePage(page);
   }
+}
+
+/**
+ * The part both browser tiers share once the page has loaded: readiness
+ * wait, shadow-DOM flattening, final URL check, content and the status of
+ * the response it came from, optional screenshot and the outbound monitor's
+ * verdict. Every page call is bounded by `deadline`; the caller closes the
+ * page.
+ */
+export async function capturePage(
+  page: Page,
+  deps: {
+    tracker: RequestTracker;
+    monitor: OutboundMonitor;
+    navigation: NavigationStatus;
+    /** Status when no main-frame response was seen (the goto() response's, else 200). */
+    fallbackStatus: number;
+    deadline: FetchDeadline;
+    settle: SettleOptions;
+    screenshot: boolean;
+  },
+): Promise<{ html: string; statusCode: number; screenshot?: string }> {
+  const { deadline } = deps;
+  await settlePage(page, deps.tracker, deps.settle);
+
+  // Flatten Shadow DOM so extraction can read hidden content
+  await deadline.run('flattening shadow DOM', () => page.evaluate(FLATTEN_SHADOW_DOM_SCRIPT));
+
+  // Page scripts may have navigated since the initial load.
+  await deadline.run('checking the final URL', () => assertNavigationAllowed(null, page.url()));
+  const html = await deadline.run('reading content', () => page.content());
+  const statusCode = deps.navigation.status(deps.fallbackStatus);
+
+  let screenshot: string | undefined;
+  if (deps.screenshot) {
+    const buffer = await deadline.run('screenshot', () =>
+      page.screenshot({ fullPage: true, type: 'png', timeout: deadline.timeoutFor('screenshot') }),
+    );
+    screenshot = buffer.toString('base64');
+  }
+
+  // Nothing is returned if any redirect hop or WebSocket reached a
+  // blocked destination while the page was loading.
+  await deadline.run('outbound checks', () => deps.monitor.assertClean());
+
+  return { html, statusCode, screenshot };
 }
 
 /**
  * Settle options for a fetch: the cap is `readyTimeoutMs`, else
  * BROWSER_READY_TIMEOUT_MS, else 2.5 s, and never runs past the caller's
- * overall `timeout` (measured from `start`).
+ * overall `timeout` (measured from `start`) less the part kept for reading
+ * the page afterwards.
  */
 export function readinessFor(
   options: { waitFor?: string; timeout?: number; screenshot?: boolean; readyTimeoutMs?: number },
@@ -529,7 +701,11 @@ export function readinessFor(
   let capMs = options.readyTimeoutMs ?? envMs('BROWSER_READY_TIMEOUT_MS', DEFAULT_READY_CAP_MS);
   let challengeCapMs = envMs('BROWSER_CHALLENGE_TIMEOUT_MS', DEFAULT_CHALLENGE_CAP_MS);
   if (options.timeout) {
-    const left = Math.max(0, options.timeout - (performance.now() - start));
+    const reserve = Math.min(
+      READ_RESERVE_MAX_MS,
+      Math.max(READ_RESERVE_MIN_MS, options.timeout * READ_RESERVE_SHARE),
+    );
+    const left = Math.max(0, options.timeout - reserve - (performance.now() - start));
     capMs = Math.min(capMs, left);
     challengeCapMs = Math.min(challengeCapMs, left);
   }

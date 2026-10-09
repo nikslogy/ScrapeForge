@@ -6,7 +6,15 @@ import {
   installOutboundGuard,
   monitorOutbound,
 } from '../browser/outbound-guard.js';
-import { envMs, readinessFor, settlePage, trackRequests } from './tier4-browser.js';
+import {
+  capturePage,
+  closePage,
+  envMs,
+  fetchDeadline,
+  readinessFor,
+  trackNavigationStatus,
+  trackRequests,
+} from './tier4-browser.js';
 
 // Optional pause after the page loads, for sites that score instant readers
 // as bots. Off by default: it is pure latency. STEALTH_HUMAN_DELAY_MS=600
@@ -65,6 +73,7 @@ export async function tier4StealthFetch(
   context: BrowserContext,
   options: {
     waitFor?: string;
+    /** Overall budget in ms, page reading included (default DEFAULT_FETCH_TIMEOUT_MS). */
     timeout?: number;
     blockResources?: boolean;
     screenshot?: boolean;
@@ -78,6 +87,7 @@ export async function tier4StealthFetch(
   latencyMs: number;
 }> {
   const start = performance.now();
+  const deadline = fetchDeadline(start, options.timeout);
   // Refuse before spending a page on it. The guards below cover everything
   // the page loads afterwards (see browser/outbound-guard.ts).
   const target = await assertPublicUrl(url);
@@ -85,6 +95,7 @@ export async function tier4StealthFetch(
   const page = await context.newPage();
   const monitor = monitorOutbound(page);
   const tracker = trackRequests(page);
+  const navigation = trackNavigationStatus(page);
 
   try {
     // Dropped by Patchright once page.route() follows (see tier4-browser.ts).
@@ -102,67 +113,43 @@ export async function tier4StealthFetch(
       'Sec-Ch-Ua-Platform': '"Windows"',
     });
 
-    const response = await page.goto(target.href, {
-      waitUntil: 'domcontentloaded',
-      timeout: options.timeout || 30_000,
-    });
+    const response = await deadline.run('navigation', () =>
+      page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation') }),
+    );
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
-    await assertNavigationAllowed(response, page.url());
+    await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
 
-    const delay = humanDelayMs();
-    if (delay > 0) await page.waitForTimeout(delay);
+    const delay = Math.min(humanDelayMs(), deadline.remaining());
+    if (delay > 0) await deadline.run('human delay', () => page.waitForTimeout(delay));
 
-    if (options.waitFor) {
-      await page.waitForSelector(options.waitFor, {
-        timeout: Math.min(options.timeout || 10_000, 10_000),
-      });
-    }
-    await settlePage(page, tracker, readinessFor(options, start));
-
-    // Flatten Shadow DOM so extraction can see hidden content
-    await page.evaluate(`
-      (function() {
-        function go(root) {
-          var els = root.querySelectorAll('*');
-          for (var i = 0; i < els.length; i++) {
-            if (els[i].shadowRoot) {
-              go(els[i].shadowRoot);
-              var w = document.createElement('div');
-              w.setAttribute('data-shadow-flattened', 'true');
-              w.innerHTML = els[i].shadowRoot.innerHTML;
-              els[i].appendChild(w);
-            }
-          }
-        }
-        go(document);
-      })();
-    `);
-
-    // Page scripts may have navigated since the initial load.
-    await assertNavigationAllowed(null, page.url());
-    const html = await page.content();
-    const statusCode = response?.status() || 200;
-
-    let screenshot: string | undefined;
-    if (options.screenshot) {
-      const buffer = await page.screenshot({ fullPage: true, type: 'png' });
-      screenshot = buffer.toString('base64');
+    const waitFor = options.waitFor;
+    if (waitFor) {
+      await deadline.run('waitFor', () =>
+        page.waitForSelector(waitFor, { timeout: deadline.timeoutFor('waitFor', 10_000) }),
+      );
     }
 
-    // Nothing is returned if any redirect hop or WebSocket reached a
-    // blocked destination while the page was loading.
-    await monitor.assertClean();
+    const capture = await capturePage(page, {
+      tracker,
+      monitor,
+      navigation,
+      fallbackStatus: response?.status() || 200,
+      deadline,
+      settle: readinessFor({ ...options, timeout: deadline.timeoutMs }, start),
+      screenshot: Boolean(options.screenshot),
+    });
 
     return {
-      html,
-      statusCode,
-      screenshot,
+      html: capture.html,
+      statusCode: capture.statusCode,
+      screenshot: capture.screenshot,
       latencyMs: Math.round(performance.now() - start),
     };
   } finally {
+    navigation.dispose();
     tracker.dispose();
     monitor.dispose();
-    await page.close();
+    await closePage(page);
   }
 }

@@ -150,9 +150,13 @@ paths:
           missing field is genuinely absent from the page (`not_found` on a
           field the schema allows to be null or left out).
         * `status: partial` — usable data, but something is missing for
-          another reason (rejected, ambiguous, provider failure, truncated
-          input), or the data does not validate against your schema
-          (`schemaValid: false`, see `schemaErrors`).
+          another reason (rejected, ambiguous, unparseable, provider failure,
+          truncated input or output, listing records dropped because none of
+          their values could be accepted, a structured-data list that covers
+          only part of the listing), a value was returned unverified because
+          the model could not check it (`unverified_values:<field>`), or the
+          data does not validate against your schema (`schemaValid: false`,
+          see `schemaErrors`).
         * `status: failed` — no usable data: blocked/challenge page, invalid
           schema, provider failure with nothing else to go on, or nothing
           found. `content.json` is omitted. Failed extractions are never
@@ -160,7 +164,15 @@ paths:
         `missing` lists each absent value with its JSON pointer and reason;
         `warnings` are machine-readable notes (e.g. `citation_mismatch:/price`,
         `structured_value_not_visible:sku`, `source_page_blocked:challenge_page`,
-        `invalid_schema:<code>: <message>`).
+        `invalid_schema:<code>: <message>`,
+        `multiple_records_for_object_schema:<n>` (see `CustomerSchema`),
+        `structured_list_incomplete:<listed>_of_<onPage>`,
+        `output_limit_records:<sent>_of_<onPage>` (a listing larger than the
+        model's output limit: only the records that fit were sent)).
+
+        Listings larger than the model's output limit are `partial`: the
+        engine sends only the records the model's answer can hold and reports
+        the rest as `not_processed` on the list's pointer.
 
         Synchronous jobs are retried once after 250 ms; webhook jobs up to
         three times with exponential backoff. Unreachable or private hosts
@@ -436,6 +448,17 @@ components:
         Shorthand fields are optional and nullable; a shorthand schema with
         one array field is a listing, otherwise the engine returns an array
         when the page lists several matching items and an object otherwise.
+        A JSON Schema with `"type": "object"` at the root always returns ONE
+        object, even on a listing or search page (an array would not match
+        your schema); when the page clearly holds several matching records,
+        `warnings` contains `multiple_records_for_object_schema:<n>`.
+        Migration for clients that relied on the old engine returning an
+        array for such schemas: ask for a list explicitly (`"type": "array"`
+        with object `items`, or a wrapper object with one array property such
+        as `{"type": "object", "properties": {"items": {"type": "array",
+        "items": {...}}}}`), or let the engine decide (shorthand, or a root
+        with `properties` but no `"type"`, which returns an object or an
+        array).
         Mark inferred fields (a summary, a classification) with
         `"x-derived": true`: they are exempt from verbatim grounding and are
         labelled `derived` in evidence. Limits: 64 KB serialized, 10 levels
@@ -551,15 +574,22 @@ components:
                 description: JSON pointer into content.json ("/price", "/items/3/price"; "/items" for the list itself).
               reason:
                 type: string
-                enum: [not_found, not_processed, ambiguous, provider_failure, truncated, rejected_ungrounded]
+                enum: [not_found, not_processed, ambiguous, provider_failure, truncated, rejected_ungrounded, unparseable]
                 description: |
                   `not_found` — not on the page. `not_processed` — part of the page was not
-                  sent to the model (input too large) or the page was blocked.
+                  sent to the model (input too large, a listing larger than the model's
+                  output limit, a structured-data list covering only part of the listing)
+                  or the page was blocked.
                   `ambiguous` — several conflicting values (e.g. a price range).
                   `provider_failure` — the model call failed (detail: auth, quota,
                   budget_exhausted, no_model_configured, …). `truncated` — the model's
                   output was cut off. `rejected_ungrounded` — the model reported a value
-                  that is not on the page.
+                  that is not on the page (on a list's pointer: records dropped because
+                  none of their values could be accepted). `unparseable` — the page shows
+                  a value that cannot be converted to the field's type ("Free" for a
+                  number, "4.5 out of 5" for an integer); detail says why.
+                  Only `not_found` on a field that may be null or absent keeps the
+                  status `complete`.
               detail:
                 type: string
         warnings:

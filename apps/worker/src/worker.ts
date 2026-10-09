@@ -5,7 +5,8 @@ import {
   ScrapeJobData,
   ScrapeResult,
   QUEUE_NAMES,
-  createCacheKey,
+  isCacheableResult,
+  resultCacheKey,
   type ExtractionMetadata,
   type ScrapeOptions,
 } from '@scrapeforge/shared';
@@ -289,18 +290,12 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
 
     // ── Stage 4: Cache + persist ───────────────────────
     //
-    // The cache key includes `extractSchema` (and includeEvidence when set)
-    // so different requests never collide. A failed extraction (block page,
-    // provider outage, nothing found) is never cached: it would mask the
-    // failure on every later call for the cacheTtl window.
-    if (options.cacheTtl && options.cacheTtl > 0 && extraction?.status !== 'failed') {
-      const cacheKeyStr = `cache:${createCacheKey(url, {
-        formats: options.formats,
-        proxy: options.proxy,
-        extractSchema: options.extractSchema,
-        includeEvidence: includeEvidence || undefined,
-      })}`;
-      await redis.set(cacheKeyStr, JSON.stringify(result), 'EX', options.cacheTtl);
+    // Same key as the API's cache read (resultCacheKey: tenant, credentials,
+    // schema, spend cap...). Only complete extractions are cached: a partial
+    // or failed one may come from this request's limits or a transient
+    // provider problem and would be served for the whole cacheTtl.
+    if (options.cacheTtl && isCacheableResult(options, extraction?.status)) {
+      await redis.set(resultCacheKey(userId, url, options), JSON.stringify(result), 'EX', options.cacheTtl);
     }
 
     await redis.set(`result:${jobId}`, JSON.stringify(result), 'EX', 3600);

@@ -31,6 +31,7 @@ import {
   checkInvariants,
   compareOutputs,
   induceRecipe,
+  isEmptyValue,
   isReservedFieldName,
   parseRecipeResponse,
   runRecipe,
@@ -56,6 +57,7 @@ import {
   type MissingReason,
   type NormalizedSchema,
   type RecipeKey,
+  type RecordGroup,
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
@@ -91,6 +93,12 @@ export interface ExtractDeps {
 const OUTPUT_TOKENS_PER_CELL = 40;
 /** Never ask for fewer output tokens than this (long string values, prose around JSON). */
 const MIN_OUTPUT_TOKENS = 1_024;
+/** Output-bound listings: answer JSON is assumed this much larger than its bare content (spacing, escapes). */
+const OUTPUT_FORMAT_FACTOR = 1.2;
+/** Records whose text is sampled to estimate a listing record's answer size. */
+const OUTPUT_SIZE_SAMPLE = 50;
+/** A retry after truncated output keeps this share of the records sent. */
+const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
 const CHARS_PER_TOKEN = 3.2;
 /** Missing entries reported at most; the rest are summarized in a warning. */
@@ -99,12 +107,25 @@ const MAX_MISSING_ENTRIES = 1_000;
 const MAX_WARNINGS_PER_KIND = 20;
 const MAX_EXCERPT_CHARS = 200;
 const MAX_REASON_CHARS = 100;
-/** Learning samples taken from the first records of a listing. */
-const MAX_LEARNING_SAMPLES = 10;
+/** Structured records whose longest value is looked up in the page's record groups. */
+const LIST_COVERAGE_SAMPLE = 20;
+/** Cards a structured listing may lack against the page's record group (promo slots): this share of the group. */
+const LIST_COVERAGE_TOLERANCE = 0.1;
+/**
+ * Raw samples handed to induction (the first records of a listing; induction
+ * uses at most 20). Whatever it induces is then verified against every
+ * grounded record, not only these.
+ */
+const MAX_LEARNING_SAMPLES = 20;
 /** Background learning runs in flight at once per process; more are skipped. */
 const MAX_BACKGROUND_LEARNING = 4;
 /** Wall-clock bound for induction (CPU on the event loop). */
 const INDUCTION_BUDGET_MS = 2_000;
+/**
+ * Least time an active recipe gets to run, even past the request deadline:
+ * it is local and fast, and a late answer from it beats no answer.
+ */
+const RECIPE_SERVE_MIN_MS = 1_000;
 /** Deadline for a model-proposed recipe call (runs after the answer). */
 const PROPOSAL_TIMEOUT_MS = 30_000;
 /** Pages with more visible text than this are never classified as challenge pages by the engine. */
@@ -234,6 +255,10 @@ function hasOwn(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function ownField(record: unknown, key: string): unknown {
+  return typeof record === 'object' && record !== null && hasOwn(record, key) ? (record as Record<string, unknown>)[key] : undefined;
+}
+
 const COMMA_DECIMAL_LANGS = new Set([
   'de', 'fr', 'es', 'it', 'pt', 'nl', 'ru', 'pl', 'cs', 'sk', 'sv', 'da', 'fi', 'nb', 'nn', 'no', 'tr', 'id', 'vi', 'el',
   'hu', 'ro', 'bg', 'uk', 'hr', 'sl', 'sr', 'lt', 'lv', 'et', 'ca', 'eu', 'gl', 'is', 'az', 'kk', 'be',
@@ -326,6 +351,8 @@ interface LlmStageResult {
   ran: boolean;
   /** Parsed records (array/auto) or [one record] (object); empty when the call failed. */
   records: Array<Map<string, LlmSlot>>;
+  /** Records the model returned (an object keeps only the first). */
+  parsedCount?: number;
   /** Failure that left the asked fields unresolved. */
   failure?: { reason: MissingReason; detail: string };
 }
@@ -348,6 +375,12 @@ class ExtractionRun {
   private blocksSentToModel = 0;
   private $?: cheerio.CheerioAPI;
   private rejectedCount = 0;
+  /** Records of a listing known to exist but not returned (list-level missing entry). */
+  private listGap?: { reason: MissingReason; detail: string };
+  /** The structured list returned was cut by the mapper's record cap. */
+  private structuredTruncated = false;
+  /** Values returned from structured data that the model should have verified but could not. */
+  private unverifiedFallbacks = 0;
 
   constructor(
     private readonly req: ExtractRequest,
@@ -418,7 +451,12 @@ class ExtractionRun {
           const result = extractFromStructuredData(this.doc, schema);
           // The mapper's own "not visible" notes are re-issued only when such a value is actually used.
           for (const w of result.warnings) if (!w.startsWith('structured_value_not_visible:')) this.warnings.add(w);
-          return { shape: result.shape, records: result.records.map((r) => this.structuredRecord(r)) };
+          return {
+            shape: result.shape,
+            primary: result.primary,
+            capped: result.warnings.some((w) => w.startsWith('structured_records_capped:')),
+            records: result.records.map((r) => this.structuredRecord(r)),
+          };
         });
     const structured = new Map<string, StructuredCandidate>();
     const structuredShape = mapped?.shape ?? null;
@@ -429,17 +467,39 @@ class ExtractionRun {
     let shape: EffectiveShape = schema.shape;
     const objectSlots = new Map<string, Slot>();
     let arrayRecords: Array<Map<string, Slot>> | null = null;
+    let structuredListFallback: { records: Array<Map<string, Slot>>; detail: string } | null = null;
 
     if (structuredShape === 'object' && structuredRecords.length > 0 && schema.shape !== 'array') {
       for (const [name, c] of structuredRecords[0]) structured.set(name, c);
-      if (schema.shape === 'auto' && [...structured.values()].some((c) => c.verified)) shape = 'object';
+      // Only a content entity of the kind the fields ask for (the product of
+      // a product page) settles 'auto' as one object; page metadata may sit
+      // on a listing page too, so the model decides there.
+      const primary = mapped?.primary;
+      const decidesObject = primary !== undefined && primary.content && primary.fits;
+      if (schema.shape === 'auto' && decidesObject && [...structured.values()].some((c) => c.verified)) shape = 'object';
     } else if (structuredShape === 'array' && schema.shape !== 'object' && this.structuredArrayComplete(structuredRecords)) {
       shape = 'array';
-      arrayRecords = structuredRecords.map((rec) => {
+      const asSlots = structuredRecords.map((rec) => {
         const out = new Map<string, Slot>();
         for (const [name, c] of rec) out.set(name, { value: c.value, source: 'structured', evidence: c.evidence });
         return out;
       });
+      const shortfall = this.structuredListShortfall(structuredRecords);
+      if (shortfall) {
+        // A featured-items or SEO-capped ItemList: the page shows more records.
+        // The model reads the page; these records are only the fallback.
+        this.warnings.add(`structured_list_incomplete:${shortfall.listed}_of_${shortfall.onPage}`);
+        structuredListFallback = {
+          records: asSlots,
+          detail: `structured data lists ${shortfall.listed} of the ${shortfall.onPage} records on the page; the others were not extracted`,
+        };
+      } else {
+        arrayRecords = asSlots;
+        if (mapped?.capped) {
+          this.structuredTruncated = true;
+          this.listGap = { reason: 'not_processed', detail: 'structured data lists more records than are returned; later records were not processed' };
+        }
+      }
     }
     if (shape !== 'array') {
       for (const [name, c] of structured) {
@@ -472,6 +532,11 @@ class ExtractionRun {
     if (arrayRecords !== null) {
       finalShape = 'array';
       records = arrayRecords;
+    } else if (structuredListFallback && llm.records.length <= 1 && (llm.failure || !llm.ran)) {
+      // The model could not read the page: the partial structured list, reported as such.
+      finalShape = 'array';
+      records = structuredListFallback.records;
+      this.listGap = { reason: llm.failure?.reason ?? 'not_processed', detail: structuredListFallback.detail };
     } else if (shape === 'array' || (shape === 'auto' && llm.records.length > 1)) {
       finalShape = 'array';
       records = llm.records;
@@ -481,6 +546,12 @@ class ExtractionRun {
     }
 
     if (this.rejectedCount > 0) this.warnings.add(`ungrounded_values_rejected:${this.rejectedCount}`);
+    if (schema.shape === 'object') {
+      // An explicit object schema returns one record even on a listing page
+      // (an array would violate it); say when the page clearly has more.
+      const n = this.recordsMatchingObjectSchema(llm, mapped?.primary?.listSize);
+      if (n > 1) this.warnings.add(`multiple_records_for_object_schema:${n}`);
+    }
     const outcome = this.timeSync('validate', () => this.finish(finalShape, records, llm));
     await this.maybeLearn(outcome, llm, asked, finalShape, recipeKey, activeRecipeSeen);
     outcome.timings = this.timingsSnapshot();
@@ -523,6 +594,52 @@ class ExtractionRun {
   private structuredArrayComplete(records: Array<Map<string, StructuredCandidate>>): boolean {
     if (records.length === 0) return false;
     return records.every((rec) => this.schema.fields.every((f) => rec.get(f.name)?.verified === true));
+  }
+
+  /**
+   * Does the page show clearly more records than the structured list holds?
+   * The record group that holds the structured records (most of their
+   * longest text values occur in its records) is compared with the list's
+   * length. A list whose records are in no group is not judged.
+   */
+  private structuredListShortfall(records: Array<Map<string, StructuredCandidate>>): { listed: number; onPage: number } | null {
+    const listed = records.length;
+    const larger = this.doc.recordGroups.filter((g) => g.recordIds.length - listed > Math.max(0, Math.floor(g.recordIds.length * LIST_COVERAGE_TOLERANCE)));
+    if (larger.length === 0) return null;
+    const keys: string[] = [];
+    for (const rec of records.slice(0, LIST_COVERAGE_SAMPLE)) {
+      let key = '';
+      for (const c of rec.values()) {
+        const raw = c.evidence.raw;
+        if (typeof raw === 'string') {
+          const t = raw.replace(/\s+/g, ' ').trim().toLowerCase();
+          if (t.length > key.length) key = t;
+        }
+      }
+      if (key.length >= 3) keys.push(key);
+    }
+    if (keys.length === 0) return null;
+    const blocks = new Map(this.doc.blocks.map((b) => [b.id, b]));
+    let onPage = 0;
+    for (const g of larger) {
+      const text = g.recordIds.map((id) => blocks.get(id)?.text ?? '').join('\n').replace(/\s+/g, ' ').toLowerCase();
+      const found = keys.filter((k) => text.includes(k)).length;
+      if (found * 2 > keys.length) onPage = Math.max(onPage, g.recordIds.length);
+    }
+    return onPage > 0 ? { listed, onPage } : null;
+  }
+
+  /**
+   * How many records like the one returned for an object schema the page
+   * holds: the model's own record count, the record group its values were
+   * read from, or the structured list the record is a member of.
+   */
+  private recordsMatchingObjectSchema(llm: LlmStageResult, structuredListSize: number | undefined): number {
+    let n = Math.max(llm.parsedCount ?? 0, structuredListSize ?? 0);
+    const groups = new Set<string>();
+    for (const slot of llm.records[0]?.values() ?? []) if (slot.value !== null && slot.recordGroupId) groups.add(slot.recordGroupId);
+    for (const g of this.doc.recordGroups) if (groups.has(g.id)) n = Math.max(n, g.recordIds.length);
+    return n;
   }
 
   private unresolved(objectSlots: Map<string, Slot>, shape: EffectiveShape): FieldSpec[] {
@@ -582,7 +699,10 @@ class ExtractionRun {
         const value = norm.ok && !isEmptyRaw(norm.value) ? norm.value : null;
         plain.push([field.name, value]);
         if (value === null) {
-          slots.set(field.name, { value: null, source: 'recipe', missing: { reason: 'not_found', detail: norm.ok ? 'recipe found no value' : `recipe value: ${norm.detail}` } });
+          const missing: Slot['missing'] = norm.ok
+            ? { reason: 'not_found', detail: 'recipe found no value' }
+            : { reason: norm.reason === 'ambiguous' ? 'ambiguous' : 'unparseable', detail: `recipe value: ${norm.detail}` };
+          slots.set(field.name, { value: null, source: 'recipe', missing });
         } else {
           slots.set(field.name, {
             value,
@@ -632,7 +752,12 @@ class ExtractionRun {
       return { activeSeen: true };
     }
 
-    const applied = this.applyRecipe(recipe, this.req.deadlineMs);
+    const applied = this.applyRecipe(recipe, Math.max(this.req.deadlineMs, Date.now() + RECIPE_SERVE_MIN_MS));
+    if (applied.errors.some((e) => /deadline|budget/i.test(e))) {
+      // Cut short by time or a work budget: says nothing about drift, so no recordUse.
+      this.warnings.add('recipe_inconclusive:deadline_or_budget');
+      return { activeSeen: true };
+    }
     const invariants = checkInvariants(stored, { data: applied.data, recordCount: applied.recordCount });
     const ok = invariants.ok && applied.errors.length === 0;
     try {
@@ -686,9 +811,13 @@ class ExtractionRun {
     const parseSource = { provider: primary.provider, model: primary.model };
 
     let maxChars = Math.floor(inputTokens * CHARS_PER_TOKEN);
+    // A listing whose answer cannot fit the output limit is cut to the
+    // records it can hold: a truncated partial, not a failed oversized call.
+    let recordCap = shape === 'object' ? null : this.outputRecordCap(fields, outputTokens);
+    if (recordCap) this.warnings.add(`output_limit_records:${recordCap.count}_of_${recordCap.group.recordIds.length}`);
     let retriedSmaller = false;
     for (;;) {
-      const rendered = this.render(maxChars, inputTokens);
+      const rendered = this.render(maxChars, inputTokens, recordCap ?? undefined);
       if (rendered.truncated) {
         this.truncated = true;
         this.warnings.add('input_truncated');
@@ -732,12 +861,18 @@ class ExtractionRun {
       if (parsedRecords) {
         // An object needs one record; extra ones are not checked (or counted as rejections).
         const used = shape === 'object' ? parsedRecords.slice(0, 1) : parsedRecords;
-        return { ran: true, records: used.map((r) => this.processRecord(r, fields, shape)) };
+        return { ran: true, records: used.map((r) => this.processRecord(r, fields, shape)), parsedCount: parsedRecords.length };
       }
       const f = failure as { category: LlmErrorCategory; message: string };
       if ((f.category === 'output_truncated' || f.category === 'input_too_large') && !retriedSmaller && maxChars > 1) {
         retriedSmaller = true;
-        maxChars = Math.floor(Math.min(maxChars, rendered.text.length) / 2);
+        const sent = recordCap ? recordCap.count : this.recordsSent(rendered.includedIds);
+        const group = recordCap?.group ?? largestRecordGroup(this.doc);
+        if (f.category === 'output_truncated' && group && sent > 1) {
+          recordCap = { group, count: Math.max(1, Math.floor(sent * TRUNCATION_RETRY_SHARE)) };
+        } else {
+          maxChars = Math.floor(Math.min(maxChars, rendered.text.length) / 2);
+        }
         this.truncated = true;
         this.warnings.add(`llm_retry_smaller_input:${f.category}`);
         continue;
@@ -748,8 +883,12 @@ class ExtractionRun {
     }
   }
 
-  /** Renders blocks into at most `maxChars`, shrinking until the token estimate fits. */
-  private render(maxChars: number, inputTokens: number): ReturnType<typeof renderBlocks> {
+  /**
+   * Renders blocks into at most `maxChars`, shrinking until the token
+   * estimate fits; with `recordCap`, rendering also stops before that
+   * record of the group (whole units only, like the char limit).
+   */
+  private render(maxChars: number, inputTokens: number, recordCap?: { group: RecordGroup; count: number }): ReturnType<typeof renderBlocks> {
     let limit = maxChars;
     let rendered = renderBlocks(this.doc, { maxChars: limit });
     // Non-ASCII pages tokenize denser than CHARS_PER_TOKEN assumes.
@@ -757,7 +896,46 @@ class ExtractionRun {
       limit = Math.floor(Math.min(limit, rendered.text.length) * Math.max(0.5, (inputTokens / estimateTokens(rendered.text)) * 0.95));
       rendered = renderBlocks(this.doc, { maxChars: limit });
     }
+    if (recordCap && recordCap.count < recordCap.group.recordIds.length) {
+      const marker = `[${recordCap.group.recordIds[recordCap.count]}] <record`;
+      const at = rendered.text.startsWith(marker) ? 0 : rendered.text.indexOf(`\n${marker}`);
+      if (at > 0) {
+        const cut = renderBlocks(this.doc, { maxChars: at });
+        // A record nested in a larger unit cannot be cut out; keep the char-limited rendering then.
+        if (cut.includedIds.includes(recordCap.group.recordIds[0])) return { ...cut, truncated: true };
+      }
+    }
     return rendered;
+  }
+
+  /**
+   * Records of the largest group the output limit can hold, when fewer than
+   * the group has (null otherwise). Applies only when the usual reservation
+   * (OUTPUT_TOKENS_PER_CELL) exceeds the limit; the answer size is then
+   * estimated per record from each field's JSON framing plus the record's own
+   * text (values are read from it).
+   */
+  private outputRecordCap(fields: FieldSpec[], outputTokens: number): { group: RecordGroup; count: number } | null {
+    const group = largestRecordGroup(this.doc);
+    if (!group) return null;
+    const records = group.recordIds.length;
+    if (records * fields.length * OUTPUT_TOKENS_PER_CELL <= outputTokens) return null;
+    const blocks = new Map(this.doc.blocks.map((b) => [b.id, b]));
+    const sample = group.recordIds.slice(0, OUTPUT_SIZE_SAMPLE);
+    const textTokens = sample.reduce((sum, id) => sum + estimateTokens(blocks.get(id)?.text ?? ''), 0) / Math.max(1, sample.length);
+    const framing = fields.reduce((sum, f) => sum + estimateTokens(`${JSON.stringify(f.name)}:{"v":"","b":"b00000"},`), 0);
+    const valueTokens = Math.min(textTokens, fields.length * OUTPUT_TOKENS_PER_CELL);
+    const perRecord = (framing + valueTokens) * OUTPUT_FORMAT_FACTOR;
+    const count = Math.max(1, Math.floor(outputTokens / perRecord));
+    return count < records ? { group, count } : null;
+  }
+
+  /** Records of the largest group among the rendered blocks. */
+  private recordsSent(includedIds: string[]): number {
+    const group = largestRecordGroup(this.doc);
+    if (!group) return 0;
+    const ids = new Set(includedIds);
+    return group.recordIds.filter((id) => ids.has(id)).length;
   }
 
   private async complete(
@@ -849,7 +1027,8 @@ class ExtractionRun {
 
     const norm = normalizeValue(cell.v, field, this.nctx);
     if (!norm.ok) {
-      const reason: MissingReason = norm.reason === 'ambiguous' ? 'ambiguous' : 'not_found';
+      // On the page but not convertible ("Free" for a price): not genuinely absent.
+      const reason: MissingReason = norm.reason === 'ambiguous' ? 'ambiguous' : 'unparseable';
       return { value: null, source: 'llm', raw: cell.v, clean: false, missing: { reason, detail: `${norm.reason}: ${norm.detail}` } };
     }
     if (isEmptyRaw(norm.value)) return notFound();
@@ -896,6 +1075,11 @@ class ExtractionRun {
       }
       if (fallback) {
         this.warnings.add(`structured_value_not_visible:${field.name}`);
+        if (askedNames.has(field.name) && llm.failure) {
+          // The model was asked to verify it but could not run: returned unverified.
+          this.warnings.add(`unverified_values:${field.name}`);
+          this.unverifiedFallbacks++;
+        }
         out.set(field.name, { value: fallback.value, source: 'structured-fallback', evidence: { ...fallback.evidence, grounded: false } });
         continue;
       }
@@ -931,9 +1115,24 @@ class ExtractionRun {
 
     // Records without a single value carry nothing usable (e.g. every value rejected).
     let kept = records;
+    let droppedWithProblems: { count: number; reason: MissingReason } | undefined;
     if (shape === 'array') {
       kept = records.filter((r) => [...r.values()].some((s) => s.value !== null));
-      if (kept.length < records.length) this.warnings.add(`dropped_records_without_values:${records.length - kept.length}`);
+      if (kept.length < records.length) {
+        this.warnings.add(`dropped_records_without_values:${records.length - kept.length}`);
+        // A record the model reported but whose every value was rejected (or
+        // could not be read) is a record of the page that is not returned.
+        const keptSet = new Set(kept);
+        for (const r of records) {
+          if (keptSet.has(r)) continue;
+          const reasons = [...r.values()]
+            .map((s) => s.missing?.reason)
+            .filter((x): x is MissingReason => x !== undefined && x !== 'not_found' && x !== 'not_processed');
+          if (reasons.length === 0) continue;
+          const reason = reasons.includes('rejected_ungrounded') ? 'rejected_ungrounded' : reasons[0];
+          droppedWithProblems = { count: (droppedWithProblems?.count ?? 0) + 1, reason: droppedWithProblems?.reason ?? reason };
+        }
+      }
     }
 
     const built = kept.map((rec, i) => {
@@ -965,9 +1164,25 @@ class ExtractionRun {
       data = schema.wrapperKey !== undefined ? Object.fromEntries([[schema.wrapperKey, built]]) : built;
     } else {
       // An empty list: the missing entry is the list itself.
-      const why = llm.failure ?? (this.truncated ? { reason: 'not_processed' as MissingReason, detail: 'input was truncated' } : { reason: 'not_found' as MissingReason, detail: 'no records found' });
+      const why =
+        llm.failure ??
+        (droppedWithProblems
+          ? { reason: droppedWithProblems.reason, detail: `${droppedWithProblems.count} record(s) were reported but none of their values could be accepted` }
+          : this.truncated
+            ? { reason: 'not_processed' as MissingReason, detail: 'input was truncated' }
+            : { reason: 'not_found' as MissingReason, detail: 'no records found' });
       missing.length = 0;
       missing.push({ path: base, reason: why.reason, ...(why.detail ? { detail: why.detail } : {}) });
+    }
+    if (shape === 'array' && droppedWithProblems && data !== null) {
+      missing.unshift({
+        path: base,
+        reason: droppedWithProblems.reason,
+        detail: `${droppedWithProblems.count} record(s) were dropped because none of their values could be accepted`,
+      });
+    }
+    if (shape === 'array' && this.listGap && data !== null) {
+      missing.unshift({ path: base, reason: this.listGap.reason, detail: this.listGap.detail });
     }
     if (shape === 'array' && this.truncated && data !== null) {
       // First, so capping the per-record entries below can never drop it.
@@ -1011,7 +1226,7 @@ class ExtractionRun {
 
   private status(data: ExtractionOutcome['data'], schemaValid: boolean, missing: MissingField[], shape: 'object' | 'array'): ExtractionStatus {
     if (data === null) return 'failed';
-    if (!schemaValid || this.truncated) return 'partial';
+    if (!schemaValid || this.truncated || this.structuredTruncated || this.unverifiedFallbacks > 0) return 'partial';
     const byName = new Map(this.schema.fields.map((f) => [f.name, f]));
     for (const m of missing) {
       if (m.reason !== 'not_found') return 'partial';
@@ -1032,7 +1247,7 @@ class ExtractionRun {
       blocksTotal: doc.blocks.length,
       blocksSentToModel: this.blocksSentToModel,
       recordsDetected: doc.recordGroups.reduce((max, g) => Math.max(max, g.recordIds.length), 0),
-      truncated: this.truncated,
+      truncated: this.truncated || this.structuredTruncated,
     };
   }
 
@@ -1204,9 +1419,9 @@ class ExtractionRun {
 interface LearningPlan {
   shape: 'object' | 'array';
   fields: FieldSpec[];
-  /** Normalized grounded values the recipe must reproduce. */
+  /** Normalized grounded values the recipe must reproduce exactly: every record of the run. */
   reference: Record<string, unknown> | Array<Record<string, unknown>>;
-  /** Raw strings as the model reported them (first records). */
+  /** Raw strings as the model reported them (first records), for induction only. */
   samples: Array<Record<string, string | null>>;
   requiredFields: string[];
   recordCount: number;
@@ -1274,13 +1489,35 @@ class RecipeLearner {
     return this.evaluate(recipe, fieldNames) === 'agree';
   }
 
-  /** Inconclusive when the run itself was cut short (deadline, output budget): no verdict on the recipe. */
+  /**
+   * Agreement means exact agreement with every grounded reference record:
+   * every compared value matches and a listing has the same number of
+   * records. A single wrong value (a sale card's struck-through price) is a
+   * disagreement, so the recipe is neither saved nor promoted. Inconclusive
+   * when the run itself was cut short (deadline, output budget).
+   */
   private evaluate(recipe: ExtractionRecipe, fieldNames: string[]): 'agree' | 'disagree' | 'inconclusive' {
     const compared = fieldNames.filter((f) => hasOwn(recipe.fields, f));
     if (compared.length === 0) return 'disagree';
     const { data, errors } = this.run_.recipeData(recipe);
     if (errors.some((e) => /deadline|budget/i.test(e))) return 'inconclusive';
-    return compareOutputs(data, this.plan.reference, compared).agree ? 'agree' : 'disagree';
+    const reference = this.plan.reference;
+    const exact = (a: unknown, b: unknown): boolean => {
+      const r = compareOutputs(a, b, compared);
+      return r.agree && r.fieldAgreement === 1;
+    };
+    if (!exact(data, reference)) return 'disagree';
+    if (Array.isArray(reference)) {
+      if (!Array.isArray(data) || data.length !== reference.length) return 'disagree';
+      // Record by record as well, so no part of a long listing goes unchecked.
+      for (let i = 0; i < reference.length; i++) {
+        const a = data[i];
+        const b = reference[i];
+        if (compared.every((f) => isEmptyValue(ownField(a, f)) && isEmptyValue(ownField(b, f)))) continue;
+        if (!exact(a, b)) return 'disagree';
+      }
+    }
+    return 'agree';
   }
 
   private async propose(fieldNames: string[]): Promise<ExtractionRecipe | null> {
@@ -1326,6 +1563,12 @@ class RecipeLearner {
 // ─────────────────────────────────────────────────────────────
 // Outcome helpers
 // ─────────────────────────────────────────────────────────────
+
+function largestRecordGroup(doc: SourceDocument): RecordGroup | undefined {
+  let best: RecordGroup | undefined;
+  for (const g of doc.recordGroups) if (!best || g.recordIds.length > best.recordIds.length) best = g;
+  return best;
+}
 
 /** Expected records on a listing page: the largest repeated group or table. */
 function expectedRecordCount(doc: SourceDocument): number {

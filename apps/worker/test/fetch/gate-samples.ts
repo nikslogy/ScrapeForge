@@ -185,6 +185,12 @@ export const GATE_SAMPLES: GateSample[] = [
     html: `<!doctype html><html><head><title>Changelog</title><script defer src="/static/js/main.js"></script></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"><main><h1>Changelog</h1><p>Version 3.2 adds dark mode, faster search and offline drafts for every workspace.</p></main></div></body></html>`,
     why: 'server-rendered React page: the standard noscript notice is not a block',
   },
+  {
+    id: 'article-hidden-browser-banner',
+    label: 'accept',
+    html: `<!doctype html><html><head><title>Pitching a tent in the rain</title>${CSS}</head><body><div id="browser-warning" style="display:none"><p>You are using an unsupported browser. Please update your browser for the best experience.</p></div><main><article><h1>Pitching a tent in the rain</h1>${'<p>Keep the inner tent packed inside the fly while you stake out the corners, then tension the guylines so water runs off.</p>'.repeat(14)}</article></main></body></html>`,
+    why: 'a hidden browser-warning banner is not what the page says',
+  },
 
   // ── reject ────────────────────────────────────────────
   {
@@ -354,5 +360,23 @@ export const GATE_SAMPLES: GateSample[] = [
     label: 'reject',
     html: `<!doctype html><html><head><title>Shop</title>${CSS}</head><body><h1>Please enable JavaScript to view the page content.</h1><p>Your support ID is: 12345678901234567890.</p></body></html>`,
     why: '"please enable javascript" stub',
+  },
+  {
+    id: 'spa-shell-custom-mount-with-chrome',
+    label: 'reject',
+    html: `<!doctype html><html lang="en"><head><title>Trail Tent 2 – Acme Outdoor</title>${CSS}<script type="module" crossorigin src="/assets/index-3f2a1b.js"></script></head><body><header class="site-header"><a class="logo" href="/">Acme Outdoor Supply Company</a><nav><a href="/tents">Tents</a><a href="/packs">Packs</a><a href="/sale">Sale</a></nav></header><div id="product-app"></div><footer class="site-footer"><p>© 2026 Acme Outdoor Supply Company. All rights reserved.</p></footer></body></html>`,
+    why: 'only header/footer text around a mount point the scorer does not know by name',
+  },
+  {
+    id: 'spa-shell-spinner-in-root',
+    label: 'reject',
+    html: `<!doctype html><html lang="en"><head><title>Acme Outdoor</title>${CSS}<script defer src="/static/js/main.js"></script></head><body><header><a href="/">Acme Outdoor Supply Company</a></header><div id="root"><div class="spinner" role="progressbar"></div></div><footer>© 2026 Acme Outdoor Supply Company. All rights reserved.</footer></body></html>`,
+    why: 'SPA mount point showing a spinner, chrome around it',
+  },
+  {
+    id: 'tr-csr-shell-dotted-capital-i',
+    label: 'reject',
+    html: `<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>İstanbul Mağaza</title><script>window.__APP_CONFIG__ = ${JSON.stringify({ api: 'https://api.magaza.example/v2', locale: 'tr-TR', features: Array.from({ length: 40 }, (_, i) => `feature_flag_number_${i}`) })};</script><script src="/static/js/main.js" defer></script></head><body><noscript>Bu uygulamayı çalıştırmak için JavaScript'i etkinleştirmeniz gerekir.</noscript><div id="root"></div></body></html>`,
+    why: '"İ" lower-cases to two characters; the scanner must not misplace the script ends',
   },
 ];

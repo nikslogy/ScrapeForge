@@ -175,7 +175,9 @@ export type MissingReason =
   | 'ambiguous'
   | 'provider_failure'
   | 'truncated'
-  | 'rejected_ungrounded';
+  | 'rejected_ungrounded'
+  /** On the page, but code cannot convert it to the field's type ("Free" for a number). */
+  | 'unparseable';
 
 export interface MissingField {
   path: string;

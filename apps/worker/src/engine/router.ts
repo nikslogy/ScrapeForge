@@ -115,23 +115,25 @@ export function assessTier(
   url: string,
   terminal = false,
 ): { ok: true; score: number } | { ok: false; score: number; reason: string } {
+  const g = judgeResponse(html, statusCode, tier, latencyMs, url);
+  const threshold = terminal ? TERMINAL_TIER_ACCEPT_QUALITY : MIN_TIER_ACCEPT_QUALITY;
+  if (!g.valid || g.score < threshold) return { ok: false, score: g.score, reason: g.reason };
+  return { ok: true, score: g.score };
+}
+
+/** The gate's two checks; `reason` says why the response misses the normal bar. */
+function judgeResponse(
+  html: string,
+  statusCode: number,
+  tier: number,
+  latencyMs: number,
+  url: string,
+): { valid: boolean; score: number; reason: string } {
   if (!isValidContent(html, statusCode, url)) {
-    return {
-      ok: false,
-      score: 0,
-      reason: `invalid content (status=${statusCode} htmlLen=${html.length})`,
-    };
+    return { valid: false, score: 0, reason: `invalid content (status=${statusCode} htmlLen=${html.length})` };
   }
   const { score, signals } = calculateQualityScore(html, statusCode, tier, latencyMs);
-  const threshold = terminal ? TERMINAL_TIER_ACCEPT_QUALITY : MIN_TIER_ACCEPT_QUALITY;
-  if (score < threshold) {
-    return {
-      ok: false,
-      score,
-      reason: `low quality ${score.toFixed(2)} (${signals[0] || 'no signal'})`,
-    };
-  }
-  return { ok: true, score };
+  return { valid: true, score, reason: `low quality ${score.toFixed(2)} (${signals[0] || 'no signal'})` };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -204,6 +206,15 @@ function isFatalFetchError(err: unknown): boolean {
   return isOutboundBlockedError(err) || isDnsLookupError(err);
 }
 
+/**
+ * The browser pool could not hand out a context in time (saturated queue,
+ * acquire timeout, shutdown): browser/pool.ts BrowserPoolError, matched by
+ * its code so another module copy's error counts too.
+ */
+function isPoolUnavailable(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'BROWSER_POOL_UNAVAILABLE';
+}
+
 // ─────────────────────────────────────────────────────────────
 // Domain strategy: per-tier success statistics
 // ─────────────────────────────────────────────────────────────
@@ -211,11 +222,15 @@ function isFatalFetchError(err: unknown): boolean {
 // Stored under `domain:{host}` (24 h TTL, refreshed on write). Each tier
 // keeps an exponentially decayed success count: every new outcome multiplies
 // the old counts by SAMPLE_DECAY (so roughly the last 10 outcomes matter) and
-// idle time halves them every HALF_LIFE_MS. A request starts at the cheapest
+// idle time halves them every HALF_LIFE_MS, so that after a quiet spell new
+// outcomes outweigh old ones. Idle decay stops at the evidence a verdict
+// needs, so a domain requested every few hours still learns; evidence older
+// than the key's TTL counts as none. A request starts at the cheapest
 // tier with a recent success rate ≥ GOOD_RATE over ≥ ~3 recent samples, so
 // a domain that always ends at T5 stops paying for T1, T2 and T4 after three
-// requests. One request in 20 starts one tier cheaper to find out whether a
-// simpler method works again (and follows up a success, see planStartTier).
+// requests. One request in 20 starts at a cheaper tier, each in turn, to find
+// out whether a simpler method works again (and follows up a success, see
+// planStartTier).
 // A tier tried in a request is never fetched again in that request: a miss at
 // the learned tier escalates from the next tier.
 
@@ -317,11 +332,22 @@ export function parseStrategy(raw: string | null): StoredStrategy | null {
   };
 }
 
-/** Stats as of `now`: idle time decays both counts (the rate is unchanged). */
+// A tier last tried longer ago than this has no evidence left (the key
+// would have expired had no other tier been written meanwhile).
+const EVIDENCE_TTL_MS = STRATEGY_TTL_SECONDS * 1000;
+
+/**
+ * Stats as of `now`: idle time decays both counts (the rate is unchanged),
+ * but not below MIN_SAMPLE_WEIGHT. Decaying further would leave a domain
+ * requested less often than every ~2.3 h "unknown" at every tier forever,
+ * starting each request from T1.
+ */
 function decayedStats(s: TierStats | undefined, now: number): { ok: number; total: number } {
   if (!s) return { ok: 0, total: 0 };
   const idle = Math.max(0, now - s.lastAt);
-  const f = 0.5 ** (idle / HALF_LIFE_MS);
+  if (idle > EVIDENCE_TTL_MS) return { ok: 0, total: 0 };
+  let f = 0.5 ** (idle / HALF_LIFE_MS);
+  if (s.total * f < MIN_SAMPLE_WEIGHT) f = s.total > 0 ? Math.min(1, MIN_SAMPLE_WEIGHT / s.total) : 1;
   return { ok: s.ok * f, total: s.total * f };
 }
 
@@ -362,19 +388,21 @@ function learnedStart(
   // No tier is reliable yet: skip tiers that keep failing.
   const firstNotBad = verdicts.find((v) => v.verdict !== 'bad');
   if (firstNotBad) return { tier: firstNotBad.t, reason: 'skip-failing' };
-  // Everything fails more often than not: start where it fails least.
+  // Everything fails more often than not: start where it fails least. When
+  // nothing succeeded at all, every request ends at the last tier anyway (the
+  // terminal tier returns what it gets), so the cheaper attempts are skipped.
   let best = verdicts[0];
   for (const v of verdicts) if (v.rate > best.rate) best = v;
+  if (best.rate === 0) best = verdicts[verdicts.length - 1];
   return { tier: best.t, reason: 'best-effort' };
 }
 
 /**
  * Where a request for this domain starts escalating, and why. Once learned,
- * one request in 1/reprobeRate starts one tier cheaper; while that cheaper
- * tier keeps succeeding it is tried again on the next request ('confirm'),
- * so a domain gets back to the simpler method in a few requests instead of
- * waiting for more lucky draws (between which idle decay would erase the
- * evidence on a quiet domain). One failure ends the follow-ups.
+ * one request in 1/reprobeRate starts at a cheaper tier (see reprobeTarget);
+ * while a cheaper tier keeps succeeding it is tried again on the next request
+ * ('confirm'), so a domain gets back to the simpler method in a few requests
+ * instead of waiting for more lucky draws. One failure ends the follow-ups.
  */
 export function planStartTier(
   s: StoredStrategy | null,
@@ -383,11 +411,34 @@ export function planStartTier(
   const plan = learnedStart(s, opts);
   const idx = opts.tiers.indexOf(plan.tier);
   if (idx <= 0 || plan.reason === 'cold' || plan.reason === 'js-heavy') return plan;
-  const cheaper = opts.tiers[idx - 1];
-  const stats = s?.tiers[String(cheaper)];
-  if (stats?.lastOk === true) return { tier: cheaper, reason: 'confirm' };
-  if (opts.random() < opts.reprobeRate) return { tier: cheaper, reason: 'reprobe' };
+  const cheaper = opts.tiers.slice(0, idx);
+  const followUp = cheaper.find((t) => s?.tiers[String(t)]?.lastOk === true);
+  if (followUp !== undefined) return { tier: followUp, reason: 'confirm' };
+  if (opts.random() < opts.reprobeRate) return { tier: reprobeTarget(s, cheaper, opts.now), reason: 'reprobe' };
   return plan;
+}
+
+/**
+ * The cheaper tier a re-probe tries: the cheapest one without a verdict
+ * (never tried, or too little evidence), else the one whose last attempt is
+ * oldest (the nearest on a tie). Successive probes so visit every cheaper
+ * tier; probing only the next one would never reach T1 past a middle tier
+ * that keeps failing (T2 behind a blocked proxy pool, or Lightpanda at T3),
+ * since escalation only moves up.
+ */
+function reprobeTarget(s: StoredStrategy | null, cheaper: readonly number[], now: number): number {
+  const unknown = cheaper.find((t) => tierVerdict(s?.tiers[String(t)], now).verdict === 'unknown');
+  if (unknown !== undefined) return unknown;
+  let target = cheaper[cheaper.length - 1];
+  let oldest = s?.tiers[String(target)]?.lastAt ?? 0;
+  for (let k = cheaper.length - 2; k >= 0; k--) {
+    const at = s?.tiers[String(cheaper[k])]?.lastAt ?? 0;
+    if (at < oldest) {
+      target = cheaper[k];
+      oldest = at;
+    }
+  }
+  return target;
 }
 
 /** Folds one request's tier outcomes into the strategy. Pure. */
@@ -648,7 +699,10 @@ export class SmartRouter {
         t4Result = a.r;
       } else if (a.acquire) {
         // The stealth tier needs a context from the same pool; waiting for it
-        // again would only double the delay.
+        // again would only double the delay. A saturated or closed pool is
+        // temporary: its own error is thrown, not "All tiers exhausted"
+        // (which the worker fails without retry).
+        if (isPoolUnavailable(a.error)) throw a.error;
         c.notes.push('T5:skipped (no browser context)');
         throw new Error(this.exhaustedMessage(c));
       }
@@ -692,6 +746,7 @@ export class SmartRouter {
     // user wants 99% of the time (they already paid for the browser fetch,
     // returning empty markdown is strictly better than 500-ing the API).
     if (t4Result) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+    if (a5.kind === 'error' && a5.acquire && isPoolUnavailable(a5.error)) throw a5.error;
 
     throw new Error(this.exhaustedMessage(c));
   }
@@ -762,15 +817,21 @@ export class SmartRouter {
       return { kind: 'error', error: new Error('no result'), acquire: false };
     }
 
-    const v = assessTier(r.html, r.statusCode, tier, r.latencyMs, c.url, terminal);
-    c.outcomes.push({ tier, ok: v.ok, latencyMs: r.latencyMs });
-    if (v.ok) {
+    const g = judgeResponse(r.html, r.statusCode, tier, r.latencyMs, c.url);
+    // Every tier is learned (and traced) by the normal bar. The terminal tier
+    // still returns a valid response below it, because nothing is left to
+    // try, but a challenge page handed back as a last resort is no success:
+    // learned as one, it would make the domain start at the terminal tier.
+    const accepted = g.valid && g.score >= MIN_TIER_ACCEPT_QUALITY;
+    c.outcomes.push({ tier, ok: accepted, latencyMs: r.latencyMs });
+    if (accepted) {
       traceAttempt(c.tracer, tier, t0, 'accepted');
     } else {
-      traceAttempt(c.tracer, tier, t0, 'rejected', v.reason);
-      c.notes.push(`T${tier}:${v.reason}`);
+      traceAttempt(c.tracer, tier, t0, 'rejected', g.reason);
+      c.notes.push(`T${tier}:${g.reason}`);
     }
-    return { kind: 'response', r, ok: v.ok };
+    const returnable = accepted || (terminal && g.valid && g.score >= TERMINAL_TIER_ACCEPT_QUALITY);
+    return { kind: 'response', r, ok: returnable };
   }
 
   private exhaustedMessage(c: RequestContext): string {

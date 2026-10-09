@@ -26,7 +26,7 @@ import type { NormalizedSchema, SourceDocument, StructuredSource } from '../type
 import { isUrlField } from '../validate/normalize.js';
 import { CONCEPT_BY_ID, type FieldPlan, type SchemaPlan, planSchema } from './concepts.js';
 import { type Discovery, type Entity, type ListCandidate, discover } from './entities.js';
-import { FAMILY_PRIOR, isContentFamily } from './families.js';
+import { type Family, FAMILY_PRIOR, isContentFamily } from './families.js';
 import { STRUCTURED_LIMITS } from './limits.js';
 import { type Hit, Resolver } from './resolve.js';
 import { PageIndex } from './visibility.js';
@@ -62,6 +62,15 @@ export interface StructuredMapResult {
   /** Fields filled in every record, in schema order. */
   filledFields: string[];
   warnings: string[];
+  /**
+   * The entity a single record (object, or array of one) was read from.
+   * `content`: a content family (product, article, job, ...), not page
+   * metadata or site scaffolding. `fits`: its type fits the requested fields,
+   * or the fields are generic page facts. `listSize`: the entity is one
+   * member of a list of this many (an object requested on a listing page).
+   * Absent for lists and empty results.
+   */
+  primary?: { family: Family; content: boolean; fits: boolean; flat: boolean; listSize?: number };
 }
 
 const SOURCE_RANK: Readonly<Record<StructuredSource, number>> = {
@@ -104,6 +113,8 @@ interface ScoredList {
 class Mapper {
   private readonly plan: SchemaPlan;
   private readonly warnings = new Set<string>();
+  /** Most requested fields characteristic of any one family (0: generic fields only). */
+  private readonly bestFamilyFit: number;
   private page!: PageIndex;
   private d!: Discovery;
   private r!: Resolver;
@@ -113,6 +124,9 @@ class Mapper {
     private readonly schema: NormalizedSchema,
   ) {
     this.plan = planSchema(schema);
+    const perFamily = new Map<Family, number>();
+    for (const f of this.plan.fields) for (const fam of f.fit) perFamily.set(fam, (perFamily.get(fam) ?? 0) + 1);
+    this.bestFamilyFit = Math.max(0, ...perFamily.values());
   }
 
   run(): StructuredMapResult {
@@ -126,14 +140,18 @@ class Mapper {
     const list = this.bestList();
     const shape = this.schema.shape;
 
-    if (shape === 'object') return all[0] ? this.objectResult(all[0], all) : this.empty();
     if (shape === 'array') {
       // A listing of one is a content entity the fields describe; never page-level metadata.
       const single = all.find((c) => c.entity.role !== 'member' && !c.entity.flat && isContentFamily(c.entity.family) && c.fit > 0);
       if (list && (!single || this.listWins(list, single, 'array'))) return this.arrayResult(list);
       return single ? this.arrayOfOne(single, all) : this.empty();
     }
-    const candidates = all.filter((c) => !c.entity.flat || this.flatDescribesRecord(c));
+    if (shape === 'object') {
+      // OpenGraph/meta stay the fallback record of an explicit object (unverified unless visible).
+      const eligible = all.filter((c) => c.entity.flat !== undefined || this.mayBeRecord(c));
+      return eligible[0] ? this.objectResult(eligible[0], eligible) : this.empty();
+    }
+    const candidates = all.filter((c) => this.mayBeRecord(c));
     const primary = candidates[0];
     const standalone = candidates.find((c) => c.entity.role !== 'member');
     // auto: an array only when the page clearly lists ≥ 2 items.
@@ -151,7 +169,39 @@ class Mapper {
    * item, and would otherwise commit the extraction to one object.
    */
   private flatDescribesRecord(c: Scored): boolean {
-    return c.fit > 0 || this.plan.fields.every((f) => f.fit.size === 0);
+    return c.fit > 0 || this.bestFamilyFit === 0;
+  }
+
+  /**
+   * May this entity be the record of an object / auto schema? Content
+   * entities (and unknown types) may. Site scaffolding (Organization,
+   * Person, WebSite, WebPage/CollectionPage, lists, navigation) is usually
+   * site-wide: the shop's Organization on a product page, a WebSite on a
+   * listing. It is the record only when it is the kind of thing the fields
+   * describe best (an Organization for name + telephone), or, for a page
+   * entity, when the fields are generic page facts, like OpenGraph.
+   */
+  private mayBeRecord(c: Scored): boolean {
+    const e = c.entity;
+    if (e.flat) return this.flatDescribesRecord(c);
+    if (isContentFamily(e.family) || e.family === 'other') return true;
+    if (c.fit > 0) return c.fit >= this.bestFamilyFit;
+    return e.family === 'page' && this.bestFamilyFit === 0;
+  }
+
+  private primaryInfo(c: Scored): NonNullable<StructuredMapResult['primary']> {
+    const family = c.entity.family;
+    const info: NonNullable<StructuredMapResult['primary']> = {
+      family,
+      content: isContentFamily(family),
+      fits: c.fit > 0 || this.bestFamilyFit === 0,
+      flat: c.entity.flat !== undefined,
+    };
+    if (c.entity.role === 'member') {
+      const list = this.d.lists.find((l) => l.members.includes(c.entity));
+      if (list) info.listSize = list.members.length;
+    }
+    return info;
   }
 
   /**
@@ -243,13 +293,13 @@ class Mapper {
   private objectResult(primary: Scored, candidates: readonly Scored[]): StructuredMapResult {
     const hits = this.recordHits(primary.entity);
     this.warnAmbiguous(primary, candidates);
-    return this.finish('object', [hits]);
+    return this.finish('object', [hits], this.primaryInfo(primary));
   }
 
   private arrayOfOne(primary: Scored, candidates: readonly Scored[]): StructuredMapResult {
     const hits = this.recordHits(primary.entity);
     this.warnAmbiguous(primary, candidates);
-    return this.finish('array', [hits]);
+    return this.finish('array', [hits], this.primaryInfo(primary));
   }
 
   private arrayResult(list: ScoredList): StructuredMapResult {
@@ -310,7 +360,11 @@ class Mapper {
     if (rival) this.warnings.add(`multiple_entities:${p.types[0] ?? p.family}`);
   }
 
-  private finish(shape: 'object' | 'array', rows: ReadonlyArray<ReadonlyArray<Hit | undefined>>): StructuredMapResult {
+  private finish(
+    shape: 'object' | 'array',
+    rows: ReadonlyArray<ReadonlyArray<Hit | undefined>>,
+    primary?: StructuredMapResult['primary'],
+  ): StructuredMapResult {
     const records: StructuredRecord[] = [];
     for (const hits of rows) {
       const entries: Array<[string, StructuredFieldValue]> = [];
@@ -323,7 +377,9 @@ class Mapper {
     }
     if (records.length === 0) return this.empty();
     const filledFields = this.plan.fields.map((f) => f.field.name).filter((name) => records.every((r) => Object.hasOwn(r, name)));
-    return { shape, records, filledFields, warnings: [...this.warnings] };
+    const result: StructuredMapResult = { shape, records, filledFields, warnings: [...this.warnings] };
+    if (primary) result.primary = primary;
+    return result;
   }
 
   private value(f: FieldPlan, h: Hit): StructuredFieldValue {

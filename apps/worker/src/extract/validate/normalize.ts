@@ -42,8 +42,14 @@ export type NormalizeResult =
 const MAX_NUMBER_TEXT = 200;
 const MAX_BOOLEAN_TEXT = 100;
 const MAX_URL_LENGTH = 8_192;
+/** Object/array levels whose leaves are normalized by their sub-schema types. */
+const MAX_NESTED_DEPTH = 8;
 
 export function normalizeValue(raw: unknown, field: FieldSpec, ctx: NormalizeContext): NormalizeResult {
+  return normalizeAt(raw, field, ctx, 0);
+}
+
+function normalizeAt(raw: unknown, field: FieldSpec, ctx: NormalizeContext, depth: number): NormalizeResult {
   if (isEmpty(raw)) return ok(null, ['empty']);
   switch (field.type) {
     case 'number':
@@ -54,9 +60,11 @@ export function normalizeValue(raw: unknown, field: FieldSpec, ctx: NormalizeCon
     case 'string':
       return normalizeString(raw, field, ctx);
     case 'array':
-      return normalizeArray(raw, field, ctx);
+      return normalizeArray(raw, field, ctx, depth);
+    case 'object':
+      return normalizeObject(raw, field, ctx, depth);
     default:
-      // Objects and untyped fields pass through; the validator judges them.
+      // Untyped fields pass through; the validator judges them.
       return ok(raw, []);
   }
 }
@@ -331,7 +339,7 @@ function looseKey(text: string): string {
 
 const SCALAR_TYPES: ReadonlySet<FieldType> = new Set(['string', 'number', 'integer', 'boolean', 'unknown']);
 
-function normalizeArray(raw: unknown, field: FieldSpec, ctx: NormalizeContext): NormalizeResult {
+function normalizeArray(raw: unknown, field: FieldSpec, ctx: NormalizeContext, depth: number): NormalizeResult {
   const itemType = field.itemType ?? 'unknown';
   const itemField: FieldSpec = {
     name: field.name,
@@ -364,7 +372,7 @@ function normalizeArray(raw: unknown, field: FieldSpec, ctx: NormalizeContext): 
   const out: unknown[] = [];
   let dropped = false;
   for (let i = 0; i < items.length; i++) {
-    const result = normalizeValue(items[i], itemField, ctx);
+    const result = normalizeAt(items[i], itemField, ctx, depth + 1);
     if (!result.ok) return fail(result.reason, `item ${i}: ${result.detail}`);
     if (result.value === null) {
       dropped = true;
@@ -375,6 +383,62 @@ function normalizeArray(raw: unknown, field: FieldSpec, ctx: NormalizeContext): 
   }
   if (dropped) steps.push('drop-empty-items');
   return ok(out, steps);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Objects
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes the leaves of an object by the types its schema declares for
+ * them ("Yes" for a nested boolean, "$1,299.00" for a nested number). Keys
+ * without a declared type, and non-object values, pass through for the
+ * validator to judge. Empty leaves are left as they are (a nested null is
+ * not introduced where the sub-schema may not allow it).
+ */
+function normalizeObject(raw: unknown, field: FieldSpec, ctx: NormalizeContext, depth: number): NormalizeResult {
+  if (!isPlainObject(raw) || depth >= MAX_NESTED_DEPTH) return ok(raw, []);
+  const properties = field.schema?.properties;
+  if (!isPlainObject(properties)) return ok(raw, []);
+  const steps: string[] = [];
+  const entries: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(raw)) {
+    const sub = Object.prototype.hasOwnProperty.call(properties, key) ? properties[key] : undefined;
+    const type = isPlainObject(sub) ? declaredType(sub) : 'unknown';
+    if (type === 'unknown' || isEmpty(value)) {
+      entries.push([key, value]);
+      continue;
+    }
+    const subField: FieldSpec = { name: key, type, required: false, nullable: true, derived: field.derived, schema: sub as JsonSchema };
+    if (type === 'array') subField.itemType = declaredType(itemSchema(sub as JsonSchema));
+    const description = (sub as JsonSchema).description;
+    if (typeof description === 'string') subField.description = description;
+    const result = normalizeAt(value, subField, ctx, depth + 1);
+    if (!result.ok) return fail(result.reason, `property ${quote(key)}: ${result.detail}`);
+    entries.push([key, result.value]);
+    for (const step of result.steps) if (!steps.includes(step)) steps.push(step);
+  }
+  // fromEntries defines own properties: a key named "__proto__" stays data.
+  return ok(Object.fromEntries(entries), steps);
+}
+
+const DECLARED_TYPES: ReadonlySet<string> = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object']);
+
+/** The one non-null type a sub-schema declares (or implies by properties/items); 'unknown' otherwise. */
+function declaredType(schema: JsonSchema): FieldType {
+  const t = schema.type;
+  const types = (typeof t === 'string' ? [t] : Array.isArray(t) ? t : []).filter((x): x is string => typeof x === 'string' && x !== 'null');
+  if (types.length === 1) return DECLARED_TYPES.has(types[0]) ? (types[0] as FieldType) : 'unknown';
+  if (types.length > 1) return 'unknown';
+  if (isPlainObject(schema.properties)) return 'object';
+  if (isPlainObject(schema.items)) return 'array';
+  return 'unknown';
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 function itemSchema(schema: JsonSchema | undefined): JsonSchema {

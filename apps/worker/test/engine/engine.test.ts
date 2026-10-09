@@ -173,7 +173,8 @@ describe('extractStructured: LLM path', () => {
     expect(out.status).toBe('failed');
     expect(out.missing).toEqual([
       { path: '/low', reason: 'ambiguous', detail: expect.stringContaining('ambiguous: several numbers') },
-      { path: '/other', reason: 'not_found', detail: expect.stringContaining('unparseable') },
+      // On the page but not a number: not genuinely absent.
+      { path: '/other', reason: 'unparseable', detail: expect.stringContaining('unparseable') },
     ]);
   });
 
@@ -578,9 +579,10 @@ describe('extractStructured: robustness', () => {
     const { client } = fakeClient(scripted(fakeResponse(JSON.stringify({ records: [{ price: { v: 1299, b: priceId }, sku: { v: { code: 'AC-1001' }, b: skuId }, name: { v: ['Acme Turbo Widget'], b: 'b1' } }] }))));
     const out = await extractStructured(request(PLAIN_PRODUCT, PRODUCT_SCHEMA), { modelClient: client, recipeStore: null });
     expect(out.data).toMatchObject({ price: 1299, sku: null });
-    expect(out.missing.find((m) => m.path === '/sku')).toMatchObject({ reason: 'not_found', detail: expect.stringMatching(/type_mismatch/) });
+    expect(out.missing.find((m) => m.path === '/sku')).toMatchObject({ reason: 'unparseable', detail: expect.stringMatching(/type_mismatch/) });
     // An array for a string field is a mismatch, not silently joined.
-    expect(out.missing.find((m) => m.path === '/name')).toMatchObject({ reason: 'not_found', detail: expect.stringMatching(/type_mismatch/) });
+    expect(out.missing.find((m) => m.path === '/name')).toMatchObject({ reason: 'unparseable', detail: expect.stringMatching(/type_mismatch/) });
+    expect(out.status).toBe('partial');
   });
 
   it('caps missing entries and repeated warnings but keeps the list-level entry', async () => {

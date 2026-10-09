@@ -241,7 +241,11 @@ describe('adversarial models over the corpus', () => {
 
   it('large-listing with a large-context model gets every record (the Phase 1 limit is output size, not the engine)', async () => {
     const fixture = loadFixture('large-listing');
-    const { outcome } = await run(fixture, oracleHandler(fixture), { caps: { contextTokens: 1_000_000, maxOutputTokens: 32_768 } });
+    // 600 records x 4 fields need ~40k output tokens: a 32k-output model cannot
+    // return them all (the engine now sends it only the records its output can
+    // hold, see apps/worker/test/engine/large-listing.test.ts), so the
+    // whole-list case uses a model whose output limit holds the answer.
+    const { outcome } = await run(fixture, oracleHandler(fixture), { caps: { contextTokens: 1_000_000, maxOutputTokens: 65_536 } });
     const score = scoreExtraction(fixture, outcome.data);
     expect(score.valuePrecision).toBe(1);
     expect(score.valueRecall).toBe(1);

@@ -1,20 +1,24 @@
 // Agreement checks between recipe output and grounded reference results, and
 // output invariants for an active recipe.
 //
-// A candidate recipe is promoted only after it reproduces grounded LLM results
-// on several snapshots (compareOutputs), and an active recipe's output is
+// A candidate recipe is saved and promoted only after it reproduces grounded
+// LLM results exactly on several snapshots (compareOutputs: every compared
+// value of every record must match), and an active recipe's output is
 // accepted only while it still looks like what was validated
 // (checkInvariants). Values are compared after normalization: strings ignore
-// case and whitespace, numbers agree within 0.5% (relative), and a string is
-// compared with a number or boolean through the same parser the engine uses
-// to normalize values.
+// case and whitespace, and a string is compared with a number or boolean
+// through the same parser the engine uses to normalize values. Numbers must be
+// equal for compareOutputs (valuesMatch); valuesAgree is a looser check (0.5%)
+// for conflict warnings, never for trusting a recipe.
 
 import type { FieldSpec, StoredRecipe } from '../types.js';
 import { normalizeValue } from '../validate/normalize.js';
+import { RECIPE_LIMITS } from './limits.js';
 
 export interface CompareResult {
+  /** Every compared pair matches (and there was at least one). */
   agree: boolean;
-  /** Agreeing (field, record) pairs / compared pairs; pairs empty on both sides are not compared. */
+  /** Matching (field, record) pairs / compared pairs; pairs empty on both sides are not compared. */
   fieldAgreement: number;
   /** Recipe record count / reference record count (array data only). */
   recordCountRatio?: number;
@@ -26,30 +30,46 @@ export interface InvariantResult {
   reasons: string[];
 }
 
-export const AGREEMENT_THRESHOLD = 0.9;
+/** Share of compared pairs that must match: all of them (one wrong value in a listing is a wrong recipe). */
+export const AGREEMENT_THRESHOLD = 1;
+/** Loose tolerance of valuesAgree (conflict warnings only). */
 const NUMBER_TOLERANCE = 0.005;
-const RECORD_COUNT_TOLERANCE = 0.1;
-const MAX_COMPARED_RECORDS = 20;
+/** Float noise allowed by valuesMatch (same value parsed along different paths). */
+const NUMBER_EPSILON = 1e-9;
+/** Records beyond this are not verified, so a longer listing cannot agree. */
+const MAX_COMPARED_RECORDS = RECIPE_LIMITS.defaultMaxRecords;
 const REQUIRED_FILL_RATE = 0.9;
 const MAX_DETAILS = 20;
-const MAX_TEXT_COMPARE_CHARS = 20_000;
+/** Longest value a recipe can yield, so the whole value is compared. */
+const MAX_TEXT_COMPARE_CHARS = RECIPE_LIMITS.maxValueChars;
 /** Nesting followed when comparing arrays/objects (data comes from model output). */
 const MAX_DEPTH = 32;
 
+/**
+ * Exact agreement of a recipe's output with a grounded reference: records are
+ * paired by position (a record missing on one side counts as empty), every
+ * listed field that is non-empty on either side is compared with valuesMatch,
+ * and a single mismatch means no agreement.
+ */
 export function compareOutputs(recipeData: unknown, referenceData: unknown, fieldNames: string[]): CompareResult {
   const details: string[] = [];
   const tally = { compared: 0, agreed: 0 };
   let recordCountRatio: number | undefined;
-  let countOk = true;
+  let complete = true;
 
   if (Array.isArray(recipeData) && Array.isArray(referenceData)) {
     const rc = recipeData.length;
     const ref = referenceData.length;
     recordCountRatio = ref === 0 ? (rc === 0 ? 1 : Number.POSITIVE_INFINITY) : rc / ref;
-    countOk = Math.abs(rc - ref) <= RECORD_COUNT_TOLERANCE * ref;
-    if (!countOk) details.push(`record count ${rc} vs reference ${ref}`);
-    const n = Math.min(rc, ref, MAX_COMPARED_RECORDS);
-    for (let i = 0; i < n; i++) compareRecord(recipeData[i], referenceData[i], fieldNames, `/${i}`, tally, details);
+    if (rc !== ref) details.push(`record count ${rc} vs reference ${ref}`);
+    const n = Math.max(rc, ref);
+    if (n > MAX_COMPARED_RECORDS) {
+      complete = false;
+      details.push(`${n} records: more than the ${MAX_COMPARED_RECORDS} that can be compared`);
+    }
+    for (let i = 0; i < Math.min(n, MAX_COMPARED_RECORDS); i++) {
+      compareRecord(recipeData[i], referenceData[i], fieldNames, `/${i}`, tally, details);
+    }
   } else if (isRecord(recipeData) && isRecord(referenceData)) {
     compareRecord(recipeData, referenceData, fieldNames, '', tally, details);
   } else {
@@ -59,7 +79,7 @@ export function compareOutputs(recipeData: unknown, referenceData: unknown, fiel
 
   if (tally.compared === 0) details.push('no non-empty values to compare');
   const fieldAgreement = tally.compared === 0 ? 0 : tally.agreed / tally.compared;
-  const agree = countOk && tally.compared > 0 && fieldAgreement >= AGREEMENT_THRESHOLD;
+  const agree = complete && tally.compared > 0 && tally.agreed === tally.compared;
   const result: CompareResult = { agree, fieldAgreement, details };
   if (recordCountRatio !== undefined) result.recordCountRatio = recordCountRatio;
   return result;
@@ -80,7 +100,7 @@ function compareRecord(
     const y = ownValue(b, name);
     if (isEmptyValue(x) && isEmptyValue(y)) continue;
     tally.compared++;
-    if (valuesAgree(x, y)) tally.agreed++;
+    if (valuesMatch(x, y)) tally.agreed++;
     else if (details.length < MAX_DETAILS) details.push(`${prefix}/${name}: ${preview(x)} vs ${preview(y)}`);
   }
 }
@@ -96,13 +116,23 @@ function ownValue(record: Record<string, unknown>, name: string): unknown {
 const NUMBER_SPEC: FieldSpec = { name: 'value', type: 'number', required: false, nullable: true, derived: false, schema: { type: 'number' } };
 const BOOLEAN_SPEC: FieldSpec = { name: 'value', type: 'boolean', required: false, nullable: true, derived: false, schema: { type: 'boolean' } };
 
+/** Same value after normalization (numbers equal up to float noise). Used to trust a recipe. */
+export function valuesMatch(a: unknown, b: unknown): boolean {
+  return agreeWith(a, b, NUMBER_EPSILON, 0);
+}
+
+/** Loose agreement (numbers within 0.5%), for conflict warnings; never for trusting a recipe. */
 export function valuesAgree(a: unknown, b: unknown, depth = 0): boolean {
+  return agreeWith(a, b, NUMBER_TOLERANCE, depth);
+}
+
+function agreeWith(a: unknown, b: unknown, tolerance: number, depth: number): boolean {
   if (depth > MAX_DEPTH) return false;
   if (isEmptyValue(a) || isEmptyValue(b)) return isEmptyValue(a) && isEmptyValue(b);
   if (typeof a === 'number' || typeof b === 'number') {
     const x = asNumber(a);
     const y = asNumber(b);
-    return x !== null && y !== null && numbersAgree(x, y);
+    return x !== null && y !== null && numbersAgree(x, y, tolerance);
   }
   if (typeof a === 'boolean' || typeof b === 'boolean') {
     const x = asBoolean(a);
@@ -113,19 +143,19 @@ export function valuesAgree(a: unknown, b: unknown, depth = 0): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     const x = a.filter((v) => !isEmptyValue(v));
     const y = b.filter((v) => !isEmptyValue(v));
-    return x.length === y.length && x.every((v, i) => valuesAgree(v, y[i], depth + 1));
+    return x.length === y.length && x.every((v, i) => agreeWith(v, y[i], tolerance, depth + 1));
   }
   if (isRecord(a) && isRecord(b)) {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-    for (const k of keys) if (!valuesAgree(ownValue(a, k), ownValue(b, k), depth + 1)) return false;
+    for (const k of keys) if (!agreeWith(ownValue(a, k), ownValue(b, k), tolerance, depth + 1)) return false;
     return true;
   }
   return false;
 }
 
-function numbersAgree(x: number, y: number): boolean {
+function numbersAgree(x: number, y: number, tolerance: number): boolean {
   if (x === y) return true;
-  return Math.abs(x - y) <= NUMBER_TOLERANCE * Math.max(Math.abs(x), Math.abs(y));
+  return Math.abs(x - y) <= tolerance * Math.max(Math.abs(x), Math.abs(y));
 }
 
 function asNumber(v: unknown): number | null {

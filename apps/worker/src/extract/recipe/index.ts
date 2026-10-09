@@ -4,7 +4,7 @@ export { runRecipe } from './run.js';
 export type { RecipeEvidence, RecipeInput, RecipeRunOptions, RecipeRunResult } from './run.js';
 export { RecipeStore } from './store.js';
 export type { CandidateInfo, RecipeKv, RecipeStoreOptions, SaveCandidateResult } from './store.js';
-export { compareOutputs, checkInvariants, valuesAgree, isEmptyValue, AGREEMENT_THRESHOLD } from './compare.js';
+export { compareOutputs, checkInvariants, valuesAgree, valuesMatch, isEmptyValue, AGREEMENT_THRESHOLD } from './compare.js';
 export type { CompareResult, InvariantResult } from './compare.js';
 export { induceRecipe, MIN_INDUCTION_COVERAGE } from './induce.js';
 export type { InduceArgs, InduceResult } from './induce.js';

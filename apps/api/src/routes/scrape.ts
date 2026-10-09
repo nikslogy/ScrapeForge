@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { ScrapeJobData, createCacheKey, checkPublicUrl } from '@scrapeforge/shared';
+import { ScrapeJobData, checkPublicUrl, resultCacheKey, type ScrapeOptions } from '@scrapeforge/shared';
 import { customerSchema, extractionOptions, jobRetryOptions } from './extract.js';
 
 // Empty strings coming from form-style API explorers (Scalar, Swagger UI)
@@ -65,16 +65,11 @@ export async function scrapeRoutes(app: FastifyInstance) {
     }
 
     const { redis, queues, queueEvents } = app;
-    const cacheKeyStr = `cache:${createCacheKey(body.url, {
-      formats: body.formats,
-      proxy: body.proxy,
-      extractSchema: body.extractSchema,
-      // Only present when set, so keys of plain requests are unchanged.
-      includeEvidence: body.includeEvidence || undefined,
-    })}`;
+    const options: ScrapeOptions = body;
 
     if (body.cacheTtl > 0) {
-      const cached = await redis.get(cacheKeyStr);
+      // The worker writes with the same helper from the same options object.
+      const cached = await redis.get(resultCacheKey(user.userId, body.url, options));
       if (cached) {
         const data = JSON.parse(cached);
         return reply.status(200).send({
@@ -90,7 +85,7 @@ export async function scrapeRoutes(app: FastifyInstance) {
       userId: user.userId,
       apiKeyId: user.apiKeyId,
       url: body.url,
-      options: body,
+      options,
       priority: body.webhookUrl ? 2 : 1,
       createdAt: new Date().toISOString(),
     };

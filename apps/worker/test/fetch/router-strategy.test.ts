@@ -155,17 +155,32 @@ describe('applyOutcomes', () => {
     expect(s.tiers['1']).toEqual({ ok: 1, total: 1, lastAt: T0, lastOkAt: T0, lastOk: true, latencyMs: 100 });
     s = applyOutcomes(s, [{ tier: 1, ok: false }], T0);
     expect(s.tiers['1']).toMatchObject({ ok: 0.9, total: 1.9, lastOkAt: T0, lastOk: false });
-    // Six idle hours halve the counts before the new outcome is added.
+    s = applyOutcomes(s, [{ tier: 1, ok: true }], T0);
+    s = applyOutcomes(s, [{ tier: 1, ok: true }], T0);
+    expect(s.tiers['1']).toMatchObject({ ok: 2.629, total: 3.439 });
+    // Six idle hours halve the counts before the new outcome is added, but
+    // not below the evidence a verdict needs (2.5).
     s = applyOutcomes(s, [{ tier: 1, ok: true, latencyMs: 200 }], T0 + 6 * HOUR);
+    const f = 2.5 / 3.439;
     expect(s.tiers['1']).toEqual({
-      ok: Math.round((0.9 * 0.5 * 0.9 + 1) * 1000) / 1000,
-      total: Math.round((1.9 * 0.5 * 0.9 + 1) * 1000) / 1000,
+      ok: Math.round((2.629 * f * 0.9 + 1) * 1000) / 1000,
+      total: Math.round((3.439 * f * 0.9 + 1) * 1000) / 1000,
       lastAt: T0 + 6 * HOUR,
       lastOkAt: T0 + 6 * HOUR,
       lastOk: true,
       latencyMs: 130, // EWMA 0.3
     });
-    expect(s.requests).toBe(3);
+    expect(s.requests).toBe(5);
+    // Eight idle hours on a full history (~9.85): it decays by 0.5^(8/6).
+    let full: StoredStrategy | null = null;
+    for (let i = 0; i < 40; i++) full = applyOutcomes(full, [{ tier: 2, ok: true }], T0);
+    const after = applyOutcomes(full, [{ tier: 2, ok: false }], T0 + 8 * HOUR).tiers['2']!;
+    expect(after.total).toBeCloseTo(full!.tiers['2']!.total * 0.5 ** (8 / 6) * 0.9 + 1, 2);
+    // Twelve would leave less than 2.5: the floor applies.
+    expect(applyOutcomes(full, [{ tier: 2, ok: false }], T0 + 12 * HOUR).tiers['2']!.total).toBe(3.25);
+    // Evidence older than the strategy key's TTL counts as none.
+    const expired = applyOutcomes(full, [{ tier: 2, ok: false }], T0 + 25 * HOUR).tiers['2']!;
+    expect(expired).toMatchObject({ ok: 0, total: 1 });
   });
 
   it('bounds the decayed total (roughly the last 10 outcomes)', () => {
@@ -232,26 +247,61 @@ describe('planStartTier', () => {
 
   it('starts where failure is least likely when every tier fails', () => {
     let s = record([[1, false], [2, false], [4, false], [5, false]], 3);
+    // Nothing ever succeeded: every request ends at the terminal tier anyway.
+    expect(plan(s)).toEqual({ tier: 5, reason: 'best-effort' });
     s = applyOutcomes(s, [{ tier: 4, ok: true }], T0);
     expect(plan(s)).toEqual({ tier: 4, reason: 'best-effort' });
   });
 
-  it('forgets stale statistics', () => {
+  it('keeps what it learned across idle gaps, and forgets it after the TTL', () => {
     const s = record([[1, false], [2, false], [4, false], [5, true]], 4);
     expect(plan(s).tier).toBe(5);
-    expect(plan(s, { now: T0 + 13 * HOUR }).tier).toBe(1);
+    expect(plan(s, { now: T0 + 13 * HOUR }).tier).toBe(5);
+    expect(plan(s, { now: T0 + 23 * HOUR }).tier).toBe(5);
+    // The key itself expires 24 h after its last write; a tier last tried
+    // that long ago (the key kept alive by other tiers) is unknown again.
+    expect(plan(s, { now: T0 + 25 * HOUR })).toEqual({ tier: 1, reason: 'cold' });
   });
 
-  it('re-probes one available tier cheaper when random() < rate, never on a cold start', () => {
+  it.each([1, 2.5, 3, 4, 6, 12])('learns a domain requested every %s h', (hours) => {
+    // Only T5 succeeds; each request escalates from its planned start tier.
+    let s: StoredStrategy | null = null;
+    let now = T0;
+    const starts: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      const p = plan(s, { now });
+      starts.push(p.tier);
+      s = applyOutcomes(s, tiers.filter((t) => t >= p.tier).map((t) => ({ tier: t, ok: t === 5 })), now, tiers);
+      now += hours * HOUR;
+    }
+    expect(starts.slice(0, 3)).toEqual([1, 1, 1]);
+    expect(starts.slice(3)).toEqual(Array(27).fill(5));
+  });
+
+  it('re-probes a cheaper tier when random() < rate, never on a cold start', () => {
     const s = record([[1, false], [2, false], [4, false], [5, true]], 3);
+    // Every cheaper tier failed in the same requests: the nearest goes first.
     expect(plan(s, { random: () => 0.01 })).toEqual({ tier: 4, reason: 'reprobe' });
     expect(plan(s, { random: () => 0.05 }).tier).toBe(5);
-    expect(plan(s, { random: () => 0.01, tiers: [1, 2, 3, 4, 5] }).tier).toBe(4);
+    // A cheaper tier never tried (Lightpanda newly configured) is probed first.
+    expect(plan(s, { random: () => 0.01, tiers: [1, 2, 3, 4, 5] }).tier).toBe(3);
     const s4 = record([[1, false], [2, false], [4, true]], 3);
     expect(plan(s4, { random: () => 0.01, tiers: [1, 2, 3, 4, 5] }).tier).toBe(3);
     expect(plan(s4, { random: () => 0.01 }).tier).toBe(2);
     expect(plan(null, { random: () => 0 })).toEqual({ tier: 1, reason: 'cold' });
     expect(plan(record([[1, true]], 3), { random: () => 0 })).toEqual({ tier: 1, reason: 'learned' });
+  });
+
+  it('re-probes the cheaper tiers in turn, not only the next one', () => {
+    // Learned T4 after T1 and T2 failed in the same requests.
+    let s = record([[1, false], [2, false], [4, true]], 3);
+    expect(plan(s, { random: () => 0 })).toEqual({ tier: 2, reason: 'reprobe' });
+    // T2 is probed and fails again: the next probe goes to T1, whose evidence is older.
+    s = applyOutcomes(s, [{ tier: 2, ok: false }, { tier: 4, ok: true }], T0 + 10 * 60_000);
+    expect(plan(s, { random: () => 0, now: T0 + 20 * 60_000 })).toEqual({ tier: 1, reason: 'reprobe' });
+    // A probe that succeeded is followed up, whichever cheaper tier it was.
+    s = applyOutcomes(s, [{ tier: 1, ok: true }], T0 + 20 * 60_000);
+    expect(plan(s, { now: T0 + 30 * 60_000 })).toEqual({ tier: 1, reason: 'confirm' });
   });
 });
 
@@ -271,6 +321,22 @@ describe('SmartRouter domain strategy', () => {
     expect(fourth.r.tierUsed).toBe(5);
     expect(redis.strategy()).toMatchObject({ tier: 5, successRate: 1, sampleSize: 4 });
     expect(redis.set).toHaveBeenLastCalledWith(`domain:${DOMAIN}`, expect.any(String), 'EX', STRATEGY_TTL_SECONDS);
+  });
+
+  it('a domain polled every 4 hours stops paying for T1, T2 and T4 after three requests', async () => {
+    const { request, clock } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(ok);
+    for (let i = 0; i < 3; i++) {
+      expect((await request()).fetched).toEqual([1, 2, 4, 5]);
+      clock.t += 4 * HOUR;
+    }
+    for (let i = 0; i < 6; i++) {
+      expect((await request()).fetched).toEqual([5]);
+      clock.t += 4 * HOUR;
+    }
   });
 
   it('a page accepted at T1 keeps one fetch per request', async () => {
@@ -367,6 +433,33 @@ describe('SmartRouter domain strategy', () => {
     expect((await request()).fetched).toEqual([1, 2]);
     // ... and later requests start at T2 again.
     for (let i = 0; i < 3; i++) expect((await request()).fetched).toEqual([2]);
+  });
+
+  it('a failing middle tier does not keep re-probes from reaching T1', async () => {
+    let probe = false;
+    const { request, clock } = setup({ random: () => (probe ? 0 : 0.99) });
+    // A temporary bot wall: T1 and T2 fail, the browser works.
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(ok);
+    for (let i = 0; i < 10; i++) {
+      await request();
+      clock.t += 60_000;
+    }
+    expect((await request()).fetched).toEqual([4]);
+
+    // The wall lifts for T1 (no proxy), but T2's proxy pool stays blocked.
+    m.tier1Fetch.mockImplementation(ok);
+    probe = true;
+    const fetched: number[][] = [];
+    for (let i = 0; i < 8; i++) {
+      clock.t += 10 * 60_000;
+      fetched.push((await request()).fetched);
+    }
+    expect(fetched.slice(0, 3).some((f) => f.includes(1))).toBe(true);
+    probe = false;
+    clock.t += 10 * 60_000;
+    expect((await request()).fetched).toEqual([1]);
   });
 
   it('re-probes about 1 request in 20 with Math.random-like input', async () => {
@@ -633,5 +726,158 @@ describe('compact example.com through the router', () => {
       m.tier1Fetch.mockResolvedValue(page(html));
       await expect(router.route('https://example.com/', {})).resolves.toMatchObject({ tierUsed: 1 });
     }
+  });
+});
+
+// ── browser pool unavailable ────────────────────────────
+
+const { BrowserPoolError } = await import('../../src/browser/pool.js');
+
+describe('SmartRouter when no browser context can be acquired', () => {
+  // worker.ts fails a job without retry when its message says the tiers are exhausted.
+  const FINAL = /All tiers exhausted/i;
+
+  it.each([
+    ['timeout', 'Timed out after 30000 ms waiting for a browser context'],
+    ['queue-full', 'Browser pool saturated: 4 contexts busy and 100 requests waiting'],
+    ['closed', 'Browser pool is shut down'],
+  ] as const)('escalating to T4 surfaces the retryable pool error (%s)', async (reason, message) => {
+    const { router, acquire, redis } = setup();
+    const err = new BrowserPoolError(reason, message);
+    acquire.mockRejectedValue(err);
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+
+    const thrown = await router.route(URL_, {}).catch((e: unknown) => e);
+    expect(thrown).toBe(err);
+    expect((thrown as Error).message).not.toMatch(FINAL);
+    expect(thrown).toMatchObject({ code: 'BROWSER_POOL_UNAVAILABLE' });
+    expect(acquire).toHaveBeenCalledTimes(1); // the stealth tier does not queue again
+    expect(m.tier4StealthFetch).not.toHaveBeenCalled();
+    await router.drainStrategyWrites();
+    // The pool's failure is not held against the browser tiers.
+    expect(Object.keys(redis.strategy()!.tiers)).toEqual(['1', '2']);
+  });
+
+  it('a domain learned at T5 also gets the retryable error', async () => {
+    const { router, request, acquire } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(ok);
+    for (let i = 0; i < 3; i++) await request();
+    expect((await request()).fetched).toEqual([5]);
+
+    const err = new BrowserPoolError('timeout', 'Timed out after 30000 ms waiting for a browser context');
+    acquire.mockRejectedValue(err);
+    await expect(router.route(URL_, {})).rejects.toBe(err);
+  });
+
+  it('T4 failing on its own and T5 finding no context is retryable too', async () => {
+    const { router, acquire } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockRejectedValue(new Error('page.goto: Timeout 30000ms exceeded'));
+    const err = new BrowserPoolError('queue-full', 'Browser pool saturated: 4 contexts busy and 100 requests waiting');
+    acquire.mockResolvedValueOnce({} as BrowserContext).mockRejectedValue(err);
+
+    await expect(router.route(URL_, {})).rejects.toBe(err);
+    expect(m.tier4Fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a rejected T4 response is still returned when T5 finds no context', async () => {
+    const { router, acquire } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    acquire.mockResolvedValueOnce({} as BrowserContext).mockRejectedValue(new BrowserPoolError('timeout', 'Timed out'));
+
+    await expect(router.route(URL_, {})).resolves.toMatchObject({ tierUsed: 4, html: SHELL });
+  });
+});
+
+// ── learning from the terminal tier ─────────────────────
+
+describe('SmartRouter learns T5 by the normal quality bar', () => {
+  // AWS WAF interstitial: passes isValidContent ("awswaf" is not on its
+  // list) and scores 0, so only the terminal tier's relaxed bar returns it.
+  const WAF =
+    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title></title><script>window.awsWafCookieDomainList = [];</script>' +
+    '<script src="https://a1b2c3.edge.sdk.awswaf.com/a1b2c3/d4e5/challenge.js"></script></head><body><div id="challenge-container"></div>' +
+    '<script>AwsWafIntegration.getToken().then(() => { window.location.reload(true); });</script>' +
+    "<noscript><h1>JavaScript is disabled</h1>In order to continue, we need to verify that you're not a robot.</noscript></body></html>";
+  const waf = () => Promise.resolve(page(WAF, 202));
+
+  it('a challenge page returned as a last resort is not recorded as a T5 success', async () => {
+    const { request, redis } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(waf);
+
+    const first = await request();
+    expect(first.r).toMatchObject({ tierUsed: 5, html: WAF }); // still returned
+    expect(redis.strategy()!.tiers['5']).toMatchObject({ ok: 0, total: 1, lastOk: false });
+  });
+
+  it('a T4 that works half the time is not abandoned for a T5 that only returns challenges', async () => {
+    const { request, redis } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    let t4 = 0;
+    m.tier4Fetch.mockImplementation(() => (t4++ % 2 === 0 ? ok() : shell()));
+    m.tier4StealthFetch.mockImplementation(waf);
+
+    const starts: number[] = [];
+    let good = 0;
+    for (let i = 0; i < 20; i++) {
+      const { r, fetched } = await request();
+      starts.push(fetched[0]);
+      if (r.html === GOOD) good++;
+    }
+    // After the cold start (and at most one look at the still-unknown T5),
+    // requests start at T4, the tier that does work.
+    expect(starts.filter((t) => t === 5).length).toBeLessThanOrEqual(1);
+    expect(starts.slice(6)).toEqual(Array(14).fill(4));
+    expect(good).toBeGreaterThanOrEqual(9);
+    const tiers = redis.strategy()!.tiers;
+    expect(tiers['5']!.ok).toBe(0);
+    expect(tiers['4']!.ok).toBeGreaterThan(0);
+  });
+
+  it('traces a returned low-quality terminal response as rejected', async () => {
+    const { StageTracer } = await import('../../src/tracing.js');
+    const { router } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(waf);
+    const tracer = new StageTracer();
+
+    await expect(router.route(URL_, {}, tracer)).resolves.toMatchObject({ tierUsed: 5 });
+    const t5 = tracer.snapshot().attempts.find((a) => a.tier === 5)!;
+    expect(t5).toMatchObject({ outcome: 'rejected', reason: expect.stringMatching(/^low quality 0\.00 /) });
+  });
+
+  it('a domain whose every tier returns a sub-bar page goes straight to T5, which still returns it', async () => {
+    const { request } = setup();
+    for (const f of [m.tier1Fetch, m.tier2Fetch, m.tier4Fetch]) f.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(waf);
+    for (let i = 0; i < 3; i++) expect((await request()).fetched).toEqual([1, 2, 4, 5]);
+    for (let i = 0; i < 3; i++) {
+      const { r, fetched } = await request();
+      expect(fetched).toEqual([5]);
+      expect(r).toMatchObject({ tierUsed: 5, html: WAF });
+    }
+  });
+
+  it('a good T5 page is still learned as a success', async () => {
+    const { request, redis } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(ok);
+    await request();
+    expect(redis.strategy()!.tiers['5']).toMatchObject({ ok: 1, total: 1, lastOk: true });
   });
 });

@@ -17,6 +17,37 @@ export interface TransformContext {
   baseUrl: string;
   /** Effective base for relative links (<base href> or page URL); null when invalid. */
   base: URL | null;
+  /** Regex work allowed for the run; unbounded when absent. */
+  regexBudget?: RegexBudget;
+}
+
+/**
+ * Regex work of one run, charged before every regex application: the run's
+ * deadline and the total input chars (RECIPE_LIMITS.maxRegexInputCharsPerRun).
+ * Once `stopped` is set, every later regex application yields null and the
+ * caller reports the stop.
+ */
+export interface RegexBudget {
+  chars: number;
+  deadlineMs?: number;
+  stopped: 'deadline' | 'budget' | null;
+}
+
+export function newRegexBudget(deadlineMs: number | undefined): RegexBudget {
+  return deadlineMs === undefined ? { chars: 0, stopped: null } : { chars: 0, deadlineMs, stopped: null };
+}
+
+function spendRegex(budget: RegexBudget, chars: number): boolean {
+  if (budget.stopped) return false;
+  if (budget.deadlineMs !== undefined && Date.now() > budget.deadlineMs) {
+    budget.stopped = 'deadline';
+  } else if (budget.chars + chars > RECIPE_LIMITS.maxRegexInputCharsPerRun) {
+    budget.stopped = 'budget';
+  } else {
+    budget.chars += chars;
+    return true;
+  }
+  return false;
 }
 
 export interface CompiledTransform {
@@ -82,8 +113,10 @@ function regexStep(pattern: string, group: number | undefined): CompiledTransfor
   // Default: the first capture group when there is one, else the whole match.
   const captures = (new RegExp(`${pattern}|`, 'u').exec('') as RegExpExecArray).length - 1;
   const index = group ?? (captures > 0 ? 1 : 0);
-  return stringStep('regex', (s) => {
-    const m = re.exec(s.length > RECIPE_LIMITS.maxRegexInputChars ? s.slice(0, RECIPE_LIMITS.maxRegexInputChars) : s);
+  return stringStep('regex', (s, ctx) => {
+    const input = s.length > RECIPE_LIMITS.maxRegexInputChars ? s.slice(0, RECIPE_LIMITS.maxRegexInputChars) : s;
+    if (ctx.regexBudget && !spendRegex(ctx.regexBudget, input.length)) return null;
+    const m = re.exec(input);
     const hit = m?.[index];
     return hit === undefined ? null : hit;
   });

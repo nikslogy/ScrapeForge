@@ -73,15 +73,15 @@ describe('compareOutputs', () => {
     expect(r).toEqual({ agree: true, fieldAgreement: 1, recordCountRatio: 1, details: [] });
   });
 
-  it('only compares the first 20 records', () => {
+  it('compares every record', () => {
     const recipe = records(30, (r, i) => {
       if (i >= 20) r.title = 'garbage';
     });
-    expect(compareOutputs(recipe, records(30), FIELDS).agree).toBe(true);
+    expect(compareOutputs(recipe, records(30), FIELDS).agree).toBe(false);
   });
 
-  it('tolerates ±10% record count and fails beyond', () => {
-    expect(compareOutputs(records(18), records(20), FIELDS)).toMatchObject({ agree: true, recordCountRatio: 0.9 });
+  it('a record with values on one side only is a disagreement', () => {
+    expect(compareOutputs(records(18), records(20), FIELDS)).toMatchObject({ agree: false, recordCountRatio: 0.9 });
     const r = compareOutputs(records(17), records(20), FIELDS);
     expect(r.agree).toBe(false);
     expect(r.details[0]).toBe('record count 17 vs reference 20');
@@ -94,18 +94,18 @@ describe('compareOutputs', () => {
     expect(r.fieldAgreement).toBeLessThan(0.9);
   });
 
-  it('requires fieldAgreement ≥ 0.9', () => {
-    // 20 records × 3 fields = 60 comparisons; 6 disagreements → 0.9 exactly.
-    const sixWrong = records(20, (r, i) => {
-      if (i < 6) r.title = 'wrong';
+  it('requires every compared value to match', () => {
+    // 20 records × 3 fields = 60 comparisons; one disagreement is enough.
+    const oneWrong = records(20, (r, i) => {
+      if (i === 0) r.title = 'wrong';
     });
-    expect(compareOutputs(sixWrong, records(20), FIELDS)).toMatchObject({ agree: true, fieldAgreement: 0.9 });
-    const sevenWrong = records(20, (r, i) => {
-      if (i < 7) r.title = 'wrong';
+    const r = compareOutputs(oneWrong, records(20), FIELDS);
+    expect(r).toMatchObject({ agree: false, details: ['/0/title: "wrong" vs "Book 0"'] });
+    expect(r.fieldAgreement).toBeCloseTo(59 / 60);
+    const closePrice = records(20, (r, i) => {
+      if (i === 3) r.price = (r.price as number) * 1.004;
     });
-    const r = compareOutputs(sevenWrong, records(20), FIELDS);
-    expect(r.agree).toBe(false);
-    expect(r.details).toContain('/0/title: "wrong" vs "Book 0"');
+    expect(compareOutputs(closePrice, records(20), FIELDS).agree).toBe(false);
   });
 
   it('values missing on both sides are not compared; one-sided values disagree', () => {

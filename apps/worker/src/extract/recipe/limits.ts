@@ -18,6 +18,12 @@ export const RECIPE_LIMITS = {
   maxRegexesPerRecipe: 50,
   /** The regex transform only ever sees this many leading chars of its input. */
   maxRegexInputChars: 10_000,
+  /**
+   * Regex input chars across one run. V8 cannot interrupt a regex, so the run
+   * also checks its deadline before every regex application; this cap bounds
+   * the total when the deadline is far off (100 inputs at the per-exec cap).
+   */
+  maxRegexInputCharsPerRun: 1_000_000,
   maxMapEntries: 100,
   maxMapKeyChars: 200,
   maxMapValueChars: 1_000,

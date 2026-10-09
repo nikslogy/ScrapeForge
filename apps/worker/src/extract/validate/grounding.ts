@@ -78,19 +78,43 @@ function checkValue(raw: unknown, locations: Locations, depth: number): Groundin
   if (typeof raw === 'number') return Number.isFinite(raw) ? locations.firstHit((p) => numericScore(p, [raw]), true) : NOT_GROUNDED;
   // A boolean has no printed form to look for; the page said "In stock".
   if (depth >= MAX_NESTING || !(Array.isArray(raw) || isPlainObject(raw))) return NOT_GROUNDED;
-  const members = (Array.isArray(raw) ? raw : Object.values(raw)).filter((v) => v !== null && v !== undefined && v !== '');
-  if (members.length === 0) return VACUOUS;
+  const entries: Array<[string | null, unknown]> = Array.isArray(raw) ? raw.map((v) => [null, v]) : Object.entries(raw);
+  let counted = 0;
   let grounded = 0;
   // Farthest location any member needed; stays 'none' if every member was vacuous.
   let where: GroundingLocation = 'none';
-  for (const member of members) {
-    const result = checkValue(member, locations, depth + 1);
+  for (const [key, member] of entries) {
+    if (member === null || member === undefined || member === '') continue;
+    let result: GroundingResult;
+    if (typeof member === 'boolean') {
+      // A boolean leaf (the response schema asks for a real boolean inside
+      // objects) is checked by the property it answers ("Wireless: Yes" for
+      // wireless); when the page does not name it, it neither grounds nor
+      // rejects the value: the other members decide.
+      const named = key === null ? null : keyPhrase(key);
+      result = named ? checkString(named, locations) : VACUOUS;
+      if (!result.grounded || result.where === 'none') continue;
+    } else {
+      result = checkValue(member, locations, depth + 1);
+    }
+    counted++;
     if (!result.grounded) continue;
     grounded++;
     if (LOCATION_RANK[result.where] > LOCATION_RANK[where]) where = result.where;
   }
-  const all = grounded === members.length;
-  return { grounded: all, where: all ? where : 'none', score: grounded / members.length };
+  if (counted === 0) return VACUOUS;
+  const all = grounded === counted;
+  return { grounded: all, where: all ? where : 'none', score: grounded / counted };
+}
+
+/** "freeShipping" / "free_shipping" → "free shipping"; null for keys with no words. */
+function keyPhrase(key: string): string | null {
+  const phrase = key
+    .slice(0, SHORT_TEXT_MAX_CHARS)
+    .replace(/([\p{Ll}\d])(\p{Lu})/gu, '$1 $2')
+    .replace(/[_\-.]+/g, ' ')
+    .trim();
+  return /\p{L}/u.test(phrase) ? phrase : null;
 }
 
 function checkString(raw: string, locations: Locations): GroundingResult {

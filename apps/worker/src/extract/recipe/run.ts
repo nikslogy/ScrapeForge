@@ -13,9 +13,9 @@
 // nearest enclosing record, so nested records keep their own values.
 //
 // Work is bounded: records are capped (maxRecords), the deadline is checked
-// between records and output size is budgeted; every stop is reported in
-// `errors`, never thrown, and the complete records produced so far are
-// returned.
+// between records and before every regex application, regex input and output
+// size are budgeted; every stop is reported in `errors`, never thrown, and
+// the complete records produced so far are returned.
 
 import * as cheerio from 'cheerio';
 import type { ExtractionRecipe, RecipeField, StructuredDataItem } from '../types.js';
@@ -23,7 +23,7 @@ import { type DomElement, type DomNode, effectiveBase, elementText, isElement, r
 import { compileFastSelector, type FastSelector } from './fast-select.js';
 import { RECIPE_LIMITS } from './limits.js';
 import { escapePointerToken, parsePointer, resolvePointer } from './pointer.js';
-import { applyTransforms, compileTransforms, type CompiledTransform, type RecipeValue, type TransformContext } from './transforms.js';
+import { applyTransforms, compileTransforms, newRegexBudget, type CompiledTransform, type RecipeValue, type RegexBudget, type TransformContext } from './transforms.js';
 import { isValidatedRecipe, validateRecipe } from './validate.js';
 
 export interface RecipeEvidence {
@@ -110,6 +110,12 @@ function charge(budget: Budget, raw: string): boolean {
 
 const BUDGET_ERROR = `output budget exceeded (${RECIPE_LIMITS.maxOutputChars} chars or ${RECIPE_LIMITS.maxOutputValues} values)`;
 
+/** Why regex work stopped, as reported in `errors` (null while it may go on). */
+function regexStop(budget: RegexBudget | undefined): string | null {
+  if (!budget?.stopped) return null;
+  return budget.stopped === 'deadline' ? 'deadline exceeded' : `regex budget exceeded (${RECIPE_LIMITS.maxRegexInputCharsPerRun} input chars)`;
+}
+
 export function runRecipe(recipe: ExtractionRecipe, input: RecipeInput, opts: RecipeRunOptions): RecipeRunResult {
   let trusted: ExtractionRecipe;
   if (isValidatedRecipe(recipe)) {
@@ -131,7 +137,11 @@ export function runRecipe(recipe: ExtractionRecipe, input: RecipeInput, opts: Re
       return { data: emptyData, evidence, recordCount: 0, errors: ['deadline exceeded before the recipe ran'] };
     }
     const $ = 'html' in input ? cheerio.load(input.html) : input.$;
-    const ctx: TransformContext = { baseUrl: opts.baseUrl, base: effectiveBase($('base[href]').first().attr('href'), opts.baseUrl) };
+    const ctx: TransformContext = {
+      baseUrl: opts.baseUrl,
+      base: effectiveBase($('base[href]').first().attr('href'), opts.baseUrl),
+      regexBudget: newRegexBudget(opts.deadlineMs),
+    };
     const plans = planFields(trusted, opts.structured);
     if (trusted.shape === 'object') return runObject($, trusted, plans, ctx, evidence, errors);
     return runArray($, trusted, plans, ctx, opts, evidence, errors);
@@ -179,6 +189,7 @@ function runObject(
   const budget = newBudget();
   const record: Record<string, unknown> = {};
   for (const plan of plans) {
+    if (regexStop(ctx.regexBudget)) break;
     let elements: DomElement[] = [];
     if (scope && plan.selector !== undefined) {
       const limit = plan.field.all ? RECIPE_LIMITS.maxItemsPerField : 1;
@@ -188,6 +199,8 @@ function runObject(
     record[plan.name] = result.value;
     evidence.push(...result.evidence);
   }
+  const stop = regexStop(ctx.regexBudget);
+  if (stop) errors.push(stop);
   if (budget.exceeded) errors.push(BUDGET_ERROR);
   return { data: record, evidence, recordCount: scope ? 1 : 0, errors };
 }
@@ -244,12 +257,18 @@ function runArray(
       const index = start + i;
       const record: Record<string, unknown> = {};
       const recordEvidence: RecipeEvidence[] = [];
-      plans.forEach((plan, p) => {
+      for (let p = 0; p < plans.length && !ctx.regexBudget?.stopped; p++) {
+        const plan = plans[p];
         const result = fieldValue(plan, matches[p][i], `/${index}/${plan.pathName}`, ctx, budget);
         record[plan.name] = result.value;
         for (const e of result.evidence) recordEvidence.push(e);
-      });
-      // A record cut short by the budget is dropped, so every record returned is complete.
+      }
+      // A record cut short by a budget or the deadline is dropped, so every record returned is complete.
+      const stop = regexStop(ctx.regexBudget);
+      if (stop) {
+        errors.push(`${stop} after ${data.length} of ${records.length} records`);
+        break outer;
+      }
       if (budget.exceeded) {
         errors.push(`${BUDGET_ERROR} after ${data.length} of ${records.length} records`);
         break outer;

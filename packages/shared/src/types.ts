@@ -89,7 +89,8 @@ export type ExtractionMissingReason =
   | 'ambiguous'
   | 'provider_failure'
   | 'truncated'
-  | 'rejected_ungrounded';
+  | 'rejected_ungrounded'
+  | 'unparseable';
 
 export interface ExtractionMissingField {
   /** JSON pointer into content.json, e.g. "/price" or "/items/3/price". */

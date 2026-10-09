@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { ScrapeJobData, checkPublicUrl, createCacheKey } from '@scrapeforge/shared';
+import { ScrapeJobData, checkPublicUrl, resultCacheKey, type ScrapeOptions } from '@scrapeforge/shared';
 
 const emptyToUndefined = (v: unknown) => (v === '' || v === null ? undefined : v);
 const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
@@ -150,20 +150,18 @@ export async function extractRoutes(app: FastifyInstance) {
 
     const { redis, queues, queueEvents } = app;
 
-    // Check cache — uses the same `cache:<hash>` namespace and key shape as
-    // the worker writes to (see apps/worker/src/worker.ts → Stage 5). Previously
-    // this route read from an `extract:...` key that nothing ever wrote to,
-    // so extract cache hits never occurred and every request re-hit the LLM.
-    const formatsForKey = [...new Set([...body.formats, 'json', 'markdown'])];
-    const cacheKey = `cache:${createCacheKey(body.url, {
-      formats: formatsForKey,
-      proxy: body.proxy,
+    // Always include 'markdown' so the pipeline returns content even if AI fails
+    const formats = [...new Set([...body.formats, 'json' as const, 'markdown' as const])];
+    const options: ScrapeOptions = {
+      ...body,
       extractSchema: body.schema,
-      // Only present when set, so keys of plain requests are unchanged.
-      includeEvidence: body.includeEvidence || undefined,
-    })}`;
+      formats,
+    };
+
+    // Same `cache:<hash>` key the worker writes (resultCacheKey over the
+    // job's own options object, so the two cannot drift).
     if (body.cacheTtl > 0) {
-      const cached = await redis.get(cacheKey);
+      const cached = await redis.get(resultCacheKey(user.userId, body.url, options));
       if (cached) {
         const data = JSON.parse(cached);
         return reply.status(200).send({
@@ -175,19 +173,12 @@ export async function extractRoutes(app: FastifyInstance) {
 
     const jobId = `ext_${nanoid(16)}`;
 
-    // Always include 'markdown' so the pipeline returns content even if AI fails
-    const formats = [...new Set([...body.formats, 'json' as const, 'markdown' as const])];
-
     const jobData: ScrapeJobData = {
       jobId,
       userId: user.userId,
       apiKeyId: user.apiKeyId,
       url: body.url,
-      options: {
-        ...body,
-        extractSchema: body.schema,
-        formats,
-      },
+      options,
       priority: body.webhookUrl ? 2 : 1,
       createdAt: new Date().toISOString(),
     };

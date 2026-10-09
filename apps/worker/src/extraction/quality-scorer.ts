@@ -13,9 +13,19 @@ export interface HtmlAnalysis {
   isHtml: boolean;
   /** Visible body text, whitespace-collapsed (no script/style/noscript/template/svg/iframe/title). */
   textLen: number;
+  /**
+   * The part of textLen outside site chrome: <nav>, page-level <header> and
+   * <footer> (not those of an article or section), and banner, navigation and
+   * contentinfo roles. Hidden elements (see textSample) are left out too.
+   */
+  mainTextLen: number;
   /** The part of textLen inside <a> elements. */
   linkTextLen: number;
-  /** Lower-cased visible text, cut at TEXT_SAMPLE_CHARS, for phrase checks. */
+  /**
+   * Lower-cased visible text, cut at TEXT_SAMPLE_CHARS, for phrase checks.
+   * Text inside elements their own attributes hide (`hidden`, inline
+   * display:none or visibility:hidden) is left out.
+   */
   textSample: string;
   /** Lower-cased <title> and <noscript> text (bounded), also checked for block phrases. */
   auxText: string;
@@ -32,12 +42,16 @@ export interface HtmlAnalysis {
   /**
    * Bytes inside JSON data scripts (JSON-LD, __NEXT_DATA__, __NUXT_DATA__...):
    * server-rendered page data that extraction reads without running scripts.
+   * JSON-LD describing only the site (Organization, WebSite, breadcrumbs...)
+   * is not page data and is not counted.
    */
   dataBytes: number;
   /** Meta refresh to another URL, a fast reload, or an inline script that navigates. */
   clientRedirect: boolean;
   /** An SPA mount point (#root, #app, #__next, <app-root>...) with nothing inside. */
   emptyMountPoint: boolean;
+  /** A spinner, loader, skeleton, progress bar or aria-busy region inside an SPA mount point. */
+  loadingMountPoint: boolean;
 }
 
 const TEXT_SAMPLE_CHARS = 20_000;
@@ -68,6 +82,23 @@ const MOUNT_IDS = new Set([
   'q-app', 'ember-app', 'appmount', 'mount',
 ]);
 const MOUNT_TAGS = new Set(['app-root']);
+
+// Site chrome: text a server renders around a client-rendered page.
+// header/footer are page chrome only outside sectioning elements (an
+// article's header holds its title), as HTML landmarks are defined.
+const SECTIONING = new Set(['article', 'aside', 'main', 'section']);
+const CHROME_ROLE = /^\s*(?:banner|navigation|contentinfo)\s*$/i;
+const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+// The class names and roles the browser tier's readiness check treats as unfinished.
+const LOADING_CLASS = /spinner|loader|skeleton|loading/i;
+
+// JSON-LD types that describe the site, not the page (same idea as the
+// extraction engine's scaffolding rule). Larger blocks are not parsed.
+const SCAFFOLDING_TYPES = new Set([
+  'organization', 'corporation', 'website', 'webpage', 'collectionpage', 'breadcrumblist', 'sitenavigationelement',
+  'wpheader', 'wpfooter', 'wpsidebar', 'searchaction', 'imageobject', 'contactpoint',
+]);
+const MAX_SCAFFOLDING_JSON_CHARS = 64 * 1024;
 
 const NON_EXECUTABLE_SCRIPT_TYPE = /^\s*(application\/(ld\+)?json|application\/json|text\/template|text\/x-template|importmap|speculationrules)\b/i;
 // Same rule as the extraction engine (extract/document/structured.ts): a
@@ -105,15 +136,104 @@ function findTagEnd(html: string, from: number): number {
   return html.length;
 }
 
-const ATTR_PATTERNS: Record<'id' | 'type' | 'content', RegExp> = {
+const ATTR_PATTERNS: Record<'id' | 'type' | 'content' | 'class' | 'role' | 'aria-busy', RegExp> = {
   id: /(?:^|[\s/])id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
   type: /(?:^|[\s/])type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
   content: /(?:^|[\s/])content\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
+  class: /(?:^|[\s/])class\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
+  role: /(?:^|[\s/])role\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
+  'aria-busy': /(?:^|[\s/])aria-busy\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i,
 };
 
 function attr(attrs: string, name: keyof typeof ATTR_PATTERNS): string | undefined {
   const m = ATTR_PATTERNS[name].exec(attrs);
   return m ? (m[1] ?? m[2] ?? m[3] ?? '') : undefined;
+}
+
+const HIDDEN_HINT = /hidden|none/i;
+const HIDING_STYLE = /(?:^|[;\s])(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i;
+
+function isAttrSpace(c: number): boolean {
+  return c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
+}
+
+/**
+ * Whether an element's own attributes hide it: the `hidden` attribute, or an
+ * inline display:none / visibility:hidden. Attributes are tokenized, so
+ * type="hidden" or class="hidden-xs" do not count.
+ */
+function hidesItself(attrs: string): boolean {
+  if (!HIDDEN_HINT.test(attrs)) return false;
+  const n = attrs.length;
+  let k = 0;
+  while (k < n) {
+    const c = attrs.charCodeAt(k);
+    if (isAttrSpace(c) || c === 47 /* / */) {
+      k++;
+      continue;
+    }
+    const nameStart = k;
+    while (k < n) {
+      const d = attrs.charCodeAt(k);
+      if (isAttrSpace(d) || d === 47 || d === 61 /* = */ || d === 62 /* > */) break;
+      k++;
+    }
+    const name = attrs.slice(nameStart, k).toLowerCase();
+    while (k < n && isAttrSpace(attrs.charCodeAt(k))) k++;
+    let value = '';
+    if (attrs.charCodeAt(k) === 61) {
+      k++;
+      while (k < n && isAttrSpace(attrs.charCodeAt(k))) k++;
+      const q = attrs.charCodeAt(k);
+      if (q === 34 || q === 39) {
+        const end = attrs.indexOf(q === 34 ? '"' : "'", k + 1);
+        value = attrs.slice(k + 1, end === -1 ? n : end);
+        k = end === -1 ? n : end + 1;
+      } else {
+        const start = k;
+        while (k < n && !isAttrSpace(attrs.charCodeAt(k))) k++;
+        value = attrs.slice(start, k);
+      }
+    }
+    if (name === 'hidden') return true;
+    if (name === 'style' && HIDING_STYLE.test(value)) return true;
+    if (k === nameStart) k++; // a stray character: always make progress
+  }
+  return false;
+}
+
+function looksLoading(attrs: string): boolean {
+  if (attrs.length < 5) return false;
+  if ((attr(attrs, 'aria-busy') ?? '').trim().toLowerCase() === 'true') return true;
+  if ((attr(attrs, 'role') ?? '').trim().toLowerCase() === 'progressbar') return true;
+  return LOADING_CLASS.test(attr(attrs, 'class') ?? '');
+}
+
+/** JSON-LD whose every node is site scaffolding (Organization, WebSite, a Yoast-style @graph of them...). */
+function isSiteScaffolding(json: string): boolean {
+  if (json.length > MAX_SCAFFOLDING_JSON_CHARS) return false;
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return false;
+  }
+  const nodes: unknown[] = [];
+  for (const top of Array.isArray(data) ? data : [data]) {
+    const graph = (top as { '@graph'?: unknown } | null)?.['@graph'];
+    if (Array.isArray(graph)) for (const g of graph) nodes.push(g);
+    else nodes.push(top);
+  }
+  if (nodes.length === 0) return false;
+  return nodes.every((node) => {
+    const t = (node as { '@type'?: unknown } | null)?.['@type'];
+    const types = Array.isArray(t) ? t : [t];
+    return types.length > 0 && types.every((x) => {
+      if (typeof x !== 'string') return false;
+      // "schema:Organization", "https://schema.org/Organization"
+      return SCAFFOLDING_TYPES.has(x.slice(Math.max(x.lastIndexOf('/'), x.lastIndexOf(':')) + 1).trim().toLowerCase());
+    });
+  });
 }
 
 const ENTITY = /&(?:#\d{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{1,31});/gi;
@@ -123,9 +243,35 @@ function collapse(raw: string): string {
   return raw.replace(NBSP, ' ').replace(ENTITY, '_').replace(/\s+/g, ' ').trim();
 }
 
+// ignoreBOM keeps a leading U+FEFF (it would otherwise be dropped).
+const UTF16 = new TextDecoder('utf-16le', { ignoreBOM: true });
+
+/**
+ * `html` lower-cased with every offset kept, so indices into `html` are
+ * indices into the result. String#toLowerCase lengthens 'İ' (U+0130, the only
+ * code point whose lower case is longer; none is shorter); a document holding
+ * it gets ASCII-only lower-casing, which is all tag names and markers need.
+ */
+function lowerSameLength(html: string): string {
+  const lower = html.toLowerCase();
+  if (lower.length === html.length) return lower;
+  const units = new Uint16Array(html.length);
+  for (let k = 0; k < html.length; k++) {
+    const c = html.charCodeAt(k);
+    units[k] = c >= 65 && c <= 90 ? c + 32 : c;
+  }
+  return UTF16.decode(units);
+}
+
+/** An open element tracked to its end tag: `depth` counts open elements of the same name. */
+interface Region {
+  name: string;
+  depth: number;
+}
+
 interface Scan {
   analysis: HtmlAnalysis;
-  /** Lower-cased html. */
+  /** Lower-cased html, same length (offsets agree with html). */
   lower: string;
   /** [start, end) of JSON data script contents, in document order. */
   dataRanges: Array<[number, number]>;
@@ -137,10 +283,14 @@ interface Scan {
  * costs O(n).
  */
 function scan(html: string): Scan {
-  const lower = html.toLowerCase();
+  const lower = lowerSameLength(html);
   const n = html.length;
   const textParts: string[] = [];
   const linkParts: string[] = [];
+  // Text outside site chrome / outside hidden elements, with the same block
+  // separators as textParts.
+  const mainParts: string[] = [];
+  const shownParts: string[] = [];
   const dataRanges: Array<[number, number]> = [];
   let linkDepth = 0;
   let runParts: string[] = [];
@@ -157,6 +307,13 @@ function scan(html: string): Scan {
   let aux = '';
   // An opened mount point waiting to see whether its next tag closes it.
   let mount: { name: string; textMark: number } | null = null;
+  // The outermost open site-chrome element, app mount point and hidden element.
+  let chrome: Region | null = null;
+  let app: Region | null = null;
+  let hidden: Region | null = null;
+  let sawHidden = false;
+  let sectioning = 0;
+  let loadingMountPoint = false;
 
   const endRun = () => {
     if (runParts.length === 0) return;
@@ -169,6 +326,9 @@ function scan(html: string): Scan {
     textParts.push(s);
     runParts.push(s);
     if (linkDepth > 0) linkParts.push(s);
+    if (hidden) return;
+    shownParts.push(s);
+    if (!chrome) mainParts.push(s);
   };
   const addAux = (s: string) => {
     if (aux.length < AUX_TEXT_CHARS) aux += ` ${collapse(s).slice(0, AUX_TEXT_CHARS)}`.toLowerCase();
@@ -216,6 +376,8 @@ function scan(html: string): Scan {
       endRun();
       // Block boundaries separate words, as rendered ("<li>a</li><li>b</li>" is "a b").
       textParts.push(' ');
+      mainParts.push(' ');
+      shownParts.push(' ');
     }
     if (name === 'a') {
       if (closing) {
@@ -231,14 +393,42 @@ function scan(html: string): Scan {
       linkParts.push(' ');
       linkDepth = 0;
     }
-    if (closing) continue;
+    if (closing) {
+      if (chrome && name === chrome.name && --chrome.depth === 0) chrome = null;
+      if (app && name === app.name && --app.depth === 0) app = null;
+      if (hidden && name === hidden.name && --hidden.depth === 0) hidden = null;
+      if (sectioning > 0 && SECTIONING.has(name)) sectioning--;
+      continue;
+    }
 
     const attrs = html.slice(j, tagEnd);
     if (LEGACY_CONTENT_TAGS.has(name)) contentTags++;
     if (TEXT_BLOCK_TAGS.has(name)) textBlocks++;
+    // Void and raw-text elements never reach a close tag the loop sees.
+    if (!VOID.has(name) && !RAW_CONTENT.has(name)) {
+      if (chrome) {
+        if (name === chrome.name) chrome.depth++;
+      } else if (
+        name === 'nav' ||
+        ((name === 'header' || name === 'footer') && sectioning === 0) ||
+        (attrs.length > 5 && CHROME_ROLE.test(attr(attrs, 'role') ?? ''))
+      ) {
+        chrome = { name, depth: 1 };
+      }
+      if (app && name === app.name) app.depth++;
+      if (hidden) {
+        if (name === hidden.name) hidden.depth++;
+      } else if (attrs.length > 5 && hidesItself(attrs)) {
+        hidden = { name, depth: 1 };
+        sawHidden = true;
+      }
+    }
+    if (SECTIONING.has(name)) sectioning++;
     if (MOUNT_TAGS.has(name) || ((name === 'div' || name === 'main' || name === 'section') && MOUNT_IDS.has((attr(attrs, 'id') ?? '').toLowerCase()))) {
       mount = { name, textMark: textParts.length };
+      if (!app) app = { name, depth: 1 };
     }
+    if (app && !loadingMountPoint && looksLoading(attrs)) loadingMountPoint = true;
     if (name === 'meta' && /http-equiv\s*=\s*["']?\s*refresh/i.test(attrs)) {
       const m = META_REFRESH.exec(attr(attrs, 'content') ?? '');
       if (m) {
@@ -257,7 +447,8 @@ function scan(html: string): Scan {
       if (name === 'script') {
         const type = attr(attrs, 'type') ?? '';
         if (JSON_DATA_TYPE.test(type)) {
-          dataBytes += content.trim().length;
+          const json = content.trim();
+          if (!(/ld\+json/i.test(type) && isSiteScaffolding(json))) dataBytes += json.length;
           dataRanges.push([i, contentEnd]);
         } else if (!NON_EXECUTABLE_SCRIPT_TYPE.test(type)) {
           scriptCount++;
@@ -288,8 +479,9 @@ function scan(html: string): Scan {
     analysis: {
       isHtml,
       textLen: text.length,
+      mainTextLen: Math.min(text.length, collapse(mainParts.join('')).length),
       linkTextLen: Math.min(text.length, collapse(linkParts.join('')).length),
-      textSample: text.slice(0, TEXT_SAMPLE_CHARS).toLowerCase(),
+      textSample: (sawHidden ? collapse(shownParts.join('')) : text).slice(0, TEXT_SAMPLE_CHARS).toLowerCase(),
       auxText: aux,
       longestRun,
       markupBytes: Math.max(0, n - rawBytes - textBytes),
@@ -299,6 +491,7 @@ function scan(html: string): Scan {
       dataBytes,
       clientRedirect,
       emptyMountPoint,
+      loadingMountPoint,
     },
   };
 }
@@ -339,8 +532,9 @@ const STRUCTURAL_MARKERS = [
 ];
 
 // Matched in visible text, <title> and <noscript>: what block pages say.
-// Everything here is reported as a bot detection indicator.
-const BLOCK_PHRASES = [
+// Everything here is reported as a bot detection indicator. A group lists
+// wordings of one message, which counts once.
+const BLOCK_PHRASES: ReadonlyArray<string | readonly string[]> = [
   'verify you are human',
   'verifying you are human',
   'are you a robot',
@@ -362,9 +556,7 @@ const BLOCK_PHRASES = [
   'enable javascript and cookies',
   'press & hold',
   'press and hold',
-  'unsupported browser',
-  'browser is not supported',
-  'please update your browser',
+  ['unsupported browser', 'browser is not supported', 'please update your browser'],
 ];
 
 // "This page needs JavaScript": every create-react-app page says so inside
@@ -408,7 +600,10 @@ function findBlockMarkers(s: Scan): string[] {
   const markup = withoutData(s.lower, s.dataRanges);
   const found = STRUCTURAL_MARKERS.filter((m) => markup.includes(m));
   const haystack = `${a.textSample} ${a.auxText}`;
-  for (const p of BLOCK_PHRASES) if (haystack.includes(p)) found.push(p);
+  for (const p of BLOCK_PHRASES) {
+    const hit = typeof p === 'string' ? (haystack.includes(p) ? p : undefined) : p.find((w) => haystack.includes(w));
+    if (hit !== undefined) found.push(hit);
+  }
   return found;
 }
 
@@ -452,6 +647,20 @@ interface ThinVerdict {
   shortPage: boolean;
 }
 
+/**
+ * Why a thin page that runs scripts looks rendered client-side, if it does:
+ * the server sent only site chrome (header, footer, navigation), or the app's
+ * mount point shows a loading placeholder and no page data came with it.
+ */
+function clientRenderedReason(a: HtmlAnalysis, hasData: boolean): string | undefined {
+  if (a.scriptCount === 0) return undefined;
+  if (a.mainTextLen < MIN_MEANINGFUL_TEXT) {
+    return `Only header, footer or navigation text (${a.mainTextLen} chars outside them) on a page that runs scripts — content rendered client-side`;
+  }
+  if (a.loadingMountPoint && !hasData) return 'Loading placeholder in the app mount point — content rendered client-side';
+  return undefined;
+}
+
 /** A page with under THIN_TEXT chars of (non-navigation) text: complete, or a stub? */
 function judgeThinPage(a: HtmlAnalysis, markers: readonly string[], jsNotice: string | undefined): ThinVerdict {
   const judged = judgedText(a);
@@ -464,11 +673,13 @@ function judgeThinPage(a: HtmlAnalysis, markers: readonly string[], jsNotice: st
   }
   const textShare = judged / Math.max(1, a.markupBytes + a.textLen);
   const hasData = a.dataBytes >= SUBSTANTIAL_DATA_BYTES && !isLinkHeavy(a);
+  const clientRendered = clientRenderedReason(a, hasData);
   const complete =
     markers.length === 0 &&
     jsNotice === undefined &&
     !a.clientRedirect &&
     !a.emptyMountPoint &&
+    clientRendered === undefined &&
     (a.textBlocks > 0 || a.longestRun >= 2 * MIN_SENTENCE_RUN) &&
     (textShare >= SHORT_PAGE_MIN_TEXT_SHARE || hasData);
   if (complete) {
@@ -486,6 +697,8 @@ function judgeThinPage(a: HtmlAnalysis, markers: readonly string[], jsNotice: st
     signal = `Mostly navigation links (${judged} of ${a.textLen} chars outside links — likely cloaked page)`;
   } else if (jsNotice !== undefined && markers.length === 0) {
     signal = `JavaScript required notice ("${jsNotice}") on a thin page — content rendered client-side`;
+  } else if (clientRendered !== undefined && markers.length === 0 && !a.emptyMountPoint && !a.clientRedirect) {
+    signal = clientRendered;
   } else {
     signal = `Very low visible text (${a.textLen} chars — likely stub / block page)`;
   }
