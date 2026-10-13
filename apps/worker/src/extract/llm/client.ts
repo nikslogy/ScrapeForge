@@ -37,6 +37,7 @@ import {
   type ModelCapabilities,
 } from '../types.js';
 import type { Budget } from './budget.js';
+import type { Semaphore } from '../../throughput/limits.js';
 import { defaultBreaker, type CircuitBreaker } from './breaker.js';
 import { errorDetails, LlmCallError, MAX_RETRY_AFTER_MS, toLlmError } from './errors.js';
 import { estimateCostUsd } from './registry.js';
@@ -65,6 +66,11 @@ export interface ModelClientOptions {
   random?: () => number;
   /** Configuration warnings to expose (e.g. from resolveModels). */
   warnings?: string[];
+  /**
+   * Shared cap on provider calls in flight (all requests of the process).
+   * A call waits for a slot until its budget deadline.
+   */
+  gate?: Semaphore;
 }
 
 export interface CompleteOptions {
@@ -149,6 +155,7 @@ export class ModelClient {
   readonly #now: () => number;
   readonly #random: () => number;
   readonly #perCallTimeoutMs: number;
+  readonly #gate?: Semaphore;
 
   constructor(opts: ModelClientOptions) {
     this.models = [...opts.models];
@@ -158,6 +165,7 @@ export class ModelClient {
     this.#sleep = opts.sleep ?? abortableSleep;
     this.#now = opts.now ?? Date.now;
     this.#random = opts.random ?? Math.random;
+    this.#gate = opts.gate;
     const t = opts.perCallTimeoutMs;
     this.#perCallTimeoutMs = t !== undefined && Number.isFinite(t) && t > 0 ? t : DEFAULT_PER_CALL_TIMEOUT_MS;
   }
@@ -208,7 +216,12 @@ export class ModelClient {
         const release = opts.budget.reserve(worstCaseUsd(effective, inputEstimate, affordable.maxOutputTokens));
         let outcome: Outcome;
         try {
-          outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote, inputEstimate);
+          const releaseSlot = await this.#slot(req, opts, caps, state, last);
+          try {
+            outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote, inputEstimate);
+          } finally {
+            releaseSlot();
+          }
         } finally {
           release();
         }
@@ -374,6 +387,21 @@ export class ModelClient {
       own += state.schemaTokens;
     }
     return Math.max(callerEstimate, own);
+  }
+
+  /** A provider-call slot from the shared gate (none configured: at once). */
+  async #slot(req: LlmRequest, opts: CompleteOptions, caps: ModelCapabilities, state: RunState, last: LlmError | undefined): Promise<() => void> {
+    if (!this.#gate) return () => undefined;
+    const deadline = opts.budget.signal(Number.POSITIVE_INFINITY);
+    try {
+      return await this.#gate.acquire(req.signal ? AbortSignal.any([req.signal, deadline]) : deadline);
+    } catch {
+      if (req.signal?.aborted) throw this.#aborted(caps, state, last);
+      this.#checkBudget(opts.budget, caps, state);
+      throw new LlmCallError('model budget exhausted: deadline reached while waiting for a model-call slot', 'budget_exhausted', caps.provider, caps.model, undefined, {
+        attempts: state.attempts,
+      });
+    }
   }
 
   #checkBudget(budget: Budget, caps: ModelCapabilities, state: RunState): void {

@@ -71,6 +71,10 @@ export interface ScrapeResult {
     extraction?: ExtractionMetadata;
     /** Where the time went: per-stage milliseconds and router tier attempts. */
     timings?: TimingsMetadata;
+    /** The page came from the fetch snapshot cache (no new fetch); it was fetched this long ago. */
+    snapshotAgeMs?: number;
+    /** An identical request was in flight: this result is a copy of that job's. */
+    coalescedWith?: string;
   };
   error?: string;
 }
@@ -120,6 +124,10 @@ export interface ExtractionScope {
   blocksSentToModel: number;
   recordsDetected: number;
   truncated: boolean;
+  /** How the page reached the model (absent when no model ran). */
+  strategy?: 'single' | 'selected' | 'partitioned';
+  /** Partitioned listings: chunk calls and how they ended. */
+  partitions?: { chunks: number; done: number; failed: number; skipped: number; recordsPerChunk: number };
 }
 
 export interface ExtractionLlmSummary {

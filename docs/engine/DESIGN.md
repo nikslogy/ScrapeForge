@@ -317,6 +317,65 @@ Both strategies can be turned off per request for diagnostics:
 `disable: ['partition']` or `disable: ['select']` falls back to the Phase 1
 single call, cut at the budget and reported `truncated`.
 
+### Throughput (Phase 3)
+
+All of this lives in `apps/worker/src/throughput/` and is wired in
+`worker.ts`. Each part degrades to "do the work" when Redis fails: a cache,
+limiter or coalescer never fails a job.
+
+**Request coalescing** (`coalesce.ts`). A job claims its request key with
+`SET NX PX`. The key is the result-cache key (tenant, URL, formats,
+schema, credentials digest, spend cap), and the claim expires at the job's
+deadline.
+
+* An identical job that finds the claim waits for the leader's
+  `result:<jobId>` and returns a copy, with `metadata.cached: true` and
+  `metadata.coalescedWith: <leader>`. It still delivers its own webhook
+  and SSE events.
+* If the leader fails or does not finish within the follower's timeout,
+  the follower does the work itself.
+* A queued job whose identical predecessor has already finished is served
+  from the result cache when the request allows caching.
+* `COALESCE_REQUESTS=0` turns coalescing off.
+
+In the end-to-end smoke test, 3 identical jobs submitted together fetched
+the origin once.
+
+**Fetch snapshot cache** (`snapshot.ts`, key `snapshotCacheKey` in
+`packages/shared`). Clean fetches are kept, gzip-compressed, for
+`SNAPSHOT_TTL_SEC` (default 300 s). A clean fetch has:
+
+* status 2xx or 3xx;
+* no block or challenge page;
+* no screenshot;
+* a compressed size of at most 4 MB.
+
+The key holds only what shapes the fetch: tenant, URL, proxy, mobile,
+`waitFor`, `blockResources` and the credentials digest. A request for the
+same page with another schema or other formats skips the fetch, and so
+does a retry after a partial extraction. The result then shows
+`metadata.snapshotAgeMs`, and the fetch adds no compute or proxy cost.
+`cacheTtl: 0` neither reads nor writes. In the smoke test, a second schema
+on a page that takes 1.5 s to fetch completed in 15 ms.
+
+**Concurrency budgets** (`limits.ts`):
+
+* **Browser contexts.** `BrowserPool`, set by `MAX_BROWSER_CONTEXTS` (as
+  before).
+* **Fetches per site, across all worker processes.** Expiring leases in a
+  Redis sorted set per host, acquired by a Lua script (`www.` shares the
+  host's budget), set by `FETCH_DOMAIN_CONCURRENCY` (default 6). A
+  crashed worker's leases expire at its job deadline. A job that gets no
+  slot before its deadline fails with a retryable timeout. A snapshot hit
+  never takes a slot.
+* **Model calls per process.** A shared semaphore in `ModelClient`
+  (`gate`), set by `EXTRACT_LLM_CONCURRENCY` (default 16). Partitioned
+  listings run several calls per request; this keeps a busy worker under
+  provider rate limits. A call still waiting at its budget deadline ends
+  as `budget_exhausted`.
+* **Cost.** Concurrent calls of one request share its `Budget` with
+  per-call reservations (see Large inputs).
+
 ### LLM response protocol
 
 The model returns raw values exactly as shown on the page plus the block id it
@@ -441,7 +500,7 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 | 0 | Build fixed, stage tracing, reproducible extraction baseline | in progress |
 | 1 | Source-preserving document, deterministic paths, model layer, validation, grounding, recipes; engine wired into worker and API | done (live-model benchmark pending an API key) |
 | 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | done (see "Large inputs (Phase 2)"); tables are not partitioned yet |
-| 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | later |
+| 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | done (see "Throughput (Phase 3)") |
 | 4 | Router: classify failures, engine vs network route, expiring per-template learning | later |
 | 5 | Mixed-load and recovery checks, published limits | later |
 

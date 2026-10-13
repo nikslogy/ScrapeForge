@@ -9,10 +9,14 @@ import {
   QUEUE_NAMES,
   isCacheableResult,
   resultCacheKey,
+  snapshotCacheKey,
   type ExtractionMetadata,
   type ScrapeOptions,
 } from '@scrapeforge/shared';
-import { SmartRouter } from './engine/router.js';
+import { SmartRouter, type RouterResult } from './engine/router.js';
+import { Coalescer, flightKey } from './throughput/coalesce.js';
+import { DomainLimiter, domainConcurrency } from './throughput/limits.js';
+import { readSnapshot, snapshotEligible, snapshotTtlSec, snapshotWorthy, writeSnapshot, type PageSnapshot } from './throughput/snapshot.js';
 import { BrowserPool } from './browser/pool.js';
 import { extractContent } from './extraction/pipeline.js';
 import { calculateQualityScore } from './extraction/quality-scorer.js';
@@ -170,6 +174,22 @@ function beforeDeadline<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
 // --- Smart Router ---
 const router = new SmartRouter(redis, acquireForJob, releaseForJob);
 
+// --- Throughput (Phase 3) ---
+// Identical requests in flight do the work once; fetched pages are kept
+// briefly apart from results; fetches per site are capped across workers.
+const coalescing = process.env.COALESCE_REQUESTS !== '0';
+const coalescer = new Coalescer({
+  set: (key, value, px, ttlMs, nx) => redis.set(key, value, px, ttlMs, nx),
+  get: (key) => redis.get(key),
+  eval: (script, numKeys, ...args) => redis.eval(script, numKeys, ...args),
+});
+const domainLimiter = new DomainLimiter({ eval: (script, numKeys, ...args) => redis.eval(script, numKeys, ...args) }, { limit: domainConcurrency() });
+const SNAPSHOT_TTL_SEC = snapshotTtlSec();
+const snapshotKv = {
+  getBuffer: (key: string) => redis.getBuffer(key),
+  set: (key: string, value: Buffer, mode: 'EX', ttlSec: number) => redis.set(key, value, mode, ttlSec),
+};
+
 // --- Structured extraction engine + SSE ---
 // One model client per process (its circuit breaker is process-wide). Its
 // configuration warnings are logged once; they never contain API keys.
@@ -278,7 +298,100 @@ function isPermanentFailure(error: unknown, message: string): boolean {
 }
 
 // --- Job Processor ---
+
+/**
+ * Runs the job, unless an identical request (same result-cache key) is in
+ * flight: then waits for that job's result and returns a copy. If the
+ * leader fails or does not finish in time, the job does the work itself.
+ */
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
+  const { jobId, url, options, userId } = job.data;
+  if (!coalescing || !jobId) return runScrapeJob(job);
+  // Queued behind an identical request that has finished since: its cached result.
+  if (options.cacheTtl && options.cacheTtl > 0) {
+    const cached = parseResult(await redis.get(resultCacheKey(userId, url, options)).catch(() => null));
+    if (cached?.status === 'completed') return serveCopy(job, cached, {});
+  }
+  const timeoutMs = options.timeout ?? 60_000;
+  const key = flightKey(resultCacheKey(userId, url, options));
+  const leader = await coalescer.claim(key, jobId, timeoutMs + JOB_DEADLINE_MARGIN_MS + 5_000);
+  if (leader === null) {
+    try {
+      return await runScrapeJob(job);
+    } finally {
+      await coalescer.release(key, jobId);
+    }
+  }
+  const copy = await followLeader(job, key, leader, Date.now() + timeoutMs);
+  return copy ?? runScrapeJob(job);
+}
+
+/** The leader's completed result as this job's own, or null (it failed, or did not finish in time). */
+async function followLeader(job: Job<ScrapeJobData>, key: string, leader: string, deadlineMs: number): Promise<ScrapeResult | null> {
+  const { jobId, url } = job.data;
+  await sseEmitter.emit(jobId, 'started', { url, jobId });
+  const leaderResult = parseResult(await coalescer.waitFor(key, leader, deadlineMs, (id) => redis.get(`result:${id}`)));
+  if (!leaderResult || leaderResult.status !== 'completed') return null;
+  console.log(`[${jobId}] Coalesced with in-flight job ${leader}`);
+  return serveCopy(job, leaderResult, { coalescedWith: leader });
+}
+
+function parseResult(raw: string | null): ScrapeResult | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ScrapeResult;
+  } catch {
+    return null;
+  }
+}
+
+/** Another job's completed result, stored and delivered as this job's own. */
+async function serveCopy(job: Job<ScrapeJobData>, source: ScrapeResult, extra: { coalescedWith?: string }): Promise<ScrapeResult> {
+  const { jobId, url, options, apiKeyId } = job.data;
+  const result: ScrapeResult = { ...source, jobId, metadata: { ...source.metadata, cached: true, ...extra } };
+  await redis.set(`result:${jobId}`, JSON.stringify(result), 'EX', 3600);
+  if (options.webhookUrl) {
+    deliverWebhook(options.webhookUrl, jobId, result as unknown as Record<string, unknown>, 'scrape.completed', apiKeyId).catch((err) =>
+      console.error(`[${jobId}] Webhook delivery error:`, err),
+    );
+  }
+  await sseEmitter.emitComplete(jobId, result as unknown as Record<string, unknown>);
+  await job.updateProgress(100);
+  scrapeRequestsTotal.inc({ tier: String(result.metadata.tierUsed), status: extra.coalescedWith ? 'coalesced' : 'cached', domain: new URL(url).hostname });
+  return result;
+}
+
+/**
+ * Fetches the page: from the snapshot cache when a recent clean fetch of it
+ * is there, else through the router within the site's fetch budget.
+ */
+async function fetchPage(
+  job: Job<ScrapeJobData>,
+  scope: JobScope,
+  signal: AbortSignal,
+  deadlineMs: number,
+  tracer: StageTracer,
+): Promise<{ rr: RouterResult; snapshot: PageSnapshot | null; snapshotKey: string | null }> {
+  const { url, options, userId } = job.data;
+  const snapshotKey = snapshotEligible(options, SNAPSHOT_TTL_SEC) ? snapshotCacheKey(userId, url, options) : null;
+  const snapshot = snapshotKey ? await readSnapshot(snapshotKv, snapshotKey) : null;
+  if (snapshot) {
+    return {
+      rr: { html: snapshot.html, statusCode: snapshot.statusCode, tierUsed: snapshot.tierUsed, proxyTier: snapshot.proxyTier, proxyCost: 0, latencyMs: 0 },
+      snapshot,
+      snapshotKey,
+    };
+  }
+  const releaseSlot = await domainLimiter.acquire(url, deadlineMs, signal);
+  try {
+    const rr = await beforeDeadline(signal, jobScopes.run(scope, () => router.route(url, options, tracer)));
+    return { rr, snapshot: null, snapshotKey };
+  } finally {
+    void releaseSlot();
+  }
+}
+
+async function runScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
   const { jobId, url, options, userId, apiKeyId } = job.data;
   const jobStart = Date.now();
   const tracer = new StageTracer();
@@ -299,9 +412,10 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
 
   try {
     // ── Stage 1: Scrape ────────────────────────────────
-    const rr = await tracer.time('fetch', () =>
-      beforeDeadline(deadline.signal, jobScopes.run(scope, () => router.route(url, options, tracer))),
+    const fetched = await tracer.time('fetch', () =>
+      fetchPage(job, scope, deadline.signal, jobStart + timeoutMs + JOB_DEADLINE_MARGIN_MS, tracer),
     );
+    const { rr, snapshot } = fetched;
     stage = 'content and structured extraction';
     await job.updateProgress(40);
     await sseEmitter.emitHeaders(jobId, rr.statusCode, {});
@@ -318,6 +432,14 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     const deadlineMs = jobStart + timeoutMs - Math.min(DEADLINE_SAFETY_MARGIN_MS, timeoutMs * 0.1);
     const includeEvidence = options.includeEvidence === true;
     const sourceBlocked = blockedFromQualitySignals(quality, rr.statusCode);
+    if (fetched.snapshotKey && !snapshot && snapshotWorthy(rr.statusCode, Boolean(sourceBlocked), rr.html)) {
+      void writeSnapshot(
+        snapshotKv,
+        fetched.snapshotKey,
+        { html: rr.html, statusCode: rr.statusCode, tierUsed: rr.tierUsed, proxyTier: rr.proxyTier, fetchedAt: Date.now() },
+        SNAPSHOT_TTL_SEC,
+      );
+    }
 
     const [extracted, outcome] = await beforeDeadline(deadline.signal, Promise.all([
       tracer.time('content', () =>
@@ -372,7 +494,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     }
 
     // ── Stage 3: cost ──────────────────────────────────
-    const computeCost = TIER_COMPUTE_COST[rr.tierUsed] ?? 0.0005;
+    // A page from the snapshot cache cost nothing to fetch this time.
+    const computeCost = snapshot ? 0 : (TIER_COMPUTE_COST[rr.tierUsed] ?? 0.0005);
     const totalCost = computeCost + rr.proxyCost + llmCost;
 
     const {
@@ -410,6 +533,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
         },
         ...(extraction ? { extraction } : {}),
         timings: { stages: trace.stages, attempts: trace.attempts, totalMs: trace.totalMs },
+        ...(snapshot ? { snapshotAgeMs: Math.max(0, Date.now() - snapshot.fetchedAt) } : {}),
       },
     };
 
@@ -442,7 +566,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     // ── Metrics ──────────────────────────────────────
     const domain = new URL(url).hostname;
     scrapeRequestsTotal.inc({ tier: String(rr.tierUsed), status: 'completed', domain });
-    scrapeDuration.observe({ tier: String(rr.tierUsed) }, rr.latencyMs / 1000);
+    if (!snapshot) scrapeDuration.observe({ tier: String(rr.tierUsed) }, rr.latencyMs / 1000);
     scrapeCost.observe({ tier: String(rr.tierUsed) }, totalCost);
     if (llmCost > 0) llmCostTotal.inc(llmCost);
     observeStages(trace);

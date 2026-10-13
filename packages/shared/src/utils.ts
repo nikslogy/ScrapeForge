@@ -66,6 +66,25 @@ export function resultCacheKey(userId: string, url: string, options: ScrapeOptio
 }
 
 /**
+ * Redis key (`snapshot:v1:<hash>`) of a fetched page, kept apart from the
+ * result cache: a request for the same page with another schema or other
+ * formats reuses the fetch. Only what shapes the fetch enters the key
+ * (tenant, URL, proxy, viewport, waits, resource blocking, a digest of the
+ * custom headers and cookies), so a snapshot is never shared across tenants
+ * or credentials.
+ */
+export function snapshotCacheKey(userId: string, url: string, options: ScrapeOptions): string {
+  return `snapshot:v1:${createCacheKey(url, {
+    tenant: userId,
+    proxy: options.proxy,
+    mobile: options.mobile,
+    waitFor: options.waitFor,
+    blockResources: options.blockResources,
+    credentials: credentialsDigest(options),
+  })}`;
+}
+
+/**
  * Whether a finished job's result may be cached. Plain scrapes are; an
  * extraction only when `complete`: a partial result can come from this
  * request's spend cap, deadline or a transient provider failure, and would

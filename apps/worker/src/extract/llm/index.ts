@@ -3,6 +3,7 @@
 
 import type { LlmProvider, ModelCapabilities } from '../types.js';
 import { defaultBreaker, type CircuitBreaker } from './breaker.js';
+import { Semaphore } from '../../throughput/limits.js';
 import { ModelClient } from './client.js';
 import { geminiFromEnv } from './providers/gemini.js';
 import { openAICompatibleFromEnv } from './providers/openai-compatible.js';
@@ -70,6 +71,9 @@ export interface DefaultModelClientOptions {
  * overrides the per-call timeout. Throws only for an invalid *_BASE_URL or a
  * malformed API key (the message names the provider, never the key).
  */
+/** Model calls in flight per worker process (EXTRACT_LLM_CONCURRENCY overrides; 0 = no cap). */
+export const DEFAULT_LLM_CONCURRENCY = 16;
+
 export function createDefaultModelClient(env: NodeJS.ProcessEnv = process.env, opts: DefaultModelClientOptions = {}): ModelClient {
   const { models, warnings } = resolveModels(env);
   const providers: Partial<Record<ModelCapabilities['provider'], LlmProvider>> = {};
@@ -84,5 +88,11 @@ export function createDefaultModelClient(env: NodeJS.ProcessEnv = process.env, o
   if (env.EXTRACT_LLM_TIMEOUT_MS !== undefined && perCallTimeoutMs === undefined) {
     warnings.push('EXTRACT_LLM_TIMEOUT_MS is not a positive number; using the default');
   }
-  return new ModelClient({ models, providers, breaker: opts.breaker ?? defaultBreaker, sleep: opts.sleep, perCallTimeoutMs, warnings });
+  // Process-wide cap on model calls in flight (partitioned listings run several per request).
+  const rawGate = env.EXTRACT_LLM_CONCURRENCY;
+  const gateLimit = rawGate === undefined || rawGate.trim() === '' ? DEFAULT_LLM_CONCURRENCY : Number(rawGate);
+  let gate: Semaphore | undefined;
+  if (Number.isInteger(gateLimit) && gateLimit > 0) gate = new Semaphore(gateLimit);
+  else if (gateLimit !== 0) warnings.push('EXTRACT_LLM_CONCURRENCY is not a non-negative integer; model calls are not capped');
+  return new ModelClient({ models, providers, breaker: opts.breaker ?? defaultBreaker, sleep: opts.sleep, perCallTimeoutMs, warnings, ...(gate ? { gate } : {}) });
 }

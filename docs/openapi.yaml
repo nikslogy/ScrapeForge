@@ -549,6 +549,22 @@ components:
               maximum: 1
             cached:
               type: boolean
+              description: >-
+                No new work was done for this request: the result came from the
+                result cache, or from an identical request that was in flight
+                (see coalescedWith).
+            coalescedWith:
+              type: string
+              description: >-
+                Job id of an identical request in flight at the same time; this
+                result is a copy of that job's (the page was fetched and
+                extracted once).
+            snapshotAgeMs:
+              type: integer
+              description: >-
+                The page came from the fetch snapshot cache (no new fetch). A
+                request for the same page with another schema or other formats
+                reuses a recent clean fetch. Set cacheTtl to 0 for a fresh page.
             costBreakdown:
               type: object
               properties:
