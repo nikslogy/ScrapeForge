@@ -293,8 +293,10 @@ Summarized here; exact rules under "Outcome semantics" above.
 
 ### Model selection
 
-`EXTRACT_MODELS` lists registry keys in priority order, e.g.
-`openrouter:google/gemini-2.5-flash,openrouter:openai/gpt-4.1-mini`.
+`EXTRACT_MODELS` lists registry keys in priority order. The benchmarked
+default is `openrouter:google/gemini-2.5-flash-lite,openrouter:anthropic/claude-haiku-5.5`
+(fastest and cheapest with 100% value precision/recall on the corpus; Haiku
+5.5 is the most accurate fallback, see `tests/eval/README.md`).
 The first is primary; the rest are bounded fallbacks. Fallback depends on the
 error category: `auth` circuit-breaks that provider; `rate_limit/overloaded`
 back off once then fall back; `output_truncated` retries with fewer blocks;

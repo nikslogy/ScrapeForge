@@ -48,7 +48,7 @@ export interface EvalArgs {
   outDir: string;
 }
 
-const DEFAULT_MODEL = 'openrouter:google/gemini-2.5-flash';
+const DEFAULT_MODEL = 'openrouter:google/gemini-2.5-flash-lite';
 const DEFAULT_OUT = fileURLToPath(new URL('./results', import.meta.url));
 
 function list(value: string): string[] {

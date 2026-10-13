@@ -1,0 +1,1655 @@
+{
+  "startedAt": "2026-10-13T06:27:36.110Z",
+  "args": {
+    "models": [
+      "openrouter:google/gemini-2.5-flash-lite",
+      "openrouter:openai/gpt-5-nano",
+      "openrouter:anthropic/claude-haiku-5.5",
+      "openrouter:google/gemini-3.8-flash"
+    ],
+    "repeat": 3,
+    "fixtures": [
+      "book-pdp-jsonld",
+      "book-pdp-plain",
+      "books-listing",
+      "electronics-pdp-sale",
+      "saas-pricing",
+      "news-article",
+      "specs-comparison-table",
+      "job-posting",
+      "prompt-injection",
+      "challenge-page",
+      "missing-fields",
+      "multilingual-de",
+      "next-data",
+      "value-at-end"
+    ],
+    "noStructured": false,
+    "concurrency": 4,
+    "maxCostUsd": 0.1,
+    "timeoutMs": 120000
+  },
+  "summary": {
+    "model": "openrouter:google/gemini-3.8-flash",
+    "runs": 42,
+    "microPrecision": 1,
+    "microRecall": 0.9876998769987699,
+    "macroPrecision": 1,
+    "macroRecall": 0.9821825396825397,
+    "statusAccuracy": 0.8571428571428571,
+    "latencyP50Ms": 1728,
+    "latencyP95Ms": 13221,
+    "totalCostUsd": 0.125467875,
+    "correctFields": 803,
+    "costPerCorrectFieldUsd": 0.00015624891033623912,
+    "calls": 36,
+    "inputTokens": 109176,
+    "outputTokens": 14304,
+    "failuresByCategory": {},
+    "statuses": {
+      "complete": 33,
+      "partial": 6,
+      "failed": 3
+    }
+  },
+  "records": [
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1360,
+      "calls": 1,
+      "inputTokens": 2001,
+      "outputTokens": 48,
+      "costUsd": 0.00168075,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1355,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1699,
+      "calls": 1,
+      "inputTokens": 2001,
+      "outputTokens": 49,
+      "costUsd": 0.0016845,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1695,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1846,
+      "calls": 1,
+      "inputTokens": 2001,
+      "outputTokens": 48,
+      "costUsd": 0.00168075,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1839,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 2298,
+      "calls": 1,
+      "inputTokens": 1956,
+      "outputTokens": 120,
+      "costUsd": 0.001917,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2295,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 2024,
+      "calls": 1,
+      "inputTokens": 1956,
+      "outputTokens": 119,
+      "costUsd": 0.00191325,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2020,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 1965,
+      "calls": 1,
+      "inputTokens": 1956,
+      "outputTokens": 119,
+      "costUsd": 0.00191325,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1962,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.98,
+      "correct": 98,
+      "returned": 98,
+      "expected": 100,
+      "latencyMs": 13221,
+      "calls": 1,
+      "inputTokens": 6845,
+      "outputTokens": 2354,
+      "costUsd": 0.010609875,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13212,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/books/6/inStock",
+          "reason": "not_found"
+        },
+        {
+          "path": "/books/12/inStock",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.98,
+      "correct": 98,
+      "returned": 98,
+      "expected": 100,
+      "latencyMs": 15751,
+      "calls": 1,
+      "inputTokens": 6845,
+      "outputTokens": 2354,
+      "costUsd": 0.010609875,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 15743,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/books/6/inStock",
+          "reason": "not_found"
+        },
+        {
+          "path": "/books/12/inStock",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 100,
+      "returned": 100,
+      "expected": 100,
+      "latencyMs": 13375,
+      "calls": 1,
+      "inputTokens": 6845,
+      "outputTokens": 2367,
+      "costUsd": 0.010658625,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13367,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 1,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 0.8888888888888888,
+      "correct": 8,
+      "returned": 8,
+      "expected": 9,
+      "latencyMs": 1857,
+      "calls": 1,
+      "inputTokens": 3189,
+      "outputTokens": 70,
+      "costUsd": 0.00265425,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1851,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "multiple_offers",
+        "llm_response:invalid block id replaced by null",
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/storage",
+          "reason": "rejected_ungrounded"
+        }
+      ]
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 0.8888888888888888,
+      "correct": 8,
+      "returned": 8,
+      "expected": 9,
+      "latencyMs": 2259,
+      "calls": 1,
+      "inputTokens": 3189,
+      "outputTokens": 70,
+      "costUsd": 0.00265425,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2254,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "multiple_offers",
+        "llm_response:invalid block id replaced by null",
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/storage",
+          "reason": "rejected_ungrounded"
+        }
+      ]
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 3,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 0.8888888888888888,
+      "correct": 8,
+      "returned": 8,
+      "expected": 9,
+      "latencyMs": 1939,
+      "calls": 1,
+      "inputTokens": 3189,
+      "outputTokens": 69,
+      "costUsd": 0.0026505,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1935,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "multiple_offers",
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/storage",
+          "reason": "rejected_ungrounded"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2430,
+      "calls": 1,
+      "inputTokens": 2030,
+      "outputTokens": 238,
+      "costUsd": 0.002415,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2425,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2779,
+      "calls": 1,
+      "inputTokens": 2030,
+      "outputTokens": 238,
+      "costUsd": 0.002415,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2776,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2579,
+      "calls": 1,
+      "inputTokens": 2030,
+      "outputTokens": 238,
+      "costUsd": 0.002415,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2574,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 4,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 8,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 3,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 10006,
+      "calls": 1,
+      "inputTokens": 2454,
+      "outputTokens": 1763,
+      "costUsd": 0.00845175,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 10000,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 10461,
+      "calls": 1,
+      "inputTokens": 2454,
+      "outputTokens": 1763,
+      "costUsd": 0.00845175,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 10455,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 10936,
+      "calls": 1,
+      "inputTokens": 2454,
+      "outputTokens": 1763,
+      "costUsd": 0.00845175,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 10928,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 1,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 0.875,
+      "correct": 7,
+      "returned": 7,
+      "expected": 8,
+      "latencyMs": 1728,
+      "calls": 1,
+      "inputTokens": 1679,
+      "outputTokens": 14,
+      "costUsd": 0.00131175,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1725,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/remote",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 0.875,
+      "correct": 7,
+      "returned": 7,
+      "expected": 8,
+      "latencyMs": 1491,
+      "calls": 1,
+      "inputTokens": 1679,
+      "outputTokens": 13,
+      "costUsd": 0.001308,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1488,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/remote",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 3,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 0.875,
+      "correct": 7,
+      "returned": 7,
+      "expected": 8,
+      "latencyMs": 1398,
+      "calls": 1,
+      "inputTokens": 1679,
+      "outputTokens": 13,
+      "costUsd": 0.001308,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1395,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/remote",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1875,
+      "calls": 1,
+      "inputTokens": 2127,
+      "outputTokens": 54,
+      "costUsd": 0.00179775,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1872,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1994,
+      "calls": 1,
+      "inputTokens": 2127,
+      "outputTokens": 54,
+      "costUsd": 0.00179775,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1990,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 2044,
+      "calls": 1,
+      "inputTokens": 2127,
+      "outputTokens": 53,
+      "costUsd": 0.001794,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2041,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 1,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 2,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 2,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 3,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 2394,
+      "calls": 1,
+      "inputTokens": 2027,
+      "outputTokens": 24,
+      "costUsd": 0.00161025,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2389,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 1429,
+      "calls": 1,
+      "inputTokens": 2027,
+      "outputTokens": 24,
+      "costUsd": 0.00161025,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1425,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 1676,
+      "calls": 1,
+      "inputTokens": 2027,
+      "outputTokens": 23,
+      "costUsd": 0.0016065,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1672,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1406,
+      "calls": 1,
+      "inputTokens": 1912,
+      "outputTokens": 18,
+      "costUsd": 0.0015015,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1397,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1415,
+      "calls": 1,
+      "inputTokens": 1912,
+      "outputTokens": 18,
+      "costUsd": 0.0015015,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1410,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1306,
+      "calls": 1,
+      "inputTokens": 1912,
+      "outputTokens": 17,
+      "costUsd": 0.00149775,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1302,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1066,
+      "calls": 1,
+      "inputTokens": 723,
+      "outputTokens": 23,
+      "costUsd": 0.0006285,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1063,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1258,
+      "calls": 1,
+      "inputTokens": 723,
+      "outputTokens": 23,
+      "costUsd": 0.0006285,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1255,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1688,
+      "calls": 1,
+      "inputTokens": 723,
+      "outputTokens": 23,
+      "costUsd": 0.0006285,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1685,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1892,
+      "calls": 1,
+      "inputTokens": 9449,
+      "outputTokens": 40,
+      "costUsd": 0.00723675,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1881,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1559,
+      "calls": 1,
+      "inputTokens": 9449,
+      "outputTokens": 40,
+      "costUsd": 0.00723675,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1553,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1632,
+      "calls": 1,
+      "inputTokens": 9449,
+      "outputTokens": 40,
+      "costUsd": 0.00723675,
+      "truncated": false,
+      "resolvedModels": [
+        "google/gemini-3.8-flash"
+      ],
+      "resolvedProviders": [
+        "Google AI Studio"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1625,
+          "resolvedModel": "google/gemini-3.8-flash",
+          "resolvedProvider": "Google AI Studio"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    }
+  ]
+}

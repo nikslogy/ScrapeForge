@@ -1,0 +1,1616 @@
+{
+  "startedAt": "2026-10-13T06:27:36.110Z",
+  "args": {
+    "models": [
+      "openrouter:google/gemini-2.5-flash-lite",
+      "openrouter:openai/gpt-5-nano",
+      "openrouter:anthropic/claude-haiku-5.5",
+      "openrouter:google/gemini-3.8-flash"
+    ],
+    "repeat": 3,
+    "fixtures": [
+      "book-pdp-jsonld",
+      "book-pdp-plain",
+      "books-listing",
+      "electronics-pdp-sale",
+      "saas-pricing",
+      "news-article",
+      "specs-comparison-table",
+      "job-posting",
+      "prompt-injection",
+      "challenge-page",
+      "missing-fields",
+      "multilingual-de",
+      "next-data",
+      "value-at-end"
+    ],
+    "noStructured": false,
+    "concurrency": 4,
+    "maxCostUsd": 0.1,
+    "timeoutMs": 120000
+  },
+  "summary": {
+    "model": "openrouter:anthropic/claude-haiku-5.5",
+    "runs": 42,
+    "microPrecision": 1,
+    "microRecall": 0.997539975399754,
+    "macroPrecision": 1,
+    "macroRecall": 0.9940476190476191,
+    "statusAccuracy": 0.9523809523809523,
+    "latencyP50Ms": 2039,
+    "latencyP95Ms": 13490,
+    "totalCostUsd": 0.0293856,
+    "correctFields": 811,
+    "costPerCorrectFieldUsd": 0.00003623378545006166,
+    "calls": 36,
+    "inputTokens": 164226,
+    "outputTokens": 25926,
+    "failuresByCategory": {},
+    "statuses": {
+      "complete": 37,
+      "partial": 2,
+      "failed": 3
+    }
+  },
+  "records": [
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 2055,
+      "calls": 1,
+      "inputTokens": 2875,
+      "outputTokens": 65,
+      "costUsd": 0.00032,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2050,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1705,
+      "calls": 1,
+      "inputTokens": 2875,
+      "outputTokens": 65,
+      "costUsd": 0.00032,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1702,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1809,
+      "calls": 1,
+      "inputTokens": 2875,
+      "outputTokens": 65,
+      "costUsd": 0.00032,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1806,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 2133,
+      "calls": 1,
+      "inputTokens": 3431,
+      "outputTokens": 159,
+      "costUsd": 0.0004226,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2129,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 1314,
+      "calls": 1,
+      "inputTokens": 3431,
+      "outputTokens": 159,
+      "costUsd": 0.0004226,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1311,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 7,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 1197,
+      "calls": 1,
+      "inputTokens": 3431,
+      "outputTokens": 159,
+      "costUsd": 0.0004226,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1194,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 100,
+      "returned": 100,
+      "expected": 100,
+      "latencyMs": 13732,
+      "calls": 1,
+      "inputTokens": 8472,
+      "outputTokens": 4218,
+      "costUsd": 0.0029562,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13722,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 100,
+      "returned": 100,
+      "expected": 100,
+      "latencyMs": 15009,
+      "calls": 1,
+      "inputTokens": 8472,
+      "outputTokens": 4540,
+      "costUsd": 0.0031172,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 15000,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 100,
+      "returned": 100,
+      "expected": 100,
+      "latencyMs": 13490,
+      "calls": 1,
+      "inputTokens": 8472,
+      "outputTokens": 4127,
+      "costUsd": 0.0029107,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13481,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 9,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 3964,
+      "calls": 1,
+      "inputTokens": 4657,
+      "outputTokens": 95,
+      "costUsd": 0.0005132,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3957,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 9,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 3484,
+      "calls": 1,
+      "inputTokens": 4657,
+      "outputTokens": 531,
+      "costUsd": 0.0007312,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3480,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 9,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 1164,
+      "calls": 1,
+      "inputTokens": 4657,
+      "outputTokens": 95,
+      "costUsd": 0.0005132,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1159,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 4517,
+      "calls": 1,
+      "inputTokens": 3382,
+      "outputTokens": 379,
+      "costUsd": 0.0005277,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 4513,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2619,
+      "calls": 1,
+      "inputTokens": 3382,
+      "outputTokens": 379,
+      "costUsd": 0.0005277,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2614,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2410,
+      "calls": 1,
+      "inputTokens": 3382,
+      "outputTokens": 379,
+      "costUsd": 0.0005277,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2406,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 4,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 3,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 3,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 13303,
+      "calls": 1,
+      "inputTokens": 4077,
+      "outputTokens": 2932,
+      "costUsd": 0.0018737,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13296,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 13456,
+      "calls": 1,
+      "inputTokens": 4077,
+      "outputTokens": 3305,
+      "costUsd": 0.0020602,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 13450,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 11961,
+      "calls": 1,
+      "inputTokens": 4077,
+      "outputTokens": 3162,
+      "costUsd": 0.0019887,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 11955,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 1,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 0.875,
+      "correct": 7,
+      "returned": 7,
+      "expected": 8,
+      "latencyMs": 2965,
+      "calls": 1,
+      "inputTokens": 2548,
+      "outputTokens": 29,
+      "costUsd": 0.0002693,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2960,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/remote",
+          "reason": "rejected_ungrounded"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 0.875,
+      "correct": 7,
+      "returned": 7,
+      "expected": 8,
+      "latencyMs": 2039,
+      "calls": 1,
+      "inputTokens": 2548,
+      "outputTokens": 29,
+      "costUsd": 0.0002693,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2035,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/remote",
+          "reason": "rejected_ungrounded"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 8,
+      "returned": 8,
+      "expected": 8,
+      "latencyMs": 1228,
+      "calls": 1,
+      "inputTokens": 2548,
+      "outputTokens": 41,
+      "costUsd": 0.0002753,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1224,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 3453,
+      "calls": 1,
+      "inputTokens": 3223,
+      "outputTokens": 75,
+      "costUsd": 0.0003598,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3450,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1420,
+      "calls": 1,
+      "inputTokens": 3223,
+      "outputTokens": 75,
+      "costUsd": 0.0003598,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1417,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1232,
+      "calls": 1,
+      "inputTokens": 3223,
+      "outputTokens": 75,
+      "costUsd": 0.0003598,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1229,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 1,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 2,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 3,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 3124,
+      "calls": 1,
+      "inputTokens": 3073,
+      "outputTokens": 126,
+      "costUsd": 0.0003703,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3119,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 2485,
+      "calls": 1,
+      "inputTokens": 3073,
+      "outputTokens": 134,
+      "costUsd": 0.0003743,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2481,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 2184,
+      "calls": 1,
+      "inputTokens": 3073,
+      "outputTokens": 138,
+      "costUsd": 0.0003763,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2179,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_found"
+        }
+      ]
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 3222,
+      "calls": 1,
+      "inputTokens": 3023,
+      "outputTokens": 35,
+      "costUsd": 0.0003198,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3218,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1694,
+      "calls": 1,
+      "inputTokens": 3023,
+      "outputTokens": 35,
+      "costUsd": 0.0003198,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1691,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1492,
+      "calls": 1,
+      "inputTokens": 3023,
+      "outputTokens": 35,
+      "costUsd": 0.0003198,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1488,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 3016,
+      "calls": 1,
+      "inputTokens": 1447,
+      "outputTokens": 40,
+      "costUsd": 0.0001647,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3013,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1717,
+      "calls": 1,
+      "inputTokens": 1447,
+      "outputTokens": 40,
+      "costUsd": 0.0001647,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1714,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1783,
+      "calls": 1,
+      "inputTokens": 1447,
+      "outputTokens": 40,
+      "costUsd": 0.0001647,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1779,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "structured_value_not_visible:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 3325,
+      "calls": 1,
+      "inputTokens": 14534,
+      "outputTokens": 55,
+      "costUsd": 0.0014809,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 3313,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1972,
+      "calls": 1,
+      "inputTokens": 14534,
+      "outputTokens": 55,
+      "costUsd": 0.0014809,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1962,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1837,
+      "calls": 1,
+      "inputTokens": 14534,
+      "outputTokens": 55,
+      "costUsd": 0.0014809,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1827,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    }
+  ]
+}
