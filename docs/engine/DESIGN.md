@@ -274,9 +274,10 @@ ordinary extraction call.
   (`input_too_large`) is halved and retried, at most 3 times.
 * There are at most 64 chunks. The rest are skipped.
 
-Answers are merged in page order, and each listing card is kept once. A
-record's identity is its home record (see Grounding), or else its
-normalized values. Duplicates are counted in the warning
+Answers are merged in page order. An answer is dropped as a repeat only
+when it has the same home record (see Grounding) and the same accepted
+values as one already kept. A card cited by mistake for another card never
+costs that card its record. Repeats are counted in the warning
 `partition_duplicates_dropped:N`.
 
 Every chunk is recorded in a ledger. `scope.partitions` gives

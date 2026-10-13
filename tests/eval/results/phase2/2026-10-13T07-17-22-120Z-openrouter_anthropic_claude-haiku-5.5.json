@@ -1,0 +1,432 @@
+{
+  "startedAt": "2026-10-13T07:17:22.120Z",
+  "args": {
+    "models": [
+      "openrouter:google/gemini-2.5-flash-lite",
+      "openrouter:anthropic/claude-haiku-5.5"
+    ],
+    "repeat": 1,
+    "fixtures": [
+      "large-listing"
+    ],
+    "noStructured": false,
+    "concurrency": 1,
+    "maxCostUsd": 0.15,
+    "timeoutMs": 240000
+  },
+  "summary": {
+    "model": "openrouter:anthropic/claude-haiku-5.5",
+    "runs": 1,
+    "microPrecision": 1,
+    "microRecall": 1,
+    "macroPrecision": 1,
+    "macroRecall": 1,
+    "statusAccuracy": 1,
+    "latencyP50Ms": 87392,
+    "latencyP95Ms": 87392,
+    "totalCostUsd": 0.0651273,
+    "correctFields": 2322,
+    "costPerCorrectFieldUsd": 0.000028047932816537468,
+    "calls": 7,
+    "inputTokens": 169558,
+    "outputTokens": 96343,
+    "failuresByCategory": {},
+    "statuses": {
+      "complete": 1
+    }
+  },
+  "records": [
+    {
+      "fixture": "large-listing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2322,
+      "returned": 2322,
+      "expected": 2322,
+      "latencyMs": 87392,
+      "calls": 7,
+      "inputTokens": 169558,
+      "outputTokens": 96343,
+      "costUsd": 0.0651273,
+      "truncated": false,
+      "resolvedModels": [
+        "anthropic/claude-haiku-5.5"
+      ],
+      "resolvedProviders": [
+        "Azure"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 44654,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 45174,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 46416,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 46759,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 12901,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 42255,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        },
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 41988,
+          "resolvedModel": "anthropic/claude-haiku-5.5",
+          "resolvedProvider": "Azure"
+        }
+      ],
+      "warnings": [
+        "partitioned:7_chunks_of_96"
+      ],
+      "missing": [
+        {
+          "path": "/products/17/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/21/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/30/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/36/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/38/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/40/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/44/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/48/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/53/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/55/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/56/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/59/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/62/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/65/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/75/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/82/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/89/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/97/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/104/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/111/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/112/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/117/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/118/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/119/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/132/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/135/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/159/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/175/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/176/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/180/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/181/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/183/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/193/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/195/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/199/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/206/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/212/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/223/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/229/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/235/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/258/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/273/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/279/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/281/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/285/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/339/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/341/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/349/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/365/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/372/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/374/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/375/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/376/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/402/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/407/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/419/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/424/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/437/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/442/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/446/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/449/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/455/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/458/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/484/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/485/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/492/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/497/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/506/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/507/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/511/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/542/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/553/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/558/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/566/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/572/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/575/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/576/rating",
+          "reason": "not_found"
+        },
+        {
+          "path": "/products/581/rating",
+          "reason": "not_found"
+        }
+      ]
+    }
+  ]
+}

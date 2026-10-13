@@ -124,6 +124,10 @@ const MIN_PARTITION_RECORDS = 2;
 const MAX_CHUNKS = 64;
 /** A chunk whose answer is cut off is halved at most this many times. */
 const MAX_CHUNK_SPLITS = 3;
+/** Output tokens one chunk's answer is planned to stay under (time to generate, not just the model limit). */
+const CHUNK_OUTPUT_TOKENS = 8_192;
+/** A chunk failing like this is too big: halve it and retry. */
+const SPLIT_CATEGORIES: ReadonlySet<LlmErrorCategory> = new Set(['output_truncated', 'input_too_large', 'timeout']);
 /** Chunk calls in flight at once (EXTRACT_PARTITION_CONCURRENCY overrides). */
 const DEFAULT_PARTITION_CONCURRENCY = 4;
 /** Unprocessed record ranges named in the list-level missing detail. */
@@ -1069,7 +1073,10 @@ class ExtractionRun {
     const group = largestRecordGroup(this.doc);
     if (!group || group.recordIds.length < MIN_PARTITION_RECORDS) return null;
     const total = group.recordIds.length;
-    const outputCap = this.outputRecordCap(fields, outputTokens)?.count ?? total;
+    // Chunks are sized for latency too: an answer of tens of thousands of
+    // tokens takes over a minute to generate (and times out), while a few
+    // chunks of ~8k run side by side.
+    const outputCap = this.outputRecordCap(fields, Math.min(outputTokens, CHUNK_OUTPUT_TOKENS))?.count ?? total;
     const whole = this.render(maxChars, inputTokens);
     if (outputCap >= total && !whole.truncated) return null;
     // Input: the rendered size of a sample of records.
@@ -1084,7 +1091,8 @@ class ExtractionRun {
 
   private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
     const ids = plan.group.recordIds;
-    const outputTokens = this.plannedOutputTokens(call.primary, plan.perChunk, call.fields.length);
+    // The ceiling a chunk may use: its planned answer with headroom, never above twice the latency target.
+    const outputTokens = Math.min(this.plannedOutputTokens(call.primary, plan.perChunk, call.fields.length), CHUNK_OUTPUT_TOKENS * OUTPUT_HEADROOM);
     const queue: Chunk[] = [];
     for (let from = 0; from < ids.length; from += plan.perChunk) queue.push({ from, to: Math.min(ids.length, from + plan.perChunk), depth: 0 });
     const ledger: ChunkEntry[] = [];
@@ -1112,7 +1120,7 @@ class ExtractionRun {
           continue;
         }
         const category = result.failure.category;
-        if ((category === 'output_truncated' || category === 'input_too_large') && chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS) {
+        if (SPLIT_CATEGORIES.has(category) && chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS) {
           // Halve and retry both halves first.
           const mid = chunk.from + Math.ceil((chunk.to - chunk.from) / 2);
           queue.unshift({ from: chunk.from, to: mid, depth: chunk.depth + 1 }, { from: mid, to: chunk.to, depth: chunk.depth + 1 });
@@ -1124,7 +1132,7 @@ class ExtractionRun {
     };
     await Promise.all(Array.from({ length: concurrency }, worker));
 
-    // Merge in page order; one record per listing card (a card answered twice keeps its first answer).
+    // Merge in page order; an answer repeated for the same card is kept once.
     answered.sort((a, b) => a.from - b.from);
     ledger.sort((a, b) => a.from - b.from);
     const records: Array<Map<string, LlmSlot>> = [];
@@ -1181,12 +1189,16 @@ class ExtractionRun {
     return Number.isInteger(fromEnv) && fromEnv > 0 ? Math.min(fromEnv, 16) : DEFAULT_PARTITION_CONCURRENCY;
   }
 
-  /** The listing card a parsed record describes, else its normalized values; undefined when it has none. */
+  /**
+   * Key under which a parsed record counts as a repeat: the listing card it
+   * cites plus its accepted values. Only an answer for the same card with
+   * the same values is dropped; a card cited by mistake for another one
+   * keeps its record. Undefined (never a repeat) without a cited card.
+   */
   private recordIdentity(record: ParsedRecord, slots: Map<string, LlmSlot>, fields: FieldSpec[]): string | undefined {
     const home = this.homeRecord(record, fields);
-    if (home) return `record:${home.block.id}`;
-    const values = fields.map((f) => slots.get(f.name)?.value ?? null);
-    return values.some((v) => v !== null) ? `values:${JSON.stringify(values)}` : undefined;
+    if (!home) return undefined;
+    return `${home.block.id}|${JSON.stringify(fields.map((f) => slots.get(f.name)?.value ?? null))}`;
   }
 
   /**

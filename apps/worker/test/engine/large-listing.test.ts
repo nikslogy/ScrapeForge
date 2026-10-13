@@ -125,3 +125,41 @@ describe('with partitioning off (Phase 1 behaviour)', () => {
     expect(provider.calls).toHaveLength(1);
   });
 });
+
+describe('chunks are sized for latency', () => {
+  it('a model with a huge output limit still gets chunks of about 8k output tokens, answered side by side', async () => {
+    const { client, provider } = fakeClient(honoursOutputLimit(listingModel), { maxOutputTokens: 65_536, contextTokens: 1_000_000 });
+    const out = await extractStructured(request(listing(items(800)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.status).toBe('complete');
+    expect(len(out.data, 'items')).toBe(800);
+    expect(provider.calls.length).toBeGreaterThanOrEqual(4);
+    for (const call of provider.calls) expect(call.req.maxOutputTokens).toBeLessThanOrEqual(2 * 8_192);
+  });
+
+  it('a chunk that times out is halved and retried', async () => {
+    const { client } = fakeClient((caps, req, i) => {
+      const cards = (req.user.match(/<record /g) ?? []).length;
+      if (cards > 40) throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      return listingModel(caps, req, i);
+    }, { maxOutputTokens: 65_536, contextTokens: 1_000_000 });
+    const out = await extractStructured(request(listing(items(300)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.warnings).toContain('partition_chunk_split:timeout');
+    expect(len(out.data, 'items')).toBe(300);
+    expect(out.status).toBe('complete');
+  });
+});
+
+describe('merging chunk answers', () => {
+  it('drops an answer repeated for the same card, keeps everything else', async () => {
+    const repeating: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Exclude<ReturnType<FakeHandler>, Promise<unknown>>;
+      const body = JSON.parse(r.text) as { records: unknown[] };
+      body.records.push(body.records[0]);
+      return { ...r, text: JSON.stringify(body) };
+    };
+    const { client, provider } = fakeClient(honoursOutputLimit(repeating), { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(items(300)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(len(out.data, 'items')).toBe(300);
+    expect(out.warnings).toContain(`partition_duplicates_dropped:${provider.calls.length}`);
+  });
+});

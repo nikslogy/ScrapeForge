@@ -152,3 +152,28 @@ What still misses:
   * "No customer reviews" for a rating. It stays `unparseable`, because
     "no reviews" may mean 0.
   * An occasional wrong `availability`.
+
+### Phase 2: the 600-card `large-listing`
+
+This was one live run per model, with partitioned extraction, a spend cap
+of $0.15 and a 240 s deadline. The raw files are in `results/phase2/`.
+
+| model | status | precision | recall | calls | latency | cost |
+|---|---|---|---|---|---|---|
+| `google/gemini-2.5-flash-lite` | partial | 100% | 99.8% | 7 | 31 s | $0.034 |
+| `anthropic/claude-haiku-5.5` | complete | 100% | 100% | 7 | 87 s | $0.065 |
+
+* Chunks hold 96 cards each, so 7 calls cover the 600 cards. Four of them
+  run at a time.
+* Flash-Lite is `partial` for an honest reason: it gave wrong prices and
+  ratings for 2 cards, and grounding rejected them.
+* Flash-Lite also repeated 51 cards in its answers. The merge drops a
+  repeat only when it names the same card and has the same values.
+
+**A finding from the first Phase 2 run.** Chunks were at first sized only
+to the model's output limit, which is 65k tokens for Flash-Lite. That gave
+2 chunks of 386 cards. Writing 386 cards takes longer than the 60 s
+per-call timeout, so the first chunk timed out twice: recall 36%, 120 s.
+
+Chunks are now planned at about 8k output tokens, and a chunk that times
+out is halved and retried.
