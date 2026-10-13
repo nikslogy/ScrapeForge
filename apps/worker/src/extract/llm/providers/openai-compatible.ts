@@ -10,7 +10,7 @@ import type { LlmProvider, LlmRequest, LlmResponse, ModelCapabilities } from '..
 import { LlmCallError, type LlmErrorDetails } from '../errors.js';
 import { isStrictCompatible } from '../json-schema.js';
 import { estimateCostUsd } from '../registry.js';
-import { effectiveMaxOutput, estimateTokens } from '../tokens.js';
+import { estimateTokens, requestedOutputTokens } from '../tokens.js';
 import {
   embeddedError,
   httpError,
@@ -87,7 +87,17 @@ export class OpenAICompatibleProvider implements LlmProvider {
       headers['X-Title'] = this.#appTitle;
     }
     const started = performance.now();
-    const result = await postJson(this.#endpoint, headers, buildChatBody(this.name, caps, req), ctx);
+    const body = buildChatBody(this.name, caps, req);
+    let result = await postJson(this.#endpoint, headers, body, ctx);
+    // OpenRouter answers "No endpoints found that can handle the requested
+    // parameters" when no upstream accepts one of them (require_parameters).
+    // For newer models that is usually temperature: retry once without it
+    // and, if that works, stop sending it to this model.
+    if (this.name === 'openrouter' && 'temperature' in body && isParameterRoutingFailure(result)) {
+      const retry = await postJson(this.#endpoint, headers, buildChatBody(this.name, caps, req, { omitTemperature: true }), ctx);
+      if (retry.status >= 200 && retry.status < 300) rememberNoTemperature(caps.model);
+      result = retry;
+    }
     if (result.status < 200 || result.status >= 300) throw httpError(result, ctx, LABEL[this.name]);
     const json = parseJsonBody(result, ctx, LABEL[this.name]);
     return readChatCompletion(json, result, ctx, LABEL[this.name], caps, req, Math.round(performance.now() - started));
@@ -116,8 +126,31 @@ export function openAICompatibleFromEnv(
 // OpenAI o-series and GPT-5 models, directly or as "openai/…" on a router.
 const REASONING_MODEL = /^(?:openai\/)?(?:o\d|gpt-5)/i;
 
+// Models OpenRouter could only route without temperature (learned per process, bounded).
+const noTemperature = new Set<string>();
+const MAX_NO_TEMPERATURE = 256;
+
+function rememberNoTemperature(model: string): void {
+  if (noTemperature.size >= MAX_NO_TEMPERATURE) noTemperature.clear();
+  noTemperature.add(model);
+}
+
+function isParameterRoutingFailure(result: { status: number; text: string }): boolean {
+  return (result.status === 404 || result.status === 400)
+    && /no endpoints found that can handle the requested parameters/i.test(result.text);
+}
+
+function sendsTemperature(caps: ModelCapabilities): boolean {
+  return caps.acceptsTemperature !== false && !REASONING_MODEL.test(caps.model) && !noTemperature.has(caps.model);
+}
+
 /** Request body for /chat/completions. Exported for tests. */
-export function buildChatBody(name: OpenAICompatibleName, caps: ModelCapabilities, req: LlmRequest): Record<string, unknown> {
+export function buildChatBody(
+  name: OpenAICompatibleName,
+  caps: ModelCapabilities,
+  req: LlmRequest,
+  opts: { omitTemperature?: boolean } = {},
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: caps.model,
     messages: [
@@ -125,9 +158,15 @@ export function buildChatBody(name: OpenAICompatibleName, caps: ModelCapabilitie
       { role: 'user', content: req.user },
     ],
   };
-  // OpenAI reasoning models reject any temperature but the default (HTTP 400).
-  if (!REASONING_MODEL.test(caps.model)) body.temperature = req.temperature ?? 0;
-  body[name === 'openai' ? 'max_completion_tokens' : 'max_tokens'] = effectiveMaxOutput(caps, req.maxOutputTokens);
+  // OpenAI reasoning models (and some newer models) reject any temperature
+  // but the default (HTTP 400, or no OpenRouter endpoint).
+  if (!opts.omitTemperature && sendsTemperature(caps)) body.temperature = req.temperature ?? 0;
+  // Hidden reasoning counts against max_tokens: reserve room for it.
+  body[name === 'openai' ? 'max_completion_tokens' : 'max_tokens'] = requestedOutputTokens(caps, req.maxOutputTokens);
+  if (caps.reasoningEffort) {
+    if (name === 'openrouter') body.reasoning = { effort: caps.reasoningEffort, exclude: true };
+    else if (name === 'openai') body.reasoning_effort = caps.reasoningEffort;
+  }
 
   const format = responseFormat(caps, req);
   if (format) body.response_format = format;

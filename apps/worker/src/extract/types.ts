@@ -282,6 +282,23 @@ export interface ModelCapabilities {
   /** USD per million tokens; used only when the provider does not report cost. */
   inputCostPerMTok?: number;
   outputCostPerMTok?: number;
+  /**
+   * The model accepts a `temperature` parameter (default true). Some models
+   * reject it, and OpenRouter with require_parameters then finds no endpoint.
+   */
+  acceptsTemperature?: boolean;
+  /**
+   * Reasoning effort to request from models that think before answering
+   * (OpenRouter `reasoning.effort`, OpenAI `reasoning_effort`). Extraction
+   * copies values from the page, so 'minimal' is usually right: it cuts
+   * hidden reasoning tokens that would otherwise use up the output limit.
+   */
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
+  /**
+   * Output tokens added on top of the answer budget for hidden reasoning,
+   * which counts against the provider's max_tokens.
+   */
+  reasoningReserveTokens?: number;
 }
 
 export interface LlmRequest {

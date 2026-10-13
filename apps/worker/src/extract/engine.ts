@@ -93,6 +93,18 @@ export interface ExtractDeps {
 const OUTPUT_TOKENS_PER_CELL = 40;
 /** Never ask for fewer output tokens than this (long string values, prose around JSON). */
 const MIN_OUTPUT_TOKENS = 1_024;
+/**
+ * max_tokens is this many times the planned answer size. Only actual output
+ * is billed, and models differ in JSON spacing: Claude Haiku 5.5 needed ~65
+ * tokens per cell on a 20-card listing where 40 were planned, so an exact
+ * reservation truncated a complete answer. The plan itself (record caps,
+ * input sizing) still uses OUTPUT_TOKENS_PER_CELL.
+ */
+const OUTPUT_HEADROOM = 2;
+/** matchByMeaning bounds: candidate length, attribute sets, class tokens per value. */
+const MEANING_MAX_CHARS = 200;
+const MEANING_MAX_ATTR_SETS = 24;
+const MEANING_MAX_TOKENS = 12;
 /** Output-bound listings: answer JSON is assumed this much larger than its bare content (spacing, escapes). */
 const OUTPUT_FORMAT_FACTOR = 1.2;
 /** Records whose text is sampled to estimate a listing record's answer size. */
@@ -799,7 +811,8 @@ class ExtractionRun {
     const reduced: NormalizedSchema = { ...this.schema, fields, shape: shapeHint };
     const primary = client.models[0];
     const expected = shape === 'object' ? 1 : expectedRecordCount(this.doc);
-    const outputTokens = Math.max(1, Math.min(primary.maxOutputTokens, Math.max(MIN_OUTPUT_TOKENS, expected * fields.length * OUTPUT_TOKENS_PER_CELL)));
+    const plannedOutput = Math.max(MIN_OUTPUT_TOKENS, expected * fields.length * OUTPUT_TOKENS_PER_CELL);
+    const outputTokens = Math.max(1, Math.min(primary.maxOutputTokens, Math.ceil(plannedOutput * OUTPUT_HEADROOM)));
     const frame = buildExtractionPrompt({ schema: reduced, renderedBlocks: '', url: this.req.url, title: this.doc.title, shapeHint });
     const schemaText = frame.user + (primary.jsonMode === 'json_schema' ? JSON.stringify(frame.responseSchema) : '');
     const inputTokens = planInputBudget(primary, { systemText: frame.system, schemaText, reservedOutputTokens: outputTokens });
@@ -1008,7 +1021,8 @@ class ExtractionRun {
         { blockText: ctx?.block.text, attrs: ctx?.block.attrs, recordText: ctx?.record?.text, recordAttrs: ctx?.recordAttrs, documentText: this.prepared },
         { derived: false },
       );
-      if (!g.grounded || g.where === 'none') {
+      const meaning = !g.grounded || g.where === 'none' ? (ctx ? this.matchByMeaning(field, cell.v, ctx) : null) : null;
+      if ((!g.grounded || g.where === 'none') && !meaning) {
         this.rejectedCount++;
         return {
           value: null,
@@ -1019,7 +1033,10 @@ class ExtractionRun {
         };
       }
       grounded = true;
-      if (g.where === 'document') {
+      if (meaning) {
+        note = meaning;
+        this.warnings.add('grounded_by_meaning');
+      } else if (g.where === 'document') {
         clean = false;
         note = cell.b ? `cited ${cell.b} but the value is elsewhere on the page` : 'no block cited; value found elsewhere on the page';
       }
@@ -1047,6 +1064,37 @@ class ExtractionRun {
     if (recordGroupId) slot.recordGroupId = recordGroupId;
     if (note) slot.citationNote = note;
     return slot;
+  }
+
+  /**
+   * Second chance for a number or boolean the model wrote in its own form
+   * instead of copying it ("3" for a rating the page shows as class
+   * "star-rating Three", "true" for "In stock"). Short texts of the cited
+   * block and its record's attributes are normalized with the field's own
+   * rules; the value is accepted only when one of them converts to exactly
+   * the same value. Strings never take this path: their meaning is too loose
+   * to compare. Returns a note for the evidence, or null.
+   */
+  private matchByMeaning(field: FieldSpec, raw: unknown, ctx: NonNullable<ReturnType<typeof blockContext>>): string | null {
+    if (field.type !== 'boolean' && field.type !== 'number' && field.type !== 'integer') return null;
+    const target = normalizeValue(raw, field, this.nctx);
+    if (!target.ok || isEmptyRaw(target.value)) return null;
+    const candidates: string[] = [ctx.block.text];
+    const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
+    for (const attrs of attrSets) {
+      for (const value of Object.values(attrs)) {
+        candidates.push(value);
+        // Class lists carry one token per fact ("star-rating Three").
+        if (/\s/.test(value)) candidates.push(...value.split(/\s+/).slice(0, MEANING_MAX_TOKENS));
+      }
+    }
+    for (const candidate of candidates) {
+      const text = candidate.trim();
+      if (text === '' || text.length > MEANING_MAX_CHARS) continue;
+      const n = normalizeValue(text, field, this.nctx);
+      if (n.ok && n.value === target.value) return `matched by meaning: "${text.slice(0, 60)}" in ${ctx.block.id}`;
+    }
+    return null;
   }
 
   // ── merge ────────────────────────────────────────────────

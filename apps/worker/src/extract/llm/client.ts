@@ -40,7 +40,7 @@ import type { Budget } from './budget.js';
 import { defaultBreaker, type CircuitBreaker } from './breaker.js';
 import { errorDetails, LlmCallError, MAX_RETRY_AFTER_MS, toLlmError } from './errors.js';
 import { estimateCostUsd } from './registry.js';
-import { effectiveMaxOutput, estimateTokens, MESSAGE_OVERHEAD_TOKENS } from './tokens.js';
+import { estimateTokens, MESSAGE_OVERHEAD_TOKENS, reasoningReserve, requestedOutputTokens } from './tokens.js';
 
 export type LlmPurpose = LlmAttemptRecord['purpose'];
 
@@ -185,11 +185,13 @@ export class ModelClient {
           state.affordableInput = Math.max(state.affordableInput ?? 0, affordable.inputFit);
           break;
         }
-        const requested = effectiveMaxOutput(effective, req.maxOutputTokens);
+        const requested = requestedOutputTokens(effective, req.maxOutputTokens);
         let attemptReq = req;
         let attemptNote = note;
         if (affordable.maxOutputTokens < requested) {
-          attemptReq = { ...req, maxOutputTokens: affordable.maxOutputTokens };
+          // affordable is the total max_tokens; the provider adds the
+          // reasoning reserve back on top of the answer budget.
+          attemptReq = { ...req, maxOutputTokens: Math.max(1, affordable.maxOutputTokens - reasoningReserve(effective)) };
           const lowered = `maxOutputTokens lowered from ${requested} to ${affordable.maxOutputTokens} by the cost cap`;
           attemptNote = note ? `${note}; ${lowered}` : lowered;
         }
@@ -303,7 +305,7 @@ export class ModelClient {
     }
     const est = opts.estimatedInputTokens;
     if (est !== undefined && Number.isFinite(est) && est > 0) {
-      if (est + effectiveMaxOutput(caps, req.maxOutputTokens) > caps.contextTokens) {
+      if (est + requestedOutputTokens(caps, req.maxOutputTokens) > caps.contextTokens) {
         return { reason: 'input does not fit the context window', category: 'input_too_large' };
       }
     }
@@ -316,13 +318,13 @@ export class ModelClient {
    * stays within the remaining spend.
    */
   #affordable(caps: ModelCapabilities, req: LlmRequest, opts: CompleteOptions, state: RunState): Affordable {
-    const requested = effectiveMaxOutput(caps, req.maxOutputTokens);
+    const requested = requestedOutputTokens(caps, req.maxOutputTokens);
     const remaining = opts.budget.remainingUsd();
     const inRate = caps.inputCostPerMTok ?? 0;
     const outRate = caps.outputCostPerMTok ?? 0;
     if (!Number.isFinite(remaining) || (inRate <= 0 && outRate <= 0)) return { ok: true, maxOutputTokens: requested };
     const inputCost = (this.#inputEstimate(caps, req, opts, state) * INPUT_COST_MARGIN * inRate) / 1_000_000;
-    const minimal = Math.min(requested, MIN_AFFORDABLE_OUTPUT_TOKENS);
+    const minimal = Math.min(requested, reasoningReserve(caps) + MIN_AFFORDABLE_OUTPUT_TOKENS);
     const left = remaining - inputCost;
     const fits = outRate <= 0 ? requested : Math.floor((left * 1_000_000) / outRate);
     if (left <= 0 || fits < minimal) {
@@ -443,7 +445,7 @@ export class ModelClient {
       if (error.category === 'timeout' && sent && signal.aborted && noUsage) {
         // A non-streaming call keeps running (and is billed) after the client
         // gives up on it; count its worst case so retries stay within the cap.
-        const worst = estimateCostUsd(caps, inputEstimate, effectiveMaxOutput(caps, req.maxOutputTokens));
+        const worst = estimateCostUsd(caps, inputEstimate, requestedOutputTokens(caps, req.maxOutputTokens));
         if (worst > 0) {
           costUsd = worst;
           const charged = `usage unknown after timeout: worst-case cost $${worst.toFixed(6)} counted`;

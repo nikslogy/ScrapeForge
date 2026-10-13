@@ -50,7 +50,7 @@ export {
   type RealProvider,
   type ResolvedModels,
 } from './registry.js';
-export { effectiveMaxOutput, estimateTokens, planInputBudget, type InputBudgetOptions } from './tokens.js';
+export { effectiveMaxOutput, estimateTokens, planInputBudget, reasoningReserve, requestedOutputTokens, type InputBudgetOptions } from './tokens.js';
 export { FakeProvider, delay, fakeCaps, fakeError, fakeResponse, scripted, type FakeCall, type FakeHandler, type FakeStep } from './providers/fake.js';
 export { GeminiProvider, geminiFromEnv, toGeminiSchema } from './providers/gemini.js';
 export { OpenAICompatibleProvider, openAICompatibleFromEnv, type OpenAICompatibleName } from './providers/openai-compatible.js';

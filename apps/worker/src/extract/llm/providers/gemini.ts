@@ -9,7 +9,7 @@
 import type { JsonSchema, LlmProvider, LlmRequest, LlmResponse, ModelCapabilities } from '../../types.js';
 import { LlmCallError, type LlmErrorDetails } from '../errors.js';
 import { estimateCostUsd } from '../registry.js';
-import { effectiveMaxOutput, estimateTokens } from '../tokens.js';
+import { estimateTokens, requestedOutputTokens } from '../tokens.js';
 import {
   embeddedError,
   httpError,
@@ -71,7 +71,7 @@ const NO_THINKING = /^(?:models\/)?gemini-2\.5-flash/;
 export function buildGeminiBody(caps: ModelCapabilities, req: LlmRequest): Record<string, unknown> {
   const generationConfig: Record<string, unknown> = {
     temperature: req.temperature ?? 0,
-    maxOutputTokens: effectiveMaxOutput(caps, req.maxOutputTokens),
+    maxOutputTokens: requestedOutputTokens(caps, req.maxOutputTokens),
   };
   // Gemini 2.5 Flash thinks by default and its thinking tokens count against
   // maxOutputTokens, so a small extraction limit can be spent before any

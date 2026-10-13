@@ -41,6 +41,24 @@ export function effectiveMaxOutput(caps: Pick<ModelCapabilities, 'maxOutputToken
   return Math.max(1, Math.min(ask, caps.maxOutputTokens));
 }
 
+/**
+ * max_tokens actually requested: the answer budget plus the model's
+ * reasoning reserve (hidden reasoning counts against max_tokens), capped
+ * at the model's output limit. Every cost and context check uses this.
+ */
+export function requestedOutputTokens(
+  caps: Pick<ModelCapabilities, 'maxOutputTokens' | 'reasoningReserveTokens'>,
+  answerTokens: number,
+): number {
+  const answer = Number.isFinite(answerTokens) ? Math.floor(answerTokens) : caps.maxOutputTokens;
+  return effectiveMaxOutput(caps, answer + reasoningReserve(caps));
+}
+
+export function reasoningReserve(caps: Pick<ModelCapabilities, 'reasoningReserveTokens'>): number {
+  const r = caps.reasoningReserveTokens;
+  return r !== undefined && Number.isFinite(r) && r > 0 ? Math.floor(r) : 0;
+}
+
 export interface InputBudgetOptions {
   systemText: string;
   /** Any other fixed text sent with the page (field list, response schema, URL line). */
@@ -57,9 +75,13 @@ export interface InputBudgetOptions {
  * large ask does not shrink the input for a model that could never emit it.
  * Returns 0 when nothing fits.
  */
-export function planInputBudget(caps: Pick<ModelCapabilities, 'contextTokens' | 'maxOutputTokens'>, opts: InputBudgetOptions): number {
+export function planInputBudget(
+  caps: Pick<ModelCapabilities, 'contextTokens' | 'maxOutputTokens' | 'reasoningReserveTokens'>,
+  opts: InputBudgetOptions,
+): number {
   const margin = Math.min(0.9, Math.max(0, Number.isFinite(opts.safetyMargin) ? (opts.safetyMargin as number) : 0.1));
-  const reserved = Math.max(0, Math.min(Number.isFinite(opts.reservedOutputTokens) ? opts.reservedOutputTokens : 0, caps.maxOutputTokens));
+  const answer = Math.max(0, Number.isFinite(opts.reservedOutputTokens) ? opts.reservedOutputTokens : 0);
+  const reserved = Math.min(answer + reasoningReserve(caps), caps.maxOutputTokens);
   // Subtracting the rounded-up margin avoids 1 - 0.9 = 0.0999… float error.
   const usable = caps.contextTokens - Math.ceil(caps.contextTokens * margin);
   const fixed = estimateTokens(opts.systemText) + estimateTokens(opts.schemaText) + MESSAGE_OVERHEAD_TOKENS;

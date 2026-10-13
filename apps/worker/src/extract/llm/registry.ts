@@ -44,12 +44,17 @@ function caps(
   strictSchema: boolean,
   inputCostPerMTok?: number,
   outputCostPerMTok?: number,
+  extra: Pick<KnownCaps, 'acceptsTemperature' | 'reasoningEffort' | 'reasoningReserveTokens'> = {},
 ): KnownCaps {
-  const out: KnownCaps = { contextTokens, maxOutputTokens, jsonMode, strictSchema };
+  const out: KnownCaps = { contextTokens, maxOutputTokens, jsonMode, strictSchema, ...extra };
   if (inputCostPerMTok !== undefined) out.inputCostPerMTok = inputCostPerMTok;
   if (outputCostPerMTok !== undefined) out.outputCostPerMTok = outputCostPerMTok;
   return out;
 }
+
+// Models that always reason before answering (it cannot be switched off):
+// ask for minimal effort and keep room for what reasoning remains.
+const MINIMAL_REASONING = { reasoningEffort: 'minimal', reasoningReserveTokens: 1_024 } as const;
 
 /**
  * Defaults to be confirmed by benchmark. Limits are rounded down from the
@@ -63,6 +68,18 @@ export const KNOWN_MODELS: Readonly<Record<string, KnownCaps>> = {
   'openrouter:openai/gpt-4.1-mini': caps(1_000_000, 32_768, 'json_schema', true, 0.4, 1.6),
   'openrouter:openai/gpt-4.1-nano': caps(1_000_000, 32_768, 'json_schema', true, 0.1, 0.4),
   'openrouter:openai/gpt-4o-mini': caps(128_000, 16_384, 'json_schema', true, 0.15, 0.6),
+  // Benchmarked 2026-10 (tests/eval/results). Prices: OpenRouter list prices.
+  'openrouter:openai/gpt-5-nano': caps(272_000, 32_768, 'json_schema', true, 0.05, 0.4, {
+    acceptsTemperature: false, ...MINIMAL_REASONING,
+  }),
+  'openrouter:openai/gpt-5-mini': caps(272_000, 32_768, 'json_schema', true, 0.25, 2.0, {
+    acceptsTemperature: false, ...MINIMAL_REASONING,
+  }),
+  'openrouter:google/gemini-3.8-flash': caps(1_000_000, 32_768, 'json_schema', false, 0.75, 3.75, MINIMAL_REASONING),
+  // Prompts above 100k tokens cost 5x on this model; keep the window under that.
+  'openrouter:anthropic/claude-haiku-5.5': caps(100_000, 16_384, 'json_schema', true, 0.1, 0.5, {
+    acceptsTemperature: false,
+  }),
   'openrouter:meta-llama/llama-3.3-70b-instruct': caps(128_000, 8_192, 'json_object', false, 0.2, 0.6),
   'openrouter:meta-llama/llama-3.3-70b-instruct:free': caps(64_000, 8_192, 'json_object', false, 0, 0),
   'groq:llama-3.3-70b-versatile': caps(128_000, 8_192, 'json_object', false, 0.59, 0.79),
@@ -75,6 +92,12 @@ export const KNOWN_MODELS: Readonly<Record<string, KnownCaps>> = {
   'openai:gpt-4.1-mini': caps(1_000_000, 32_768, 'json_schema', true, 0.4, 1.6),
   'openai:gpt-4.1-nano': caps(1_000_000, 32_768, 'json_schema', true, 0.1, 0.4),
   'openai:gpt-4o-mini': caps(128_000, 16_384, 'json_schema', true, 0.15, 0.6),
+  'openai:gpt-5-nano': caps(272_000, 32_768, 'json_schema', true, 0.05, 0.4, {
+    acceptsTemperature: false, ...MINIMAL_REASONING,
+  }),
+  'openai:gpt-5-mini': caps(272_000, 32_768, 'json_schema', true, 0.25, 2.0, {
+    acceptsTemperature: false, ...MINIMAL_REASONING,
+  }),
 };
 
 /** Capabilities assumed for a model the table does not know. */
@@ -86,6 +109,7 @@ export const UNKNOWN_MODEL_DEFAULTS: Readonly<KnownCaps> = {
 };
 
 const JSON_MODES: ReadonlySet<string> = new Set(['none', 'json_object', 'json_schema']);
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(['minimal', 'low', 'medium', 'high']);
 const MAX_MODELS = 16;
 const MAX_TOKENS_LIMIT = 100_000_000;
 
@@ -167,7 +191,16 @@ function validOverride(key: string, value: Record<string, unknown>, warnings: st
         else bad(field);
         break;
       case 'strictSchema':
-        if (typeof v === 'boolean') o.strictSchema = v;
+      case 'acceptsTemperature':
+        if (typeof v === 'boolean') o[field] = v;
+        else bad(field);
+        break;
+      case 'reasoningEffort':
+        if (typeof v === 'string' && REASONING_EFFORTS.has(v)) o.reasoningEffort = v as KnownCaps['reasoningEffort'];
+        else bad(field);
+        break;
+      case 'reasoningReserveTokens':
+        if (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= MAX_TOKENS_LIMIT) o.reasoningReserveTokens = v as number;
         else bad(field);
         break;
       default:
