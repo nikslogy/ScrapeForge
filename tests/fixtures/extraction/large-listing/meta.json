@@ -15,7 +15,14 @@
   },
   "expectedShape": "array",
   "recordKey": "sku",
-  "expectStatus": "partial",
-  "notes": "Phase 2 target: all 600 records (exhaustive, partitioned extraction merged by SKU) and status complete. Phase 1 cannot fit this page in one model call and must report it honestly: truncated: true, status partial, missing entries with reason not_processed, never a 'complete' answer with a silently shortened list. Sale cards show the sale price first and the compare-at price struck through; gold price is the sale price. Unrated cards say 'No reviews yet' (rating null). The Recently viewed cards (HP-000417, HP-000926, HP-000133) are not part of the listing. Facet counts ('Under $50 (n)') are decoys.",
-  "tags": ["listing", "large-input", "generated", "phase2", "nulls", "decoys"]
+  "expectStatus": "complete",
+  "notes": "Phase 2: all 600 records by partitioned extraction (chunks of the product-card group, merged in page order), status complete. With partitioning off, or when chunks fail or the budget runs out, the outcome must say so honestly: truncated: true, status partial, a missing entry with reason not_processed naming the unprocessed record ranges, never a 'complete' answer with a silently shortened list. Sale cards show the sale price first and the compare-at price struck through; gold price is the sale price. Unrated cards say 'No reviews yet' (rating null). The Recently viewed cards (HP-000417, HP-000926, HP-000133) are not part of the listing. Facet counts ('Under $50 (n)') are decoys.",
+  "tags": [
+    "listing",
+    "large-input",
+    "generated",
+    "phase2",
+    "nulls",
+    "decoys"
+  ]
 }

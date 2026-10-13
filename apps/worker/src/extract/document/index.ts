@@ -3,6 +3,8 @@ import type { SourceBlock, SourceDocument } from '../types.js';
 export { buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING } from './build.js';
 export type { DocumentBuildStats } from './build.js';
 export { renderBlocks } from './render.js';
+export { selectBlocks, scoreBlocks, queryTerms } from './select.js';
+export type { BlockSelection } from './select.js';
 export type { RenderOptions, RenderResult } from './render.js';
 export { DOCUMENT_LIMITS } from './limits.js';
 

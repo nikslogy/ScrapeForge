@@ -13,7 +13,7 @@
 import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { roundMs, StageTracer } from '../tracing.js';
-import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, type BlockContext } from './document/index.js';
+import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, selectBlocks, type BlockContext } from './document/index.js';
 import {
   Budget,
   buildExtractionPrompt,
@@ -55,6 +55,7 @@ import {
   type LlmUsageSummary,
   type MissingField,
   type MissingReason,
+  type ModelCapabilities,
   type NormalizedSchema,
   type RecipeKey,
   type RecordGroup,
@@ -115,6 +116,18 @@ const HOME_RECORD_MIN_VOTES = 2;
 const OUTPUT_FORMAT_FACTOR = 1.2;
 /** Records whose text is sampled to estimate a listing record's answer size. */
 const OUTPUT_SIZE_SAMPLE = 50;
+/** Share of the input budget a selection or chunk plans to fill (rendering estimates are rough). */
+const SELECTION_FILL = 0.9;
+/** Listings with fewer records than this are never partitioned. */
+const MIN_PARTITION_RECORDS = 2;
+/** Upper bound on chunk calls for one listing; the rest is reported not processed. */
+const MAX_CHUNKS = 64;
+/** A chunk whose answer is cut off is halved at most this many times. */
+const MAX_CHUNK_SPLITS = 3;
+/** Chunk calls in flight at once (EXTRACT_PARTITION_CONCURRENCY overrides). */
+const DEFAULT_PARTITION_CONCURRENCY = 4;
+/** Unprocessed record ranges named in the list-level missing detail. */
+const MAX_REPORTED_GAPS = 5;
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -442,6 +455,37 @@ interface LlmSlot extends Slot {
 
 type EffectiveShape = 'object' | 'array' | 'auto';
 
+interface ModelCall {
+  client: ModelClient;
+  budget: Budget;
+  reduced: NormalizedSchema;
+  fields: FieldSpec[];
+  shape: EffectiveShape;
+  shapeHint: 'object' | 'array' | 'auto';
+  primary: ModelCapabilities;
+  parseSource: { provider: string; model: string };
+}
+
+interface PartitionPlan {
+  group: RecordGroup;
+  perChunk: number;
+}
+
+/** Records [from, to) of the partitioned group; depth = times it was halved. */
+interface Chunk {
+  from: number;
+  to: number;
+  depth: number;
+}
+
+interface ChunkEntry {
+  from: number;
+  to: number;
+  status: 'done' | 'failed' | 'skipped';
+  reason?: string;
+  returned?: number;
+}
+
 interface LlmStageResult {
   ran: boolean;
   /** Parsed records (array/auto) or [one record] (object); empty when the call failed. */
@@ -472,6 +516,16 @@ class ExtractionRun {
   private rejectedCount = 0;
   /** Records of a listing known to exist but not returned (list-level missing entry). */
   private listGap?: { reason: MissingReason; detail: string };
+  /** Only the blocks most relevant to the fields were sent (a page larger than one call). */
+  private selectedInput = false;
+  /** Some chunks of a partitioned listing were not processed. */
+  private coverageGap = false;
+  /** A field asked of a selected input was not found (it may be in what was not sent). */
+  private selectionIncomplete = false;
+  /** How the page reached the model, for scope. */
+  private strategy?: 'single' | 'selected' | 'partitioned';
+  /** Partitioned extraction summary, for scope. */
+  private partition?: { chunks: number; done: number; failed: number; skipped: number; recordsPerChunk: number };
   /** The structured list returned was cut by the mapper's record cap. */
   private structuredTruncated = false;
   /** Values returned from structured data that the model should have verified but could not. */
@@ -894,8 +948,7 @@ class ExtractionRun {
     const reduced: NormalizedSchema = { ...this.schema, fields, shape: shapeHint };
     const primary = client.models[0];
     const expected = shape === 'object' ? 1 : expectedRecordCount(this.doc);
-    const plannedOutput = Math.max(MIN_OUTPUT_TOKENS, expected * fields.length * OUTPUT_TOKENS_PER_CELL);
-    const outputTokens = Math.max(1, Math.min(primary.maxOutputTokens, Math.ceil(plannedOutput * OUTPUT_HEADROOM)));
+    const outputTokens = this.plannedOutputTokens(primary, expected, fields.length);
     const frame = buildExtractionPrompt({ schema: reduced, renderedBlocks: '', url: this.req.url, title: this.doc.title, shapeHint });
     const schemaText = frame.user + (primary.jsonMode === 'json_schema' ? JSON.stringify(frame.responseSchema) : '');
     const inputTokens = planInputBudget(primary, { systemText: frame.system, schemaText, reservedOutputTokens: outputTokens });
@@ -903,63 +956,62 @@ class ExtractionRun {
       this.warnings.add('llm_failed:input_too_large');
       return { ran: false, records: [], failure: { reason: 'provider_failure', detail: 'input_too_large: the prompt frame does not fit the model context' } };
     }
-    const budget = new Budget({ deadlineMs: this.req.deadlineMs, maxCostUsd: this.req.maxCostUsd });
-    const parseSource = { provider: primary.provider, model: primary.model };
+    const call: ModelCall = {
+      client,
+      budget: new Budget({ deadlineMs: this.req.deadlineMs, maxCostUsd: this.req.maxCostUsd }),
+      reduced,
+      fields,
+      shape,
+      shapeHint,
+      primary,
+      parseSource: { provider: primary.provider, model: primary.model },
+    };
+    const maxChars = Math.floor(inputTokens * CHARS_PER_TOKEN);
 
-    let maxChars = Math.floor(inputTokens * CHARS_PER_TOKEN);
+    if (shape === 'array' && !this.disabled.has('partition')) {
+      const plan = this.partitionPlan(fields, outputTokens, maxChars, inputTokens);
+      if (plan) return this.runPartitioned(call, plan, maxChars);
+    }
+    return this.runSingle(call, outputTokens, maxChars, inputTokens);
+  }
+
+  /** max_tokens for an answer of `records` × `fieldCount` cells, with headroom, within the model limit. */
+  private plannedOutputTokens(primary: ModelCapabilities, records: number, fieldCount: number): number {
+    const planned = Math.max(MIN_OUTPUT_TOKENS, records * fieldCount * OUTPUT_TOKENS_PER_CELL);
+    return Math.max(1, Math.min(primary.maxOutputTokens, Math.ceil(planned * OUTPUT_HEADROOM)));
+  }
+
+  /** One model call for the whole (or the selected part of the) page, as in Phase 1. */
+  private async runSingle(call: ModelCall, outputTokens: number, initialMaxChars: number, inputTokens: number): Promise<LlmStageResult> {
+    const { fields, shape } = call;
+    let maxChars = initialMaxChars;
     // A listing whose answer cannot fit the output limit is cut to the
     // records it can hold: a truncated partial, not a failed oversized call.
     let recordCap = shape === 'object' ? null : this.outputRecordCap(fields, outputTokens);
     if (recordCap) this.warnings.add(`output_limit_records:${recordCap.count}_of_${recordCap.group.recordIds.length}`);
     let retriedSmaller = false;
     for (;;) {
-      const rendered = this.render(maxChars, inputTokens, recordCap ?? undefined);
-      if (rendered.truncated) {
+      let rendered = this.render(maxChars, inputTokens, recordCap ?? undefined);
+      // A single answer on a page that does not fit: send the blocks most
+      // relevant to the fields instead of the first ones.
+      if (rendered.truncated && !recordCap && shape === 'object' && !this.disabled.has('select')) {
+        const selection = selectBlocks(this.doc, fields, Math.floor(maxChars * SELECTION_FILL));
+        rendered = this.render(maxChars, inputTokens, undefined, selection.blockIds);
+        this.selectedInput = true;
+        this.warnings.add(`input_selected:${rendered.includedIds.length}_of_${this.doc.blocks.length}_blocks`);
+      } else if (rendered.truncated) {
         this.truncated = true;
         this.warnings.add('input_truncated');
       }
       this.blocksSentToModel = rendered.includedIds.length;
-      const prompt = buildExtractionPrompt({ schema: reduced, renderedBlocks: rendered.text, url: this.req.url, title: this.doc.title, shapeHint });
-      const estimatedInputTokens =
-        estimateTokens(prompt.system) + estimateTokens(prompt.user) + (primary.jsonMode === 'json_schema' ? estimateTokens(JSON.stringify(prompt.responseSchema)) : 0);
-
-      const call = await this.complete(client, budget, {
-        system: prompt.system,
-        user: prompt.user,
-        maxOutputTokens: outputTokens,
-        responseSchema: prompt.responseSchema,
-        temperature: 0,
-      }, 'extract', estimatedInputTokens);
-
-      let failure: { category: LlmErrorCategory; message: string } | undefined;
-      let parsedRecords: ParsedRecord[] | undefined;
-      if (call.ok) {
-        const parsed = this.parse(call.text, reduced, parseSource);
-        if (parsed.ok) {
-          parsedRecords = parsed.records;
-        } else if (parsed.category === 'parse_error') {
-          const repair = buildRepairPrompt(call.text, parsed.message);
-          const repaired = await this.complete(client, budget, { system: repair.system, user: repair.user, maxOutputTokens: outputTokens, temperature: 0 }, 'repair', estimateTokens(repair.system) + estimateTokens(repair.user));
-          if (repaired.ok) {
-            const again = this.parse(repaired.text, reduced, parseSource);
-            if (again.ok) parsedRecords = again.records;
-            else failure = { category: again.category, message: again.message };
-          } else {
-            failure = repaired.failure;
-          }
-        } else {
-          failure = { category: parsed.category, message: parsed.message };
-        }
-      } else {
-        failure = call.failure;
-      }
-
-      if (parsedRecords) {
+      this.strategy = this.selectedInput ? 'selected' : 'single';
+      const result = await this.callAndParse(call, rendered.text, outputTokens);
+      if ('records' in result) {
         // An object needs one record; extra ones are not checked (or counted as rejections).
-        const used = shape === 'object' ? parsedRecords.slice(0, 1) : parsedRecords;
-        return { ran: true, records: used.map((r) => this.processRecord(r, fields, shape)), parsedCount: parsedRecords.length };
+        const used = shape === 'object' ? result.records.slice(0, 1) : result.records;
+        return { ran: true, records: used.map((r) => this.processRecord(r, fields, shape)), parsedCount: result.records.length };
       }
-      const f = failure as { category: LlmErrorCategory; message: string };
+      const f = result.failure;
       if ((f.category === 'output_truncated' || f.category === 'input_too_large') && !retriedSmaller && maxChars > 1) {
         retriedSmaller = true;
         const sent = recordCap ? recordCap.count : this.recordsSent(rendered.includedIds);
@@ -979,18 +1031,177 @@ class ExtractionRun {
     }
   }
 
+  /** One extraction call on `renderedText`, with one repair call when the answer does not parse. */
+  private async callAndParse(
+    call: ModelCall,
+    renderedText: string,
+    outputTokens: number,
+  ): Promise<{ records: ParsedRecord[] } | { failure: { category: LlmErrorCategory; message: string } }> {
+    const prompt = buildExtractionPrompt({ schema: call.reduced, renderedBlocks: renderedText, url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint });
+    const estimatedInputTokens =
+      estimateTokens(prompt.system) + estimateTokens(prompt.user) + (call.primary.jsonMode === 'json_schema' ? estimateTokens(JSON.stringify(prompt.responseSchema)) : 0);
+    const first = await this.complete(call.client, call.budget, {
+      system: prompt.system,
+      user: prompt.user,
+      maxOutputTokens: outputTokens,
+      responseSchema: prompt.responseSchema,
+      temperature: 0,
+    }, 'extract', estimatedInputTokens);
+    if (!first.ok) return { failure: first.failure };
+    const parsed = this.parse(first.text, call.reduced, call.parseSource);
+    if (parsed.ok) return { records: parsed.records };
+    if (parsed.category !== 'parse_error') return { failure: { category: parsed.category, message: parsed.message } };
+    const repair = buildRepairPrompt(first.text, parsed.message);
+    const repaired = await this.complete(call.client, call.budget, { system: repair.system, user: repair.user, maxOutputTokens: outputTokens, temperature: 0 }, 'repair', estimateTokens(repair.system) + estimateTokens(repair.user));
+    if (!repaired.ok) return { failure: repaired.failure };
+    const again = this.parse(repaired.text, call.reduced, call.parseSource);
+    return again.ok ? { records: again.records } : { failure: { category: again.category, message: again.message } };
+  }
+
+  // ── partitioned extraction (listings larger than one call) ──
+
+  /**
+   * Records per chunk when the largest record group does not fit one call
+   * (its answer exceeds the output limit, or the page the input budget);
+   * null when one call holds it, or there is no group to split.
+   */
+  private partitionPlan(fields: FieldSpec[], outputTokens: number, maxChars: number, inputTokens: number): PartitionPlan | null {
+    const group = largestRecordGroup(this.doc);
+    if (!group || group.recordIds.length < MIN_PARTITION_RECORDS) return null;
+    const total = group.recordIds.length;
+    const outputCap = this.outputRecordCap(fields, outputTokens)?.count ?? total;
+    const whole = this.render(maxChars, inputTokens);
+    if (outputCap >= total && !whole.truncated) return null;
+    // Input: the rendered size of a sample of records.
+    const sample = group.recordIds.slice(0, OUTPUT_SIZE_SAMPLE);
+    const sampleChars = renderBlocks(this.doc, { blockIds: sample }).text.length;
+    const perRecordChars = Math.max(1, sampleChars / sample.length);
+    const inputCap = Math.max(1, Math.floor((maxChars * SELECTION_FILL) / perRecordChars));
+    const perChunk = Math.max(1, Math.min(outputCap, inputCap));
+    if (perChunk >= total) return null;
+    return { group, perChunk };
+  }
+
+  private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
+    const ids = plan.group.recordIds;
+    const outputTokens = this.plannedOutputTokens(call.primary, plan.perChunk, call.fields.length);
+    const queue: Chunk[] = [];
+    for (let from = 0; from < ids.length; from += plan.perChunk) queue.push({ from, to: Math.min(ids.length, from + plan.perChunk), depth: 0 });
+    const ledger: ChunkEntry[] = [];
+    if (queue.length > MAX_CHUNKS) {
+      for (const c of queue.splice(MAX_CHUNKS)) ledger.push({ from: c.from, to: c.to, status: 'skipped', reason: `more than ${MAX_CHUNKS} chunks` });
+    }
+    const answered: Array<{ from: number; records: ParsedRecord[] }> = [];
+    let sentBlocks = 0;
+    const concurrency = Math.max(1, Math.min(this.partitionConcurrency(), queue.length));
+    const worker = async (): Promise<void> => {
+      for (let chunk = queue.shift(); chunk; chunk = queue.shift()) {
+        if (!call.budget.canSpend()) {
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: call.budget.remainingMs() <= 0 ? 'deadline' : 'cost_cap' });
+          continue;
+        }
+        const rendered = renderBlocks(this.doc, { blockIds: ids.slice(chunk.from, chunk.to), maxChars });
+        const tooBig = rendered.truncated || estimateTokens(rendered.text) > maxChars / CHARS_PER_TOKEN;
+        const result = tooBig
+          ? { failure: { category: 'input_too_large' as LlmErrorCategory, message: 'chunk does not fit the input budget' } }
+          : await this.callAndParse(call, rendered.text, Math.min(outputTokens, this.plannedOutputTokens(call.primary, chunk.to - chunk.from, call.fields.length)));
+        if ('records' in result) {
+          sentBlocks += rendered.includedIds.length;
+          answered.push({ from: chunk.from, records: result.records });
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned: result.records.length });
+          continue;
+        }
+        const category = result.failure.category;
+        if ((category === 'output_truncated' || category === 'input_too_large') && chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS) {
+          // Halve and retry both halves first.
+          const mid = chunk.from + Math.ceil((chunk.to - chunk.from) / 2);
+          queue.unshift({ from: chunk.from, to: mid, depth: chunk.depth + 1 }, { from: mid, to: chunk.to, depth: chunk.depth + 1 });
+          this.warnings.add(`partition_chunk_split:${category}`);
+          continue;
+        }
+        ledger.push({ from: chunk.from, to: chunk.to, status: 'failed', reason: category });
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, worker));
+
+    // Merge in page order; one record per listing card (a card answered twice keeps its first answer).
+    answered.sort((a, b) => a.from - b.from);
+    ledger.sort((a, b) => a.from - b.from);
+    const records: Array<Map<string, LlmSlot>> = [];
+    const seen = new Set<string>();
+    let parsedCount = 0;
+    let duplicates = 0;
+    for (const chunk of answered) {
+      for (const r of chunk.records) {
+        parsedCount++;
+        const slots = this.processRecord(r, call.fields, call.shape);
+        const key = this.recordIdentity(r, slots, call.fields);
+        if (key !== undefined && seen.has(key)) {
+          duplicates++;
+          continue;
+        }
+        if (key !== undefined) seen.add(key);
+        records.push(slots);
+      }
+    }
+    if (duplicates > 0) this.warnings.add(`partition_duplicates_dropped:${duplicates}`);
+    this.blocksSentToModel = sentBlocks;
+    this.strategy = 'partitioned';
+    const done = ledger.filter((e) => e.status === 'done');
+    this.partition = {
+      chunks: ledger.length,
+      done: done.length,
+      failed: ledger.filter((e) => e.status === 'failed').length,
+      skipped: ledger.filter((e) => e.status === 'skipped').length,
+      recordsPerChunk: plan.perChunk,
+    };
+    this.warnings.add(`partitioned:${ledger.length}_chunks_of_${plan.perChunk}`);
+    const gaps = ledger.filter((e) => e.status !== 'done');
+    if (gaps.length > 0) {
+      const missingRecords = gaps.reduce((n, e) => n + (e.to - e.from), 0);
+      const ranges = gaps.slice(0, MAX_REPORTED_GAPS).map((e) => `${e.from + 1}–${e.to} (${e.reason})`).join(', ');
+      const more = gaps.length > MAX_REPORTED_GAPS ? `, and ${gaps.length - MAX_REPORTED_GAPS} more` : '';
+      this.coverageGap = true;
+      const allProviderFailures = gaps.every((e) => e.status === 'failed' && e.reason !== 'output_truncated' && e.reason !== 'input_too_large');
+      this.listGap = {
+        reason: allProviderFailures ? 'provider_failure' : 'not_processed',
+        detail: `${missingRecords} of ${ids.length} records were not processed: records ${ranges}${more}`,
+      };
+    }
+    if (done.length === 0) {
+      const reason = gaps[0]?.reason ?? 'unknown';
+      this.warnings.add(`llm_failed:${reason}`);
+      return { ran: true, records: [], failure: { reason: reason === 'output_truncated' ? 'truncated' : 'provider_failure', detail: this.listGap?.detail ?? reason } };
+    }
+    return { ran: true, records, parsedCount };
+  }
+
+  private partitionConcurrency(): number {
+    const fromEnv = Number(process.env.EXTRACT_PARTITION_CONCURRENCY);
+    return Number.isInteger(fromEnv) && fromEnv > 0 ? Math.min(fromEnv, 16) : DEFAULT_PARTITION_CONCURRENCY;
+  }
+
+  /** The listing card a parsed record describes, else its normalized values; undefined when it has none. */
+  private recordIdentity(record: ParsedRecord, slots: Map<string, LlmSlot>, fields: FieldSpec[]): string | undefined {
+    const home = this.homeRecord(record, fields);
+    if (home) return `record:${home.block.id}`;
+    const values = fields.map((f) => slots.get(f.name)?.value ?? null);
+    return values.some((v) => v !== null) ? `values:${JSON.stringify(values)}` : undefined;
+  }
+
   /**
    * Renders blocks into at most `maxChars`, shrinking until the token
    * estimate fits; with `recordCap`, rendering also stops before that
    * record of the group (whole units only, like the char limit).
    */
-  private render(maxChars: number, inputTokens: number, recordCap?: { group: RecordGroup; count: number }): ReturnType<typeof renderBlocks> {
+  private render(maxChars: number, inputTokens: number, recordCap?: { group: RecordGroup; count: number }, blockIds?: readonly string[]): ReturnType<typeof renderBlocks> {
     let limit = maxChars;
-    let rendered = renderBlocks(this.doc, { maxChars: limit });
+    const opts = blockIds ? { blockIds } : {};
+    let rendered = renderBlocks(this.doc, { ...opts, maxChars: limit });
     // Non-ASCII pages tokenize denser than CHARS_PER_TOKEN assumes.
     for (let i = 0; i < 8 && estimateTokens(rendered.text) > inputTokens && rendered.text.length > 0; i++) {
       limit = Math.floor(Math.min(limit, rendered.text.length) * Math.max(0.5, (inputTokens / estimateTokens(rendered.text)) * 0.95));
-      rendered = renderBlocks(this.doc, { maxChars: limit });
+      rendered = renderBlocks(this.doc, { ...opts, maxChars: limit });
     }
     if (recordCap && recordCap.count < recordCap.group.recordIds.length) {
       const marker = `[${recordCap.group.recordIds[recordCap.count]}] <record`;
@@ -1113,14 +1324,16 @@ class ExtractionRun {
 
   /** Grounding, then normalization, of one model-reported value. */
   private processCell(field: FieldSpec, cell: ParsedCell, shape: EffectiveShape, home?: BlockContext, keys: readonly string[] = []): LlmSlot {
-    const notFound = (detail?: string): LlmSlot => ({
-      value: null,
-      source: 'llm',
-      clean: true,
-      missing: this.truncated && shape !== 'array' && !detail
-        ? { reason: 'not_processed', detail: 'input was truncated; the value may be in the part not sent to the model' }
-        : { reason: 'not_found', ...(detail ? { detail } : {}) },
-    });
+    const notFound = (detail?: string): LlmSlot => {
+      if (!detail && shape !== 'array' && (this.truncated || this.selectedInput)) {
+        if (this.selectedInput) this.selectionIncomplete = true;
+        const why = this.truncated
+          ? 'input was truncated; the value may be in the part not sent to the model'
+          : 'only the parts of the page most relevant to the fields were sent; the value may be in the rest';
+        return { value: null, source: 'llm', clean: true, missing: { reason: 'not_processed', detail: why } };
+      }
+      return { value: null, source: 'llm', clean: true, missing: { reason: 'not_found', ...(detail ? { detail } : {}) } };
+    };
     if (isEmptyRaw(cell.v)) return notFound();
 
     const cited = cell.b ? blockContext(this.doc, cell.b) : undefined;
@@ -1503,7 +1716,9 @@ class ExtractionRun {
       blocksTotal: doc.blocks.length,
       blocksSentToModel: this.blocksSentToModel,
       recordsDetected: doc.recordGroups.reduce((max, g) => Math.max(max, g.recordIds.length), 0),
-      truncated: this.truncated || this.structuredTruncated,
+      truncated: this.truncated || this.structuredTruncated || this.coverageGap || this.selectionIncomplete,
+      ...(this.strategy ? { strategy: this.strategy } : {}),
+      ...(this.partition ? { partitions: { ...this.partition } } : {}),
     };
   }
 
@@ -1557,7 +1772,7 @@ class ExtractionRun {
     const store = this.deps.recipeStore;
     if (mode === 'off' || !store || !key || activeSeen) return;
     if (this.disabled.has('recipe') || this.disabled.has('recipe-learning')) return;
-    if (!llm.ran || llm.failure || llm.records.length === 0 || this.truncated || outcome.status === 'failed') return;
+    if (!llm.ran || llm.failure || llm.records.length === 0 || this.truncated || this.coverageGap || outcome.status === 'failed') return;
     const plan = this.learningPlan(llm, asked, shape);
     if (!plan) return;
 

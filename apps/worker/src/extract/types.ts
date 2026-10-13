@@ -240,6 +240,14 @@ export interface ExtractionOutcome {
     blocksSentToModel: number;
     recordsDetected: number;
     truncated: boolean;
+    /**
+     * How the page reached the model: in one call ('single'), as the blocks
+     * most relevant to the fields ('selected', a page larger than one call),
+     * or as chunks of a listing ('partitioned'). Absent when no model ran.
+     */
+    strategy?: 'single' | 'selected' | 'partitioned';
+    /** Partitioned listings: chunk calls and how they ended. */
+    partitions?: { chunks: number; done: number; failed: number; skipped: number; recordsPerChunk: number };
   };
   llm: LlmUsageSummary;
   /** Stage → milliseconds, e.g. { document: 12, structured: 1, llm: 2400, validate: 3 }. */
@@ -421,5 +429,5 @@ export interface ExtractRequest {
   /** Include per-field evidence in the outcome (always computed internally). */
   includeEvidence?: boolean;
   /** Skip stages (testing / diagnostics). */
-  disable?: Array<'structured' | 'recipe' | 'llm' | 'recipe-learning'>;
+  disable?: Array<'structured' | 'recipe' | 'llm' | 'recipe-learning' | 'partition' | 'select'>;
 }

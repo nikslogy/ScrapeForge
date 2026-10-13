@@ -632,7 +632,30 @@ components:
               description: Size of the largest group of repeated items detected on the page.
             truncated:
               type: boolean
-              description: Part of the page was not sent to the model (status is then never complete).
+              description: >-
+                Part of the page that may hold requested values was not
+                processed (status is then never complete). False when
+                targeted selection found every field, or every chunk of a
+                partitioned listing was answered.
+            strategy:
+              type: string
+              enum: [single, selected, partitioned]
+              description: >-
+                How the page reached the model: whole in one call, as the
+                blocks most relevant to the fields (a single answer on a page
+                larger than one call), or in chunks of the listing's records.
+                Absent when no model ran.
+            partitions:
+              type: object
+              description: Partitioned listings only.
+              properties:
+                chunks: { type: integer }
+                done: { type: integer }
+                failed: { type: integer }
+                skipped:
+                  type: integer
+                  description: Not sent (deadline, cost cap, or more than 64 chunks).
+                recordsPerChunk: { type: integer }
         llm:
           type: object
           properties:

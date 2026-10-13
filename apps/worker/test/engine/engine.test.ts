@@ -379,15 +379,30 @@ describe('extractStructured: truncation', () => {
     expect(out.missing).toEqual([{ path: '/sku', reason: 'not_processed', detail: expect.any(String) }]);
   });
 
-  it('reports not_processed for the unseen part of a listing', async () => {
+  it('reports not_processed for the unseen part of a listing (one call: partitioning off)', async () => {
     const html = listing(items(60));
     const { client } = fakeClient(listingModel, { contextTokens: 2_500, maxOutputTokens: 512 });
-    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null });
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL, disable: ['partition'] }), { modelClient: client, recipeStore: null });
     const list = (out.data as { items: unknown[] }).items;
     expect(list.length).toBeGreaterThan(0);
     expect(list.length).toBeLessThan(60);
     expect(out.status).toBe('partial');
     expect(out.missing).toContainEqual({ path: '/items', reason: 'not_processed', detail: expect.stringContaining('input truncated') });
+    expect(out.scope.strategy).toBe('single');
+  });
+
+  it('partitions the same listing into chunks and returns every record', async () => {
+    const html = listing(items(60));
+    const { client, provider } = fakeClient(listingModel, { contextTokens: 2_500, maxOutputTokens: 512 });
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null });
+    expect((out.data as { items: unknown[] }).items).toHaveLength(60);
+    expect(out.data).toEqual({ items: items(60).map((it) => ({ title: it.title, price: Number(it.price.slice(1)) })) });
+    expect(out.status).toBe('complete');
+    expect(out.scope.truncated).toBe(false);
+    expect(out.scope.strategy).toBe('partitioned');
+    expect(out.scope.partitions).toMatchObject({ done: out.scope.partitions?.chunks, failed: 0, skipped: 0 });
+    expect(provider.calls.length).toBeGreaterThan(1);
+    expect(out.missing).toEqual([]);
   });
 });
 

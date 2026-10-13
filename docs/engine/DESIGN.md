@@ -225,21 +225,15 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   (`OPENROUTER_API_KEY`), per-model precision/recall, status accuracy,
   latency percentiles, cost per correct field. See `tests/eval/README.md`.
 
-### Known limitations (Phase 1)
+### Known limitations
 
-* Booleans are read from availability/yes-no wording; a phrase such as
-  "On-site" for `remote: false` is not converted (mark such fields
-  `x-derived` or accept `partial`).
-* A value present only in an attribute (`class="star-rating Three"`, `href`)
-  must be cited from its own block; it cannot be verified elsewhere.
 * Visible text that contains an injected instruction is still page text: a
   model that obeys it can return grounded but wrong values (the hidden
   injection text never reaches the model).
-* Listing pages whose records do not fit one call are partial (Phase 2). The
-  output-capacity estimate is conservative (×1.2 for JSON formatting), so a
-  model writing compact JSON could sometimes have answered a few more
-  records; a model writing much more verbose JSON (3× the estimate) can
-  still overflow twice and fail (the engine does not see truncated output).
+* Partitioning splits the largest record group only. A listing that is one
+  huge table, or whose items form no detected group, is still sent in one
+  call and reported `partial` with `truncated` when it does not fit.
+  Targeted selection serves object answers only.
 * A structured list is compared with the record group that holds its
   records; a list whose records sit in no detected group is not judged.
 * A boolean inside an object field that the page does not name by its key
@@ -252,6 +246,75 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   tier applies them yet (a gap that predates this package): the page is
   fetched without them. Custom `headers` are sent by the HTTP tiers (T1,
   T2) only, not by Lightpanda (T3) or the browser tiers (T4, T5).
+
+### Large inputs (Phase 2)
+
+When the page fits one call, nothing changes: it is sent whole
+(`scope.strategy: "single"`). Otherwise the strategy depends on the answer's
+shape.
+
+**Listings (array schemas) are partitioned.** This applies when the largest
+record group's answer exceeds the output limit, or the page exceeds the
+input budget. `partitionPlan` sizes chunks to whichever limit is smaller:
+
+* the output limit: the same estimate as `outputRecordCap`;
+* the input budget: the rendered size of a sample of 50 records.
+
+Each chunk is rendered on its own (only its record frames) and sent as an
+ordinary extraction call.
+
+* Calls run concurrently: up to 4 at a time, set by
+  `EXTRACT_PARTITION_CONCURRENCY`, at most 16.
+* All calls share one `Budget`. Each call reserves its worst-case cost
+  while in flight (`Budget.reserve`), so concurrent calls cannot together
+  pass `maxCostUsd`.
+* Once the deadline or the cost cap is reached, the remaining chunks are
+  skipped.
+* A chunk whose answer is cut off (`output_truncated`) or that does not fit
+  (`input_too_large`) is halved and retried, at most 3 times.
+* There are at most 64 chunks. The rest are skipped.
+
+Answers are merged in page order, and each listing card is kept once. A
+record's identity is its home record (see Grounding), or else its
+normalized values. Duplicates are counted in the warning
+`partition_duplicates_dropped:N`.
+
+Every chunk is recorded in a ledger. `scope.partitions` gives
+`{chunks, done, failed, skipped, recordsPerChunk}`. Chunks that are not
+done give:
+
+* `scope.truncated: true`;
+* a list-level `missing` entry naming the unprocessed record ranges and
+  their reason, e.g. "216 of 400 records were not processed: records
+  1–216 (unknown)";
+* status `partial`.
+
+A listing answered in full is `complete`, and recipe learning runs on it,
+so the next page of the same template needs no model call. The
+`large-listing` fixture (600 cards) is now `complete`, with all 600
+records. That takes 3 calls on a model with 8k output and 128k context, and
+7 calls with a 32k context.
+
+**Single answers (object schemas) use targeted selection.**
+`document/select.ts` scores every block with BM25 against the field names
+(split from camelCase and snake_case), their descriptions and enum values,
+plus a few related words. "price" also matches "cost", "sale" and "msrp".
+Each block's text, heading path and the attributes shown to the model are
+scored. The selection keeps:
+
+* the top 15% of the page;
+* then the best-scoring blocks, each with the block before and after it;
+* then the rest in page order while room is left.
+
+It is rendered in page order (`scope.strategy: "selected"`, warning
+`input_selected:<sent>_of_<total>_blocks`). If every asked field is found,
+the outcome can be `complete`. A field not found is `not_processed`, not
+`not_found`, because it may be in what was not sent. `scope.truncated` is
+then true and the status `partial`.
+
+Both strategies can be turned off per request for diagnostics:
+`disable: ['partition']` or `disable: ['select']` falls back to the Phase 1
+single call, cut at the budget and reported `truncated`.
 
 ### LLM response protocol
 
@@ -376,11 +439,12 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 |---|---|---|
 | 0 | Build fixed, stage tracing, reproducible extraction baseline | in progress |
 | 1 | Source-preserving document, deterministic paths, model layer, validation, grounding, recipes; engine wired into worker and API | done (live-model benchmark pending an API key) |
-| 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | next |
+| 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | done (see "Large inputs (Phase 2)"); tables are not partitioned yet |
 | 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | later |
 | 4 | Router: classify failures, engine vs network route, expiring per-template learning | later |
 | 5 | Mixed-load and recovery checks, published limits | later |
 
-In Phase 1, inputs larger than the model budget are not silently cut: the
-engine sends what fits and reports `truncated: true`, `status: partial`, and
+Inputs larger than the model budget are never silently cut. Phase 2 sends
+the relevant blocks, or every record in chunks. Whatever still could not
+be processed is reported with `truncated: true`, `status: partial` and
 `missing` entries with reason `not_processed`.

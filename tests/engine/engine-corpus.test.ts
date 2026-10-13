@@ -9,7 +9,7 @@ import { buildSourceDocument } from '../../apps/worker/src/extract/document/inde
 import { extractStructured } from '../../apps/worker/src/extract/engine.js';
 import { CircuitBreaker, FakeProvider, fakeCaps, ModelClient, type FakeHandler } from '../../apps/worker/src/extract/llm/index.js';
 import { RecipeStore, type RecipeKv } from '../../apps/worker/src/extract/recipe/index.js';
-import type { ExtractionOutcome, ModelCapabilities } from '../../apps/worker/src/extract/types.js';
+import type { ExtractionOutcome, ExtractRequest, ModelCapabilities } from '../../apps/worker/src/extract/types.js';
 import { loadFixture, loadFixtures, type Fixture } from '../fixtures/extraction/load.js';
 import { oracleHandler, type OracleRecord } from './oracle.js';
 import { aggregate, formatSummary, scoreExtraction, type ScoreResult } from './scoring.js';
@@ -19,7 +19,7 @@ interface Run {
   provider: FakeProvider;
 }
 
-async function run(fixture: Fixture, handler: FakeHandler, opts: { caps?: Partial<ModelCapabilities>; disable?: Array<'structured' | 'recipe' | 'llm'> } = {}): Promise<Run> {
+async function run(fixture: Fixture, handler: FakeHandler, opts: { caps?: Partial<ModelCapabilities>; disable?: ExtractRequest['disable'] } = {}): Promise<Run> {
   const provider = new FakeProvider(handler);
   const client = new ModelClient({ models: [fakeCaps(opts.caps)], providers: { fake: provider }, breaker: new CircuitBreaker() });
   const outcome = await extractStructured(
@@ -224,9 +224,22 @@ describe('adversarial models over the corpus', () => {
     expect(score.valuePrecision).toBeLessThan(1);
   });
 
-  it('large-listing with a small-context model: partial, truncated, never complete', async () => {
+  it('large-listing with a small-context model: partitioned into chunks, every record, complete', async () => {
     const fixture = loadFixture('large-listing');
     const { outcome, provider } = await run(fixture, oracleHandler(fixture), { caps: { contextTokens: 32_000, maxOutputTokens: 8_192 } });
+    expect(provider.calls.length).toBeGreaterThan(1);
+    expect(outcome.status).toBe('complete');
+    expect(outcome.scope.truncated).toBe(false);
+    expect(outcome.scope.strategy).toBe('partitioned');
+    const score = scoreExtraction(fixture, outcome.data);
+    expect(score.valuePrecision).toBe(1);
+    expect(score.valueRecall).toBe(1);
+    console.log(`large-listing (32k context): ${provider.calls.length} calls, records=${(outcome.data as { products: unknown[] }).products.length}/600`);
+  });
+
+  it('large-listing with a small-context model and partitioning off: partial, truncated, never complete', async () => {
+    const fixture = loadFixture('large-listing');
+    const { outcome, provider } = await run(fixture, oracleHandler(fixture), { caps: { contextTokens: 32_000, maxOutputTokens: 8_192 }, disable: ['partition'] });
     expect(provider.calls).toHaveLength(1);
     expect(outcome.status).toBe('partial');
     expect(outcome.scope.truncated).toBe(true);

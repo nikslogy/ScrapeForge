@@ -283,7 +283,12 @@ describe('extraction fixture corpus', () => {
 
   it('covers both shapes, every status, decoys and adversarial pages', () => {
     expect(fixtures.filter((f) => f.expectedShape === 'array').length).toBeGreaterThanOrEqual(4);
-    expect(new Set(fixtures.map((f) => f.expectStatus))).toEqual(new Set(['complete', 'partial', 'failed']));
+    // large-listing, the last page a correct reader could only answer in
+    // part, is complete since Phase 2 (partitioned extraction). Partial
+    // outcomes are covered by engine tests: partitioning off, failed chunks,
+    // the cost cap, ambiguous and unparseable values.
+    const statuses = new Set(fixtures.map((f) => f.expectStatus));
+    expect(statuses.has('complete') && statuses.has('failed')).toBe(true);
     expect(fixtures.filter((f) => f.tags.includes('decoys')).length).toBeGreaterThanOrEqual(10);
     // Both customer schema styles are represented.
     expect(fixtures.some((f) => normalizeSchema(f.schema).fromShorthand)).toBe(true);
@@ -563,6 +568,7 @@ describe('fixture traps', () => {
     expect($('#product-grid .badge--sale').length).toBeGreaterThan(50);
     expect($('.recently-viewed article.product-card')).toHaveLength(3);
     expect(f.tags).toContain('phase2');
-    expect(f.expectStatus).toBe('partial');
+    // Phase 2 answers all 600 cards by partitioned calls.
+    expect(f.expectStatus).toBe('complete');
   });
 });

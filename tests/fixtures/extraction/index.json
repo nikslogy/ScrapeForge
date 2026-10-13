@@ -15,6 +15,6 @@
     {"id": "multilingual-de", "category": "ecommerce-pdp", "expectedShape": "object", "expectStatus": "complete", "tags": ["pdp", "i18n", "locale-numbers", "microdata", "decoys"]},
     {"id": "next-data", "category": "spa-embedded-json", "expectedShape": "object", "expectStatus": "complete", "tags": ["embedded-json", "next-js", "spa", "relative-urls", "decoys"]},
     {"id": "value-at-end", "category": "long-article", "expectedShape": "object", "expectStatus": "complete", "tags": ["article", "long-input", "generated", "decoys"]},
-    {"id": "large-listing", "category": "ecommerce-listing", "expectedShape": "array", "expectStatus": "partial", "tags": ["listing", "large-input", "generated", "phase2", "nulls", "decoys"]}
+    {"id": "large-listing", "category": "ecommerce-listing", "expectedShape": "array", "expectStatus": "complete", "tags": ["listing", "large-input", "generated", "phase2", "nulls", "decoys"]}
   ]
 }

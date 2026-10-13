@@ -191,9 +191,18 @@ describe('recipe learning (await mode)', () => {
   it('does not learn from truncated input', async () => {
     const { store, kv } = memoryStore();
     const { client } = fakeClient(listingModel, { contextTokens: 2_500, maxOutputTokens: 512 });
-    const out = await extractStructured(request(listing(items(60)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: store, learning: 'await' });
+    const out = await extractStructured(request(listing(items(60)), LISTING_SCHEMA, { url: LISTING_URL, disable: ['partition'] }), { modelClient: client, recipeStore: store, learning: 'await' });
     expect(out.scope.truncated).toBe(true);
     expect(kv.data.size).toBe(0);
+  });
+
+  it('learns from a listing answered in full by partitioned calls', async () => {
+    const { store, kv } = memoryStore();
+    const { client } = fakeClient(listingModel, { contextTokens: 2_500, maxOutputTokens: 512 });
+    const out = await extractStructured(request(listing(items(60)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: store, learning: 'await' });
+    expect(out.scope.strategy).toBe('partitioned');
+    expect(out.scope.truncated).toBe(false);
+    expect(kv.data.size).toBeGreaterThan(0);
   });
 });
 
