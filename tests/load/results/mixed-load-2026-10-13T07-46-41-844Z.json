@@ -1,0 +1,167 @@
+{
+  "startedAt": "2026-10-13T07:45:52.395Z",
+  "jobs": 150,
+  "clients": 8,
+  "workerConcurrency": 8,
+  "browserContexts": 2,
+  "mixed": {
+    "wallMs": 8722,
+    "jobsPerSec": 17.2,
+    "byKind": {
+      "static": {
+        "jobs": 53,
+        "completed": 53,
+        "failed": 0,
+        "p50Ms": 23,
+        "p95Ms": 425,
+        "tiers": [
+          1
+        ]
+      },
+      "product": {
+        "jobs": 37,
+        "completed": 37,
+        "failed": 0,
+        "p50Ms": 24,
+        "p95Ms": 423,
+        "tiers": [
+          1
+        ],
+        "extraction": {
+          "complete": 37
+        }
+      },
+      "spa": {
+        "jobs": 18,
+        "completed": 18,
+        "failed": 0,
+        "p50Ms": 738,
+        "p95Ms": 1435,
+        "tiers": [
+          4
+        ]
+      },
+      "large": {
+        "jobs": 15,
+        "completed": 15,
+        "failed": 0,
+        "p50Ms": 384,
+        "p95Ms": 898,
+        "tiers": [
+          1
+        ]
+      },
+      "slow": {
+        "jobs": 11,
+        "completed": 11,
+        "failed": 0,
+        "p50Ms": 1600,
+        "p95Ms": 2083,
+        "tiers": [
+          1
+        ]
+      },
+      "down": {
+        "jobs": 8,
+        "completed": 0,
+        "failed": 8,
+        "p50Ms": 1427,
+        "p95Ms": 1760,
+        "tiers": []
+      },
+      "limited": {
+        "jobs": 8,
+        "completed": 0,
+        "failed": 8,
+        "p50Ms": 490,
+        "p95Ms": 629,
+        "tiers": []
+      }
+    }
+  },
+  "burst": {
+    "jobs": 20,
+    "originFetches": 1,
+    "coalesced": 7,
+    "cachedOrCoalesced": 7,
+    "p50Ms": 1561,
+    "p95Ms": 1620
+  },
+  "snapshot": {
+    "originFetches": 1,
+    "msPerRequest": [
+      12,
+      8,
+      10
+    ],
+    "snapshotAgeMs": [
+      null,
+      12,
+      21
+    ]
+  },
+  "crashRecovery": {
+    "jobs": 10,
+    "completed": 10,
+    "p50Ms": 34996,
+    "maxMs": 36502,
+    "wallMs": 36502
+  },
+  "redisRestart": {
+    "jobs": 5,
+    "completed": 5,
+    "wallMs": 1028
+  },
+  "checks": [
+    {
+      "name": "A: every job ends as expected (pages complete; 500/429 sites fail retryably)",
+      "ok": true,
+      "detail": "150 jobs, 0 unexpected: []"
+    },
+    {
+      "name": "A: JSON-LD products extract complete without a model",
+      "ok": true,
+      "detail": "37/37 complete"
+    },
+    {
+      "name": "A: a failing site is fetched at most 4 times per job (no browser escalation)",
+      "ok": true,
+      "detail": "fetches per failing job: [4]"
+    },
+    {
+      "name": "B: 20 identical requests fetch the origin once",
+      "ok": true,
+      "detail": "{\"jobs\":20,\"originFetches\":1,\"coalesced\":7,\"cachedOrCoalesced\":7,\"p50Ms\":1561,\"p95Ms\":1620}"
+    },
+    {
+      "name": "C: three schemas on one page fetch it once",
+      "ok": true,
+      "detail": "{\"originFetches\":1,\"msPerRequest\":[12,8,10],\"snapshotAgeMs\":[null,12,21]}"
+    },
+    {
+      "name": "D: every in-flight job finishes after a worker crash",
+      "ok": true,
+      "detail": "{\"jobs\":10,\"completed\":10,\"p50Ms\":34996,\"maxMs\":36502,\"wallMs\":36502}"
+    },
+    {
+      "name": "E: the worker serves new jobs after Redis restarts",
+      "ok": true,
+      "detail": "{\"jobs\":5,\"completed\":5,\"wallMs\":1028}"
+    }
+  ],
+  "workerLogTail": [
+    "[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "[ioredis] Unhandled error event: Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221",
+    "Error: connect ECONNREFUSED 127.0.0.1:40221"
+  ]
+}

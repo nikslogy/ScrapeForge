@@ -47,6 +47,9 @@ vi.mock('ioredis', () => ({
       return h.kv.delete(key) ? 1 : 0;
     }
     async quit() {}
+    on() {
+      return this;
+    }
   },
 }));
 vi.mock('pg', () => ({

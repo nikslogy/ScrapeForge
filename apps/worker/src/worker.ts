@@ -49,6 +49,15 @@ const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
 });
+// ioredis reconnects on its own; without a listener every failed attempt is
+// printed as an "Unhandled error event". One line per 10 s is enough.
+let lastRedisErrorLog = 0;
+redis.on('error', (err: Error) => {
+  const now = Date.now();
+  if (now - lastRedisErrorLog < 10_000) return;
+  lastRedisErrorLog = now;
+  console.error(`[redis] ${err.message} (reconnecting)`);
+});
 
 const pg = new Pool({
   connectionString:
@@ -655,6 +664,10 @@ const workerOptions = {
   ),
   stalledInterval: parseInt(process.env.BULLMQ_STALLED_INTERVAL_MS || '15000'),
   maxStalledCount: parseInt(process.env.BULLMQ_MAX_STALLED_COUNT || '2'),
+  // A crashed worker's jobs are picked up once their lock expires: about
+  // lockDuration after the crash (35 s measured with the 30 s default).
+  // The lock is renewed every lockDuration / 2 while a job runs.
+  lockDuration: parseInt(process.env.BULLMQ_LOCK_DURATION_MS || '30000'),
 };
 
 const workers: Worker[] = [];

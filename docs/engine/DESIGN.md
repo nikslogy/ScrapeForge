@@ -548,7 +548,7 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 | 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | done (see "Large inputs (Phase 2)"); tables are not partitioned yet |
 | 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | done (see "Throughput (Phase 3)") |
 | 4 | Router: classify failures, engine vs network route, expiring per-template learning | done (see "Fetch routing (Phase 4)") |
-| 5 | Mixed-load and recovery checks, published limits | later |
+| 5 | Mixed-load and recovery checks, published limits | done: `tests/load/mixed-load.ts`, `docs/limits.md` |
 
 Inputs larger than the model budget are never silently cut. Phase 2 sends
 the relevant blocks, or every record in chunks. Whatever still could not
