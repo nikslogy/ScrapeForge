@@ -282,6 +282,48 @@ as grounded when the page names its key ("Wireless: Yes" for `wireless`) and
 is otherwise left to the other members. An object of booleans the page does
 not name is unverified and rejected.
 
+A cited value that does not appear as written gets these further checks, all
+in `engine.ts` (`groundIn`, `matchByMeaning`):
+
+* **As a number.** For a number field, a value like "512 GB SSD" is looked
+  up as the number it normalizes to (512).
+* **By meaning.** For a number or boolean, the value can be confirmed by a
+  short text of the cited block: the block itself, one of its sentences or
+  lines, or an attribute of its record. That text must normalize to exactly
+  the same value. Examples: "3" for class "star-rating Three", `false` for
+  "It is not eligible for fully remote work."
+  * For a boolean, the block must not also say the opposite.
+  * For a cited table, only the row naming the answer's own values counts
+    (a cell equal to "Nova X1"), narrowed to the column whose header names
+    the field ("5G" for `has5g`).
+  * Link and image attributes are never used.
+  * The evidence note says what matched, and the warning
+    `grounded_by_meaning` is added.
+* **In its own listing record.** An answer's home record is the record
+  that at least two of its cells cite, more than any other record. A value
+  whose citation fails, or that has none, is looked for in that record and
+  accepted with `citation_mismatch`. In a listing with a home record, a
+  number or boolean found only elsewhere on the page is rejected, because
+  the same small values appear on every card.
+* **With a block-id suffix.** "b22-r3" or "b22.3" reads as `b22`, with the
+  warning `block id suffix ignored`.
+* **As model filler.** A model placeholder that is printed nowhere ("N/A",
+  "Not specified", "unknown") counts as not found, not as an ungrounded
+  value.
+
+Normalization follows the field. If a number field names its unit ("SSD
+capacity in GB", `weightKg`, "Battery (mAh)"), the number printed in that
+unit is the value: "512 GB PCIe 4.0" gives 512. A value printed only in
+another unit of the same quantity is converted when the factor is exact,
+and rounded to the printed precision: "3.09 lb" gives 1.4 kg. Otherwise the
+value is `ambiguous`; "1 TB" for GB could mean decimal or binary units.
+
+Text saying there is no value becomes null with reason `not_found` and the
+detail "the page states no value". Examples: "Contact sales", "Price on
+request", "TBA", "Coming soon", "N/A", "—", "Sold out", "Unlimited seats",
+and their de/fr/es/it/pt/nl forms. "Free", "None" and "No reviews" stay
+`unparseable`, since they may mean 0.
+
 ### Outcome status
 
 Summarized here; exact rules under "Outcome semantics" above.

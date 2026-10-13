@@ -100,7 +100,7 @@ describe('numbers', () => {
     expect(failure(raw, number)).toBe('ambiguous');
   });
 
-  it.each([['Free'], ['Call for price'], ['N/A'], ['—'], ['One of the best'], ['SKU A1B2'], ['10,20,30'], [`${'1 '.repeat(150)}`]])(
+  it.each([['Free'], ['None'], ['No reviews yet'], ['One of the best'], ['SKU A1B2'], ['10,20,30'], [`${'1 '.repeat(150)}`]])(
     '%j is unparseable',
     (raw) => {
       expect(failure(raw, number)).toBe('unparseable');

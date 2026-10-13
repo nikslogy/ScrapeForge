@@ -13,7 +13,7 @@
 import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { roundMs, StageTracer } from '../tracing.js';
-import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks } from './document/index.js';
+import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, type BlockContext } from './document/index.js';
 import {
   Budget,
   buildExtractionPrompt,
@@ -61,7 +61,7 @@ import {
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
-import { checkGrounding, isUrlField, normalizeValue, prepareText, validateOutput, type NormalizeContext, type PreparedText } from './validate/index.js';
+import { checkGrounding, isUrlField, normalizeValue, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
 
 export type LearningMode = 'background' | 'await' | 'off';
 
@@ -105,6 +105,12 @@ const OUTPUT_HEADROOM = 2;
 const MEANING_MAX_CHARS = 200;
 const MEANING_MAX_ATTR_SETS = 24;
 const MEANING_MAX_TOKENS = 12;
+/** Attributes whose values are addresses, never a printed fact. */
+const MEANING_SKIP_ATTRS = new Set(['href', 'src', 'srcset', 'data-src', 'data-srcset', 'action', 'poster', 'cite', 'data-href', 'data-url']);
+/** Sentences/lines of a long block tried by matchByMeaning. */
+const MEANING_MAX_PIECES = 24;
+/** Cells of one answer that must cite the same record before it counts as the answer's record. */
+const HOME_RECORD_MIN_VOTES = 2;
 /** Output-bound listings: answer JSON is assumed this much larger than its bare content (spacing, escapes). */
 const OUTPUT_FORMAT_FACTOR = 1.2;
 /** Records whose text is sampled to estimate a listing record's answer size. */
@@ -261,6 +267,83 @@ function isEmptyRaw(v: unknown, depth = 0): boolean {
   if (depth > 32) return false;
   const members = Array.isArray(v) ? v : Object.values(v);
   return members.every((m) => isEmptyRaw(m, depth + 1));
+}
+
+// What models write instead of null when they find nothing. Only taken as
+// "not found" when the text is not printed in the cited block or record.
+const PLACEHOLDER_ANSWER =
+  /^(?:n\/?a|n\.a\.?|none|null|nil|undefined|unknown|missing|empty|-+|—|–|not (?:found|available|applicable|specified|provided|mentioned|listed|stated|given|present|shown)|no (?:data|information|info|value)(?: (?:available|found|provided))?)$/;
+
+function isPlaceholderAnswer(v: unknown): boolean {
+  if (typeof v !== 'string' || v.length > 40) return false;
+  return PLACEHOLDER_ANSWER.test(v.trim().toLowerCase().replace(/[.!]+$/, ''));
+}
+
+const MAX_TABLE_ROWS = 2_000;
+
+function looseText(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function alnum(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * Cells of the one table row (rendered "a | b | c") that has a cell equal to
+ * one of the answer's own values, narrowed to the field's column when one
+ * header names it ("5G" for has5g, "Battery (mAh)" for batteryMah). Null
+ * when no single row is named.
+ */
+function tableCells(text: string, keys: readonly string[], field: FieldSpec): string[] | null {
+  const wanted = new Set(keys.map(looseText).filter((k) => k.length >= 2));
+  if (wanted.size === 0) return null;
+  const rows = text
+    .split('\n')
+    .slice(0, MAX_TABLE_ROWS)
+    .filter((line) => line.includes(' | '))
+    .map((line) => line.split(' | ').map((c) => c.trim()));
+  if (rows.length < 2) return null;
+  const hits = rows.slice(1).filter((cells) => cells.some((c) => wanted.has(looseText(c))));
+  if (hits.length !== 1) return null;
+  const [row] = hits;
+  const header = rows[0];
+  if (header.length === row.length) {
+    const col = fieldColumn(header, field);
+    if (col >= 0) return [row[col]];
+  }
+  return row;
+}
+
+/** Index of the one header that names the field (longest match wins), or -1. */
+function fieldColumn(header: readonly string[], field: FieldSpec): number {
+  const name = alnum(field.name);
+  let best = -1;
+  let bestLen = 0;
+  let tie = false;
+  header.forEach((h, i) => {
+    // "Battery (mAh)" → "battery", "Price*" → "price".
+    const key = alnum(h.replace(/\([^)]*\)|\[[^\]]*\]/g, ''));
+    if (key.length < 2 || !(name.includes(key) || key.includes(name))) return;
+    if (key.length > bestLen) [best, bestLen, tie] = [i, key.length, false];
+    else if (key.length === bestLen) tie = true;
+  });
+  return tie ? -1 : best;
+}
+
+/** A number with at least three significant digits ("512", "47.82"), so finding it somewhere on the page means something. */
+function isDistinctiveNumber(text: string): boolean {
+  return (text.match(/\d/g) ?? []).join('').replace(/^0+/, '').length >= 3;
+}
+
+/** A block's text, then its sentences and lines (bounded) when it has several. */
+function textPieces(text: string): string[] {
+  const pieces = text
+    .slice(0, MEANING_MAX_CHARS * MEANING_MAX_PIECES)
+    .split(/\n|(?<=[.!?])\s+|\s[·|•]\s|;\s/)
+    .filter((p) => p.trim() !== '')
+    .slice(0, MEANING_MAX_PIECES);
+  return pieces.length > 1 ? [text, ...pieces] : [text];
 }
 
 function hasOwn(obj: object, key: string): boolean {
@@ -986,43 +1069,90 @@ class ExtractionRun {
 
   private processRecord(record: ParsedRecord, fields: FieldSpec[], shape: EffectiveShape): Map<string, LlmSlot> {
     const out = new Map<string, LlmSlot>();
+    const home = shape === 'object' ? undefined : this.homeRecord(record, fields);
+    // The answer's own words ("Nova X1 Pro"): they say which table row it describes.
+    const keys: string[] = [];
+    for (const field of fields) {
+      const v = hasOwn(record, field.name) ? record[field.name].v : undefined;
+      if (field.type === 'string' && typeof v === 'string' && v.length >= 2 && v.length <= MEANING_MAX_CHARS) keys.push(v);
+    }
     for (const field of fields) {
       const cell: ParsedCell = hasOwn(record, field.name) ? record[field.name] : { v: null, b: null };
-      out.set(field.name, this.processCell(field, cell, shape));
+      out.set(field.name, this.processCell(field, cell, shape, home, keys));
     }
     return out;
   }
 
+  /**
+   * The listing record a model answer describes: the record most of its
+   * cells cite (at least two, and more than any other record). A value
+   * whose own citation does not check out is then looked for in that
+   * record, so one miscited cell ("4 stars" citing the next card) does not
+   * lose a value its own card prints.
+   */
+  private homeRecord(record: ParsedRecord, fields: FieldSpec[]): BlockContext | undefined {
+    const votes = new Map<string, number>();
+    for (const field of fields) {
+      if (!hasOwn(record, field.name)) continue;
+      const cell = record[field.name];
+      if (!cell.b || isEmptyRaw(cell.v)) continue;
+      const ctx = blockContext(this.doc, cell.b);
+      const id = ctx?.record?.id ?? (ctx?.block.kind === 'record' ? ctx.block.id : undefined);
+      if (id) votes.set(id, (votes.get(id) ?? 0) + 1);
+    }
+    let best: string | undefined;
+    let bestVotes = 0;
+    let tie = false;
+    for (const [id, n] of votes) {
+      if (n > bestVotes) [best, bestVotes, tie] = [id, n, false];
+      else if (n === bestVotes) tie = true;
+    }
+    if (!best || bestVotes < HOME_RECORD_MIN_VOTES || tie) return undefined;
+    return blockContext(this.doc, best);
+  }
+
   /** Grounding, then normalization, of one model-reported value. */
-  private processCell(field: FieldSpec, cell: ParsedCell, shape: EffectiveShape): LlmSlot {
-    const notFound = (): LlmSlot => ({
+  private processCell(field: FieldSpec, cell: ParsedCell, shape: EffectiveShape, home?: BlockContext, keys: readonly string[] = []): LlmSlot {
+    const notFound = (detail?: string): LlmSlot => ({
       value: null,
       source: 'llm',
       clean: true,
-      missing: this.truncated && shape !== 'array'
+      missing: this.truncated && shape !== 'array' && !detail
         ? { reason: 'not_processed', detail: 'input was truncated; the value may be in the part not sent to the model' }
-        : { reason: 'not_found' },
+        : { reason: 'not_found', ...(detail ? { detail } : {}) },
     });
     if (isEmptyRaw(cell.v)) return notFound();
 
-    const ctx = cell.b ? blockContext(this.doc, cell.b) : undefined;
-    const blockId = ctx ? ctx.block.id : undefined;
-    const recordGroupId = ctx?.record?.recordGroupId ?? ctx?.block.recordGroupId;
-    const excerpt = ctx ? excerptOf(ctx.block) : undefined;
+    const cited = cell.b ? blockContext(this.doc, cell.b) : undefined;
+    let ctx = cited;
     let grounded = false;
     let clean = true;
     let note: string | undefined;
+    let mismatch = false;
 
     if (field.derived) {
       clean = false;
     } else {
-      const g = checkGrounding(
-        cell.v,
-        { blockText: ctx?.block.text, attrs: ctx?.block.attrs, recordText: ctx?.record?.text, recordAttrs: ctx?.recordAttrs, documentText: this.prepared },
-        { derived: false },
-      );
-      const meaning = !g.grounded || g.where === 'none' ? (ctx ? this.matchByMeaning(field, cell.v, ctx) : null) : null;
-      if ((!g.grounded || g.where === 'none') && !meaning) {
+      let found = cited ? this.groundIn(field, cell.v, cited, keys) : null;
+      // The citation did not check out (or there was none): try the record
+      // the rest of this answer cites before the whole page.
+      if ((!found || found.where === 'document') && home && home.block.id !== (cited?.record?.id ?? cited?.block.id)) {
+        const inHome = this.groundIn(field, cell.v, home, keys);
+        if (inHome && inHome.where !== 'document') {
+          found = inHome;
+          ctx = home;
+          mismatch = true;
+          note = `${cell.b ? `cited ${cell.b}` : 'no block cited'}; value found in its record ${home.block.id}${inHome.meaning ? ` (${inHome.meaning})` : ''}`;
+        }
+      }
+      if (!found && !cited) found = this.groundIn(field, cell.v, undefined, keys);
+      // In a listing, the same small numbers and yes/no words are printed on
+      // every card: found only elsewhere on the page, and not in this
+      // answer's own card, it most likely belongs to another one.
+      if (found?.where === 'document' && home && field.type !== 'string' && field.type !== 'array' && field.type !== 'object') found = null;
+      if (!found) {
+        // "N/A", "Not specified": the model's way of saying it found nothing.
+        if (isPlaceholderAnswer(cell.v)) return notFound();
         this.rejectedCount++;
         return {
           value: null,
@@ -1033,14 +1163,21 @@ class ExtractionRun {
         };
       }
       grounded = true;
-      if (meaning) {
-        note = meaning;
-        this.warnings.add('grounded_by_meaning');
-      } else if (g.where === 'document') {
-        clean = false;
-        note = cell.b ? `cited ${cell.b} but the value is elsewhere on the page` : 'no block cited; value found elsewhere on the page';
+      if (found.meaning) this.warnings.add('grounded_by_meaning');
+      if (!note) {
+        if (found.where === 'document') {
+          mismatch = true;
+          note = cell.b ? `cited ${cell.b} but the value is elsewhere on the page` : 'no block cited; value found elsewhere on the page';
+        } else if (found.meaning) {
+          note = found.meaning;
+        }
       }
+      if (mismatch) clean = false;
     }
+
+    const blockId = ctx ? ctx.block.id : undefined;
+    const recordGroupId = ctx?.record?.recordGroupId ?? ctx?.block.recordGroupId;
+    const excerpt = ctx ? excerptOf(ctx.block) : undefined;
 
     const norm = normalizeValue(cell.v, field, this.nctx);
     if (!norm.ok) {
@@ -1048,7 +1185,10 @@ class ExtractionRun {
       const reason: MissingReason = norm.reason === 'ambiguous' ? 'ambiguous' : 'unparseable';
       return { value: null, source: 'llm', raw: cell.v, clean: false, missing: { reason, detail: `${norm.reason}: ${norm.detail}` } };
     }
-    if (isEmptyRaw(norm.value)) return notFound();
+    if (isEmptyRaw(norm.value)) {
+      // "Contact sales" for a price: the page says there is none.
+      return norm.steps.includes('no-value') ? notFound(`the page states no value: ${clip(String(cell.v), 60)}`) : notFound();
+    }
 
     const evidence: Omit<FieldEvidence, 'path'> = {
       source: 'llm',
@@ -1062,39 +1202,84 @@ class ExtractionRun {
     if (note) evidence.note = note;
     const slot: LlmSlot = { value: norm.value, source: 'llm', raw: cell.v, clean, evidence };
     if (recordGroupId) slot.recordGroupId = recordGroupId;
-    if (note) slot.citationNote = note;
+    if (mismatch && note) slot.citationNote = note;
     return slot;
+  }
+
+  /**
+   * Where `raw` is printed relative to `ctx` (block, its attributes, its
+   * record, or elsewhere on the page), or null when it is not. A number
+   * whose text is not printed as written ("512 GB SSD" for a cell reading
+   * "512 GB PCIe 4.0 NVMe SSD") is looked up as the number it normalizes
+   * to; a number or boolean the model wrote in its own words is matched by
+   * meaning against the cited block.
+   */
+  private groundIn(field: FieldSpec, raw: unknown, ctx: BlockContext | undefined, keys: readonly string[]): { where: string; meaning?: string } | null {
+    const sources = { blockText: ctx?.block.text, attrs: ctx?.block.attrs, recordText: ctx?.record?.text, recordAttrs: ctx?.recordAttrs, documentText: this.prepared };
+    const near = (r: GroundingResult): boolean => r.grounded && r.where !== 'none' && r.where !== 'document';
+    const g = checkGrounding(raw, sources, { derived: false });
+    if (near(g)) return { where: g.where };
+    let byNumber: GroundingResult | undefined;
+    if (typeof raw === 'string' && (field.type === 'number' || field.type === 'integer')) {
+      const n = normalizeValue(raw, field, this.nctx);
+      if (n.ok && typeof n.value === 'number' && !n.steps.some((s) => s.startsWith('convert:'))) {
+        byNumber = checkGrounding(n.value, sources, { derived: false });
+        if (near(byNumber)) return { where: byNumber.where };
+      }
+    }
+    const meaning = ctx ? this.matchByMeaning(field, raw, ctx, keys) : null;
+    if (meaning) return { where: 'block', meaning };
+    if (g.grounded && g.where === 'document') return { where: 'document' };
+    // A number found only as the number it normalizes to, somewhere on the
+    // page, and with no citation to say where: only when it is distinctive
+    // ("512", "47.82"; never "1" or "4").
+    if (!ctx && byNumber?.grounded && byNumber.where === 'document' && typeof raw === 'string' && isDistinctiveNumber(raw)) return { where: 'document' };
+    return null;
   }
 
   /**
    * Second chance for a number or boolean the model wrote in its own form
    * instead of copying it ("3" for a rating the page shows as class
-   * "star-rating Three", "true" for "In stock"). Short texts of the cited
-   * block and its record's attributes are normalized with the field's own
-   * rules; the value is accepted only when one of them converts to exactly
-   * the same value. Strings never take this path: their meaning is too loose
-   * to compare. Returns a note for the evidence, or null.
+   * "star-rating Three", "true" for "In stock", "false" for remote when the
+   * block says "It is not eligible for fully remote work"). Short texts of
+   * the cited block (its sentences and lines, when it is long) and its
+   * record's attributes are normalized with the field's own rules; the
+   * value is accepted only when one of them converts to exactly the same
+   * value, and, for a yes/no field, none of them to the opposite. Strings
+   * never take this path: their meaning is too loose to compare. Returns a
+   * note for the evidence, or null.
    */
-  private matchByMeaning(field: FieldSpec, raw: unknown, ctx: NonNullable<ReturnType<typeof blockContext>>): string | null {
+  private matchByMeaning(field: FieldSpec, raw: unknown, ctx: BlockContext, keys: readonly string[] = []): string | null {
     if (field.type !== 'boolean' && field.type !== 'number' && field.type !== 'integer') return null;
     const target = normalizeValue(raw, field, this.nctx);
     if (!target.ok || isEmptyRaw(target.value)) return null;
-    const candidates: string[] = [ctx.block.text];
+    // A whole table cited: only the row this answer names, in the field's column when the header says which.
+    const row = ctx.block.kind === 'table' ? tableCells(ctx.block.text, keys, field) : null;
+    const candidates: string[] = row ?? [...textPieces(ctx.block.text)];
     const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
     for (const attrs of attrSets) {
-      for (const value of Object.values(attrs)) {
+      for (const [name, value] of Object.entries(attrs)) {
+        // Links and image paths hold digits that mean nothing ("/3f/c6/…").
+        if (MEANING_SKIP_ATTRS.has(name) || /[/\\=?&#]|:\/\//.test(value)) continue;
         candidates.push(value);
         // Class lists carry one token per fact ("star-rating Three").
         if (/\s/.test(value)) candidates.push(...value.split(/\s+/).slice(0, MEANING_MAX_TOKENS));
       }
     }
+    let match: string | null = null;
     for (const candidate of candidates) {
       const text = candidate.trim();
       if (text === '' || text.length > MEANING_MAX_CHARS) continue;
       const n = normalizeValue(text, field, this.nctx);
-      if (n.ok && n.value === target.value) return `matched by meaning: "${text.slice(0, 60)}" in ${ctx.block.id}`;
+      if (!n.ok || isEmptyRaw(n.value)) continue;
+      if (n.value === target.value) {
+        match ??= `matched by meaning: "${text.slice(0, 60)}" in ${ctx.block.id}`;
+        if (field.type !== 'boolean') return match;
+      } else if (field.type === 'boolean') {
+        return null; // the block says both: not a confirmation
+      }
     }
-    return null;
+    return match;
   }
 
   // ── merge ────────────────────────────────────────────────

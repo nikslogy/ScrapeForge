@@ -32,6 +32,7 @@ const MAX_NESTING = 512;
 const MAX_CANDIDATES = 8;
 const MAX_DISTINCT_WARNINGS = 20;
 const BLOCK_ID = /^b\d{1,9}$/;
+const BLOCK_ID_WITH_PART = /^(b\d{1,9})(?:[-_.:/#]\w{1,12}|(?:r|row|c|col|cell)\d{1,6})$/;
 
 /** Counts repeated warnings so a 500-record listing yields one line per kind. */
 class Warnings {
@@ -444,6 +445,13 @@ function blockId(b: unknown, warnings: Warnings): string | null {
   const id = b.trim().replace(/^\[\s*([^\]]*?)\s*\]$/, '$1').toLowerCase();
   if (id === '' || id === 'null') return null;
   if (BLOCK_ID.test(id)) return id;
+  // "b22-r3", "b22.3", "b22r3": a row or part of block b22. The value is
+  // still verified against b22, so keeping the block costs nothing.
+  const part = BLOCK_ID_WITH_PART.exec(id);
+  if (part) {
+    warnings.add('block id suffix ignored');
+    return part[1];
+  }
   warnings.add('invalid block id replaced by null');
   return null;
 }

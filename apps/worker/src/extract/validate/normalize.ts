@@ -6,6 +6,8 @@
 // say exactly how a value was produced. It never guesses: two different
 // numbers in one price ("$10 - $20") are 'ambiguous', "Free" is
 // 'unparseable', and an object where a number belongs is a 'type_mismatch'.
+// Text that says there is no value ("Contact sales", "TBA") reads as null,
+// with the step 'no-value', so a correct answer to such a page is complete.
 
 import type { FieldSpec, FieldType, JsonSchema } from '../types.js';
 import { readAvailability, readWorkplace, workplaceTopic } from './booleans.js';
@@ -17,6 +19,7 @@ import {
   stripCurrencySymbols,
   type NumericToken,
 } from './numbers.js';
+import { convertUnit, fieldUnit, unitAfter, type Unit } from './units.js';
 
 export { findNumericTokens, localeNumberCandidates, parseLocaleNumber } from './numbers.js';
 export type { LocaleNumberOptions, NumericToken } from './numbers.js';
@@ -54,7 +57,7 @@ function normalizeAt(raw: unknown, field: FieldSpec, ctx: NormalizeContext, dept
   switch (field.type) {
     case 'number':
     case 'integer':
-      return normalizeNumber(raw, field.type === 'integer', ctx);
+      return normalizeNumber(raw, field, ctx);
     case 'boolean':
       return normalizeBoolean(raw, field);
     case 'string':
@@ -97,7 +100,50 @@ const SCALE: Record<string, number> = {
 };
 const SCALE_WORDS = new Set(['k', 'm', 'b', 'mil', ...Object.keys(SCALE).map((k) => k.toLowerCase())]);
 
-function normalizeNumber(raw: unknown, integer: boolean, ctx: NormalizeContext): NormalizeResult {
+// What a page prints where a number would be when there is none. Matched
+// against the whole text (an optional "Price:" label and up to four trailing
+// words allowed), and only when the text holds no digit. "Free" is not here:
+// it may well mean 0. Neither are "None" or "No reviews", which may too.
+const NO_NUMBER_PHRASES = [
+  'contact(?: us| sales| (?:the )?(?:seller|dealer|store|vendor))?', 'call(?: us| for (?:price|pricing|a quote|details))',
+  'email us', 'enquire', 'inquire', '(?:request|get|ask for) (?:a )?(?:quote|price|pricing)', 'quote on request',
+  '(?:price |pricing )?(?:on|upon|by) (?:request|application)', 'available on request', 'p\\.?o\\.?a\\.?',
+  'custom(?: pricing| price| quote| plan)?', 'tailored(?: pricing)?', 'bespoke', "let'?s talk", 'talk to (?:sales|us)',
+  'tba', 'tbd', 'tbc', 't\\.b\\.[adc]\\.?', 'to be (?:announced|determined|confirmed)', 'coming soon',
+  'not yet (?:available|announced|released|known|rated|priced)',
+  'n/a', 'n\\.a\\.?', 'not available', 'not applicable', '(?:currently |temporarily )?unavailable',
+  'out of stock', 'sold out', 'discontinued', 'no longer available',
+  'unknown', 'not (?:specified|listed|stated|disclosed|provided|rated)', 'no (?:price|rating)(?: yet)?',
+  'unlimited', 'varies', 'variable', 'see (?:details|store|below|website|site)',
+  // de, fr, es, it, pt, nl
+  '(?:preis )?auf anfrage', 'k\\. ?a\\.', 'keine angabe', 'nicht (?:verfügbar|lieferbar|angegeben)', 'ausverkauft', 'demnächst',
+  '(?:prix )?sur demande', 'nous contacter', 'épuisée?', 'bientôt disponible', 'non disponible', 'indisponible',
+  '(?:precio )?(?:a consultar|bajo pedido)', 'consultar', 'agotado', 'próximamente', 'no disponible',
+  '(?:prezzo )?su richiesta', 'esaurito', 'non disponibile', 'prossimamente',
+  'sob consulta', 'esgotado', 'em breve', 'indisponível', 'op aanvraag', 'uitverkocht', 'niet beschikbaar',
+];
+const NO_NUMBER = new RegExp(`^(?:[\\p{L} ]{1,24}:\\s*)?(?:${NO_NUMBER_PHRASES.join('|')})(?:\\s+[\\p{L}']+){0,4}$`, 'u');
+const DASHES_ONLY = /^[-‐‑‒–—―?]+$/u;
+
+/** Text stating that there is no number ("Contact sales", "TBA", "—"). */
+function statesNoNumber(text: string): boolean {
+  const t = text.toLowerCase().replace(/^[\s"'“”‘’([]+|[\s"'“”‘’)\].!:;]+$/gu, '');
+  return t === '' || DASHES_ONLY.test(t) || NO_NUMBER.test(t);
+}
+
+const NO_BOOLEAN = new RegExp(
+  `^(?:${['n/a', 'n\\.a\\.?', 'tba', 'tbd', 'tbc', 'to be (?:announced|determined|confirmed)', 'unknown',
+    'not (?:specified|stated|disclosed|provided|applicable)', 'keine angabe', 'k\\. ?a\\.'].join('|')})$`,
+  'u',
+);
+
+function statesNoBoolean(text: string): boolean {
+  const t = text.toLowerCase().replace(/^[\s"'“”‘’([]+|[\s"'“”‘’)\].!:;]+$/gu, '');
+  return DASHES_ONLY.test(t) || NO_BOOLEAN.test(t);
+}
+
+function normalizeNumber(raw: unknown, field: FieldSpec, ctx: NormalizeContext): NormalizeResult {
+  const integer = field.type === 'integer';
   if (typeof raw === 'number') {
     if (!Number.isFinite(raw)) return fail('unparseable', 'number is not finite');
     if (integer && !Number.isInteger(raw)) return fail('type_mismatch', `${raw} is not an integer`);
@@ -114,6 +160,7 @@ function normalizeNumber(raw: unknown, integer: boolean, ctx: NormalizeContext):
 
   if (tokens.length === 0) {
     const spelled = parseNumberWords(text);
+    if (spelled === null && !/\d/.test(text) && statesNoNumber(text)) return ok(null, ['no-value']);
     if (spelled === null) return fail('unparseable', `no number in ${quote(text)}`);
     steps.push('number-word');
     return finishNumber(spelled, steps, integer);
@@ -134,6 +181,11 @@ function normalizeNumber(raw: unknown, integer: boolean, ctx: NormalizeContext):
     if (!reading) return fail('unparseable', `malformed number ${quote(token.text)}`);
     readings.push(reading);
   }
+  const unit = fieldUnit(field);
+  if (unit) {
+    const byUnit = readByUnit(text, tokens, readings, unit, integer);
+    if (byUnit) return byUnit;
+  }
   const distinct = [...new Set(readings.map((r) => r.value))];
   if (distinct.length > 1) {
     return fail('ambiguous', `several numbers in ${quote(text)}: ${distinct.slice(0, 3).join(', ')}`);
@@ -146,6 +198,37 @@ function normalizeNumber(raw: unknown, integer: boolean, ctx: NormalizeContext):
 interface Reading {
   value: number;
   steps: string[];
+  /** The unit printed right after the number, if any. */
+  unit?: Unit;
+}
+
+/**
+ * For a field that names its unit: the number printed in that unit
+ * ("512 GB PCIe 4.0" → 512 for "capacity in GB"), or else the one printed
+ * in another unit of the same quantity, converted ("3.09 lb" → 1.4 for
+ * "weight in kilograms"). Null when the text prints no unit of that
+ * quantity: the usual rules decide.
+ */
+function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], unit: Unit, integer: boolean): NormalizeResult | null {
+  const same = readings.filter((r) => r.unit?.id === unit.id);
+  const sameValues = [...new Set(same.map((r) => r.value))];
+  if (sameValues.length > 1) return fail('ambiguous', `several values in ${unit.id} in ${quote(text)}: ${sameValues.slice(0, 3).join(', ')}`);
+  if (sameValues.length === 1) {
+    const steps = tokens.length > 1 || hasExtraWords(text, tokens) ? ['extract-number'] : [];
+    steps.push(...same[0].steps, `unit:${unit.id}`);
+    return finishNumber(sameValues[0], steps, integer);
+  }
+  const others: Array<{ reading: Reading; token: NumericToken }> = [];
+  readings.forEach((reading, i) => {
+    if (reading.unit && reading.unit.dim === unit.dim) others.push({ reading, token: tokens[i] });
+  });
+  if (others.length === 0) return null;
+  const converted = others.map(({ reading, token }) => convertUnit(reading.value, token.text, reading.unit as Unit, unit));
+  const from = others[0].reading.unit as Unit;
+  if (converted.some((v) => v === null)) return fail('ambiguous', `${quote(text)} is in ${from.id}, the field asks for ${unit.id}`);
+  const values = [...new Set(converted as number[])];
+  if (values.length > 1) return fail('ambiguous', `several values in ${quote(text)}: ${values.slice(0, 3).join(', ')}`);
+  return finishNumber(values[0], ['extract-number', ...others[0].reading.steps, `convert:${from.id}-${unit.id}`], integer);
 }
 
 function readToken(text: string, token: NumericToken, integer: boolean, ctx: NormalizeContext): Reading | null | 'ambiguous' {
@@ -164,7 +247,10 @@ function readToken(text: string, token: NumericToken, integer: boolean, ctx: Nor
   } else if (/^ ?%/.test(after)) {
     steps.push('percent');
   }
-  return { value: value === 0 ? 0 : value, steps };
+  const reading: Reading = { value: value === 0 ? 0 : value, steps };
+  const unit = scale ? undefined : unitAfter(after);
+  if (unit) reading.unit = unit;
+  return reading;
 }
 
 /** "4.5 out of 5", "4/5", "3 of 5 stars": the first number is the value. */
@@ -230,7 +316,11 @@ function normalizeBoolean(raw: unknown, field: FieldSpec): NormalizeResult {
   if (parsed === 'ambiguous') {
     return fail('ambiguous', workplace ? `no clear remote/on-site answer in ${quote(text)}` : `both available and unavailable in ${quote(text)}`);
   }
-  if (parsed === null) return fail('unparseable', `not a yes/no value: ${quote(text)}`);
+  if (parsed === null) {
+    // "N/A" or "TBA" answers neither way; "not available" is an answer and never gets here.
+    if (statesNoBoolean(text)) return ok(null, ['no-value']);
+    return fail('unparseable', `not a yes/no value: ${quote(text)}`);
+  }
   return ok(parsed, ['parse-boolean']);
 }
 

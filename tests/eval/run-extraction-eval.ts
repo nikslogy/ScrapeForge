@@ -149,7 +149,7 @@ export interface RunRecord {
   resolvedProviders: string[];
   attempts: Array<{ ok: boolean; purpose: string; errorCategory?: string; latencyMs: number; resolvedModel?: string; resolvedProvider?: string }>;
   warnings: string[];
-  missing: Array<{ path: string; reason: string }>;
+  missing: Array<{ path: string; reason: string; detail?: string }>;
   /** Engine error (a bug), if the run threw. */
   error?: string;
 }
@@ -208,7 +208,7 @@ async function runOne(fixture: Fixture, repeat: number, client: ModelClient, arg
     resolvedProviders: [...new Set(outcome.llm.attempts.map((a) => a.resolvedProvider).filter((p): p is string => !!p))],
     attempts,
     warnings: outcome.warnings,
-    missing: outcome.missing.map((m) => ({ path: m.path, reason: m.reason })),
+    missing: outcome.missing.map((m) => ({ path: m.path, reason: m.reason, ...(m.detail ? { detail: m.detail } : {}) })),
   };
   if (error) record.error = error;
   return { record, score };
