@@ -121,6 +121,14 @@ describe('text that states there is no value', () => {
     expect(normalized(raw, price).ok).toBe(false);
   });
 
+  it('star glyphs count the filled stars', () => {
+    const rating = spec('rating', 'number');
+    expect(normalized('★★★★☆', rating)).toMatchObject({ ok: true, value: 4 });
+    expect(normalized('★★★½☆', rating)).toMatchObject({ ok: true, value: 3.5 });
+    expect(normalized('⭐⭐⭐', spec('stars', 'integer'))).toMatchObject({ ok: true, value: 3 });
+    expect(normalized('☆☆☆☆☆', rating).ok).toBe(false);
+  });
+
   it('booleans: "N/A" is no answer, "Not available" is an answer', () => {
     const inStock = spec('inStock', 'boolean');
     expect(normalized('N/A', inStock)).toEqual({ ok: true, value: null, steps: ['no-value'] });

@@ -158,6 +158,8 @@ function normalizeNumber(raw: unknown, field: FieldSpec, ctx: NormalizeContext):
   if (hasCurrencyMarker(text)) steps.push('strip-currency');
   const tokens = findNumericTokens(text, 8);
 
+  const stars = countStars(text);
+  if (stars !== null) return finishNumber(stars, ['star-glyphs'], integer);
   if (tokens.length === 0) {
     const spelled = parseNumberWords(text);
     if (spelled === null && !/\d/.test(text) && statesNoNumber(text)) return ok(null, ['no-value']);
@@ -260,6 +262,15 @@ function isRatingScale(text: string, [value, scale]: NumericToken[]): boolean {
   const a = parseLocaleNumber(value.text);
   const b = parseLocaleNumber(scale.text);
   return a !== null && b !== null && b > 0 && a <= b && !value.negative && !scale.negative;
+}
+
+/** "★★★★☆" → 4, "★★★½" → 3.5: filled stars (and one half) out of a row of star glyphs. */
+function countStars(text: string): number | null {
+  // NFKC turns "½" into "1⁄2".
+  const glyphs = text.replace(/\s+/g, '').replace('1\u20442', '½');
+  if (!/^[★⭐☆✩✰]*[½⯪⯨]?[☆✩✰]*$/u.test(glyphs) || !/[★⭐]/u.test(glyphs)) return null;
+  const full = (glyphs.match(/[★⭐]/gu) ?? []).length;
+  return /[½⯪⯨]/u.test(glyphs) ? full + 0.5 : full;
 }
 
 function parseNumberWords(text: string): number | null {

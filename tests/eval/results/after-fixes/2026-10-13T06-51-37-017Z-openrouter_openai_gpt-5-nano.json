@@ -1,0 +1,2317 @@
+{
+  "startedAt": "2026-10-13T06:51:37.017Z",
+  "args": {
+    "models": [
+      "openrouter:google/gemini-2.5-flash-lite",
+      "openrouter:anthropic/claude-haiku-5.5",
+      "openrouter:openai/gpt-5-nano",
+      "openrouter:google/gemini-3.8-flash"
+    ],
+    "repeat": 3,
+    "fixtures": [
+      "book-pdp-jsonld",
+      "book-pdp-plain",
+      "books-listing",
+      "electronics-pdp-sale",
+      "saas-pricing",
+      "news-article",
+      "specs-comparison-table",
+      "job-posting",
+      "prompt-injection",
+      "challenge-page",
+      "missing-fields",
+      "multilingual-de",
+      "next-data",
+      "value-at-end"
+    ],
+    "noStructured": false,
+    "concurrency": 4,
+    "maxCostUsd": 0.1,
+    "timeoutMs": 120000
+  },
+  "summary": {
+    "model": "openrouter:openai/gpt-5-nano",
+    "runs": 42,
+    "microPrecision": 0.9913419913419913,
+    "microRecall": 0.8450184501845018,
+    "macroPrecision": 0.9770219198790625,
+    "macroRecall": 0.9426550962265245,
+    "statusAccuracy": 0.7857142857142857,
+    "latencyP50Ms": 1058,
+    "latencyP95Ms": 14245,
+    "totalCostUsd": 0.008215980000000001,
+    "correctFields": 687,
+    "costPerCorrectFieldUsd": 0.000011959213973799129,
+    "calls": 36,
+    "inputTokens": 98958,
+    "outputTokens": 13959,
+    "failuresByCategory": {},
+    "statuses": {
+      "complete": 30,
+      "partial": 9,
+      "failed": 3
+    }
+  },
+  "records": [
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1111,
+      "calls": 1,
+      "inputTokens": 1783,
+      "outputTokens": 66,
+      "costUsd": 0.00011555,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1106,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1046,
+      "calls": 1,
+      "inputTokens": 1783,
+      "outputTokens": 66,
+      "costUsd": 0.00004067,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1042,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-jsonld",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 6,
+      "returned": 6,
+      "expected": 6,
+      "latencyMs": 1070,
+      "calls": 1,
+      "inputTokens": 1783,
+      "outputTokens": 66,
+      "costUsd": 0.00004067,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1066,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "conflict:availability"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 0.8571428571428571,
+      "recall": 0.8571428571428571,
+      "correct": 6,
+      "returned": 7,
+      "expected": 7,
+      "latencyMs": 1561,
+      "calls": 1,
+      "inputTokens": 1884,
+      "outputTokens": 133,
+      "costUsd": 0.0001474,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1556,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.8571428571428571,
+      "correct": 6,
+      "returned": 6,
+      "expected": 7,
+      "latencyMs": 1537,
+      "calls": 1,
+      "inputTokens": 1884,
+      "outputTokens": 141,
+      "costUsd": 0.0001506,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1532,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/availability",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b10 or on the page"
+        }
+      ]
+    },
+    {
+      "fixture": "book-pdp-plain",
+      "repeat": 3,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.8571428571428571,
+      "correct": 6,
+      "returned": 6,
+      "expected": 7,
+      "latencyMs": 1537,
+      "calls": 1,
+      "inputTokens": 1884,
+      "outputTokens": 152,
+      "costUsd": 0.00007436,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1533,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": [
+        {
+          "path": "/availability",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b10 or on the page"
+        }
+      ]
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 1,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.8,
+      "correct": 80,
+      "returned": 80,
+      "expected": 100,
+      "latencyMs": 14937,
+      "calls": 1,
+      "inputTokens": 5515,
+      "outputTokens": 2240,
+      "costUsd": 0.00117175,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 14914,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "grounded_by_meaning",
+        "ungrounded_values_rejected:20"
+      ],
+      "missing": [
+        {
+          "path": "/books/0/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b82 or on the page"
+        },
+        {
+          "path": "/books/1/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b90 or on the page"
+        },
+        {
+          "path": "/books/2/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b98 or on the page"
+        },
+        {
+          "path": "/books/3/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b106 or on the page"
+        },
+        {
+          "path": "/books/4/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b114 or on the page"
+        },
+        {
+          "path": "/books/5/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b122 or on the page"
+        },
+        {
+          "path": "/books/6/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b130 or on the page"
+        },
+        {
+          "path": "/books/7/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b138 or on the page"
+        },
+        {
+          "path": "/books/8/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b146 or on the page"
+        },
+        {
+          "path": "/books/9/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b154 or on the page"
+        },
+        {
+          "path": "/books/10/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b162 or on the page"
+        },
+        {
+          "path": "/books/11/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b171 or on the page"
+        },
+        {
+          "path": "/books/12/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b178 or on the page"
+        },
+        {
+          "path": "/books/13/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b186 or on the page"
+        },
+        {
+          "path": "/books/14/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b194 or on the page"
+        },
+        {
+          "path": "/books/15/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b202 or on the page"
+        },
+        {
+          "path": "/books/16/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b210 or on the page"
+        },
+        {
+          "path": "/books/17/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b218 or on the page"
+        },
+        {
+          "path": "/books/18/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b226 or on the page"
+        },
+        {
+          "path": "/books/19/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b234 or on the page"
+        }
+      ]
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.8,
+      "correct": 80,
+      "returned": 80,
+      "expected": 100,
+      "latencyMs": 14245,
+      "calls": 1,
+      "inputTokens": 5515,
+      "outputTokens": 2239,
+      "costUsd": 0.00117135,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 14224,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "grounded_by_meaning",
+        "ungrounded_values_rejected:20"
+      ],
+      "missing": [
+        {
+          "path": "/books/0/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b82 or on the page"
+        },
+        {
+          "path": "/books/1/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b90 or on the page"
+        },
+        {
+          "path": "/books/2/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b98 or on the page"
+        },
+        {
+          "path": "/books/3/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b106 or on the page"
+        },
+        {
+          "path": "/books/4/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b114 or on the page"
+        },
+        {
+          "path": "/books/5/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b122 or on the page"
+        },
+        {
+          "path": "/books/6/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b130 or on the page"
+        },
+        {
+          "path": "/books/7/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b138 or on the page"
+        },
+        {
+          "path": "/books/8/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b146 or on the page"
+        },
+        {
+          "path": "/books/9/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b154 or on the page"
+        },
+        {
+          "path": "/books/10/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b162 or on the page"
+        },
+        {
+          "path": "/books/11/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b171 or on the page"
+        },
+        {
+          "path": "/books/12/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b179 or on the page"
+        },
+        {
+          "path": "/books/13/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b186 or on the page"
+        },
+        {
+          "path": "/books/14/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b194 or on the page"
+        },
+        {
+          "path": "/books/15/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b202 or on the page"
+        },
+        {
+          "path": "/books/16/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b210 or on the page"
+        },
+        {
+          "path": "/books/17/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b218 or on the page"
+        },
+        {
+          "path": "/books/18/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b226 or on the page"
+        },
+        {
+          "path": "/books/19/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b234 or on the page"
+        }
+      ]
+    },
+    {
+      "fixture": "books-listing",
+      "repeat": 3,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.8,
+      "correct": 80,
+      "returned": 80,
+      "expected": 100,
+      "latencyMs": 14837,
+      "calls": 1,
+      "inputTokens": 5515,
+      "outputTokens": 2239,
+      "costUsd": 0.00092943,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 14810,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "grounded_by_meaning",
+        "ungrounded_values_rejected:20"
+      ],
+      "missing": [
+        {
+          "path": "/books/0/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b82 or on the page"
+        },
+        {
+          "path": "/books/1/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b90 or on the page"
+        },
+        {
+          "path": "/books/2/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b98 or on the page"
+        },
+        {
+          "path": "/books/3/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b106 or on the page"
+        },
+        {
+          "path": "/books/4/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b114 or on the page"
+        },
+        {
+          "path": "/books/5/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b122 or on the page"
+        },
+        {
+          "path": "/books/6/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b130 or on the page"
+        },
+        {
+          "path": "/books/7/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b138 or on the page"
+        },
+        {
+          "path": "/books/8/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b146 or on the page"
+        },
+        {
+          "path": "/books/9/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b154 or on the page"
+        },
+        {
+          "path": "/books/10/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b162 or on the page"
+        },
+        {
+          "path": "/books/11/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b171 or on the page"
+        },
+        {
+          "path": "/books/12/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b178 or on the page"
+        },
+        {
+          "path": "/books/13/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b186 or on the page"
+        },
+        {
+          "path": "/books/14/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b194 or on the page"
+        },
+        {
+          "path": "/books/15/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b202 or on the page"
+        },
+        {
+          "path": "/books/16/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b210 or on the page"
+        },
+        {
+          "path": "/books/17/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b218 or on the page"
+        },
+        {
+          "path": "/books/18/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b226 or on the page"
+        },
+        {
+          "path": "/books/19/rating",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b234 or on the page"
+        }
+      ]
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 0.8888888888888888,
+      "recall": 0.8888888888888888,
+      "correct": 8,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 1213,
+      "calls": 1,
+      "inputTokens": 2771,
+      "outputTokens": 84,
+      "costUsd": 0.00017215,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1207,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 9,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 1318,
+      "calls": 1,
+      "inputTokens": 2771,
+      "outputTokens": 96,
+      "costUsd": 0.00005599,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1309,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "electronics-pdp-sale",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 0.8888888888888888,
+      "recall": 0.8888888888888888,
+      "correct": 8,
+      "returned": 9,
+      "expected": 9,
+      "latencyMs": 1363,
+      "calls": 1,
+      "inputTokens": 2771,
+      "outputTokens": 96,
+      "costUsd": 0.00005599,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1357,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "multiple_offers"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2332,
+      "calls": 1,
+      "inputTokens": 1894,
+      "outputTokens": 257,
+      "costUsd": 0.0001975,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2328,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found",
+          "detail": "the page states no value: Custom pricing"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found",
+          "detail": "the page states no value: Unlimited seats"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2322,
+      "calls": 1,
+      "inputTokens": 1894,
+      "outputTokens": 256,
+      "costUsd": 0.00011646,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2318,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found",
+          "detail": "the page states no value: Custom pricing"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found",
+          "detail": "the page states no value: Unlimited seats"
+        }
+      ]
+    },
+    {
+      "fixture": "saas-pricing",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 13,
+      "returned": 13,
+      "expected": 13,
+      "latencyMs": 2250,
+      "calls": 1,
+      "inputTokens": 1894,
+      "outputTokens": 257,
+      "costUsd": 0.00011686,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 2244,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/3/monthlyPrice",
+          "reason": "not_found",
+          "detail": "the page states no value: Custom pricing"
+        },
+        {
+          "path": "/3/annualPricePerMonth",
+          "reason": "not_found"
+        },
+        {
+          "path": "/3/seatsIncluded",
+          "reason": "not_found",
+          "detail": "the page states no value: Unlimited seats"
+        }
+      ]
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 5,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 5,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "news-article",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 4,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 9924,
+      "calls": 1,
+      "inputTokens": 2336,
+      "outputTokens": 1554,
+      "costUsd": 0.0007384,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 9914,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "citation_mismatch:/phones/0/price",
+        "citation_mismatch:/phones/0/screenInches",
+        "citation_mismatch:/phones/0/batteryMah",
+        "citation_mismatch:/phones/0/weightG",
+        "citation_mismatch:/phones/0/has5g",
+        "citation_mismatch:/phones/0/releaseYear",
+        "citation_mismatch:/phones/1/model",
+        "citation_mismatch:/phones/1/price",
+        "citation_mismatch:/phones/1/screenInches",
+        "citation_mismatch:/phones/1/batteryMah",
+        "citation_mismatch:/phones/1/weightG",
+        "citation_mismatch:/phones/1/has5g",
+        "citation_mismatch:/phones/1/releaseYear",
+        "citation_mismatch:/phones/2/model",
+        "citation_mismatch:/phones/2/price",
+        "citation_mismatch:/phones/2/screenInches",
+        "citation_mismatch:/phones/2/batteryMah",
+        "citation_mismatch:/phones/2/weightG",
+        "citation_mismatch:/phones/2/has5g",
+        "citation_mismatch:/phones/2/releaseYear",
+        "citation_mismatch:+83 more"
+      ],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found",
+          "detail": "the page states no value: TBA"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 0.4423076923076923,
+      "correct": 46,
+      "returned": 46,
+      "expected": 104,
+      "latencyMs": 9757,
+      "calls": 1,
+      "inputTokens": 2336,
+      "outputTokens": 1534,
+      "costUsd": 0.00063248,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 9742,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "llm_response:invalid block id replaced by null (20 times)",
+        "ungrounded_values_rejected:58",
+        "citation_mismatch:/phones/1/model",
+        "citation_mismatch:/phones/2/model",
+        "citation_mismatch:/phones/3/model",
+        "citation_mismatch:/phones/4/model",
+        "citation_mismatch:/phones/5/model",
+        "citation_mismatch:/phones/6/model",
+        "citation_mismatch:/phones/7/model",
+        "citation_mismatch:/phones/8/model",
+        "citation_mismatch:/phones/9/model",
+        "citation_mismatch:/phones/9/price",
+        "citation_mismatch:/phones/9/screenInches",
+        "citation_mismatch:/phones/9/batteryMah",
+        "citation_mismatch:/phones/9/weightG",
+        "citation_mismatch:/phones/9/has5g",
+        "citation_mismatch:/phones/9/releaseYear",
+        "citation_mismatch:/phones/10/model",
+        "citation_mismatch:/phones/10/price",
+        "citation_mismatch:/phones/10/screenInches",
+        "citation_mismatch:/phones/10/batteryMah",
+        "citation_mismatch:/phones/10/weightG",
+        "citation_mismatch:+22 more"
+      ],
+      "missing": [
+        {
+          "path": "/phones/0/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/0/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/0/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/0/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/0/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/1/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/1/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/1/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/1/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/1/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/1/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/2/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/2/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/2/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/2/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/2/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/2/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/3/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/3/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/3/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/3/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/3/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/3/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/4/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/4/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/4/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/4/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/4/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/4/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/5/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/5/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/5/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/5/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/5/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/5/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/6/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/6/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/6/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/6/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/6/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found on the page"
+        },
+        {
+          "path": "/phones/6/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/7/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/7/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/7/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/7/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/7/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/7/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/8/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/8/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/8/batteryMah",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/8/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/8/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/8/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b9 or on the page"
+        },
+        {
+          "path": "/phones/12/price",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/12/screenInches",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/12/weightG",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/12/has5g",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/12/releaseYear",
+          "reason": "rejected_ungrounded",
+          "detail": "value not found in cited block b20 or on the page"
+        },
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found",
+          "detail": "the page states no value: TBA"
+        }
+      ]
+    },
+    {
+      "fixture": "specs-comparison-table",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "llm",
+      "precision": 1,
+      "recall": 1,
+      "correct": 104,
+      "returned": 104,
+      "expected": 104,
+      "latencyMs": 9240,
+      "calls": 1,
+      "inputTokens": 2336,
+      "outputTokens": 1450,
+      "costUsd": 0.00059888,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 9231,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "llm_response:invalid block id replaced by null (104 times)",
+        "citation_mismatch:/phones/0/price",
+        "citation_mismatch:/phones/0/screenInches",
+        "citation_mismatch:/phones/0/batteryMah",
+        "citation_mismatch:/phones/0/weightG",
+        "citation_mismatch:/phones/0/has5g",
+        "citation_mismatch:/phones/0/releaseYear",
+        "citation_mismatch:/phones/1/model",
+        "citation_mismatch:/phones/1/price",
+        "citation_mismatch:/phones/1/screenInches",
+        "citation_mismatch:/phones/1/batteryMah",
+        "citation_mismatch:/phones/1/weightG",
+        "citation_mismatch:/phones/1/has5g",
+        "citation_mismatch:/phones/1/releaseYear",
+        "citation_mismatch:/phones/2/model",
+        "citation_mismatch:/phones/2/price",
+        "citation_mismatch:/phones/2/screenInches",
+        "citation_mismatch:/phones/2/batteryMah",
+        "citation_mismatch:/phones/2/weightG",
+        "citation_mismatch:/phones/2/has5g",
+        "citation_mismatch:/phones/2/releaseYear",
+        "citation_mismatch:+83 more"
+      ],
+      "missing": [
+        {
+          "path": "/phones/13/price",
+          "reason": "not_found",
+          "detail": "the page states no value: TBA"
+        }
+      ]
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 8,
+      "returned": 8,
+      "expected": 8,
+      "latencyMs": 1054,
+      "calls": 1,
+      "inputTokens": 1509,
+      "outputTokens": 45,
+      "costUsd": 0.00009345,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1049,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 8,
+      "returned": 8,
+      "expected": 8,
+      "latencyMs": 1115,
+      "calls": 1,
+      "inputTokens": 1509,
+      "outputTokens": 45,
+      "costUsd": 0.00003009,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1111,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "job-posting",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 8,
+      "returned": 8,
+      "expected": 8,
+      "latencyMs": 1105,
+      "calls": 1,
+      "inputTokens": 1509,
+      "outputTokens": 45,
+      "costUsd": 0.00003009,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1099,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 958,
+      "calls": 1,
+      "inputTokens": 1915,
+      "outputTokens": 73,
+      "costUsd": 0.00012495,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 954,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 960,
+      "calls": 1,
+      "inputTokens": 1915,
+      "outputTokens": 69,
+      "costUsd": 0.00012335,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 954,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "prompt-injection",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1027,
+      "calls": 1,
+      "inputTokens": 1915,
+      "outputTokens": 73,
+      "costUsd": 0.00004431,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1024,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 1,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 2,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        }
+      ]
+    },
+    {
+      "fixture": "challenge-page",
+      "repeat": 3,
+      "status": "failed",
+      "expectedStatus": "failed",
+      "method": "none",
+      "precision": 1,
+      "recall": 1,
+      "correct": 0,
+      "returned": 0,
+      "expected": 0,
+      "latencyMs": 1,
+      "calls": 0,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0,
+      "truncated": false,
+      "resolvedModels": [],
+      "resolvedProviders": [],
+      "attempts": [],
+      "warnings": [
+        "source_page_blocked:challenge_page"
+      ],
+      "missing": [
+        {
+          "path": "/title",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/price",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        },
+        {
+          "path": "/rating",
+          "reason": "not_processed",
+          "detail": "source_page_blocked"
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 1,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 950,
+      "calls": 1,
+      "inputTokens": 1841,
+      "outputTokens": 54,
+      "costUsd": 0.00011365,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 947,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found",
+          "detail": "the page states no value: Currently unavailable."
+        },
+        {
+          "path": "/rating",
+          "reason": "unparseable",
+          "detail": "unparseable: no number in \"No customer reviews\""
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 2,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 1034,
+      "calls": 1,
+      "inputTokens": 1841,
+      "outputTokens": 54,
+      "costUsd": 0.00003301,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1030,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found",
+          "detail": "the page states no value: Currently unavailable."
+        },
+        {
+          "path": "/rating",
+          "reason": "unparseable",
+          "detail": "unparseable: no number in \"No customer reviews\""
+        }
+      ]
+    },
+    {
+      "fixture": "missing-fields",
+      "repeat": 3,
+      "status": "partial",
+      "expectedStatus": "complete",
+      "method": "structured-data",
+      "precision": 1,
+      "recall": 1,
+      "correct": 2,
+      "returned": 2,
+      "expected": 2,
+      "latencyMs": 927,
+      "calls": 1,
+      "inputTokens": 1841,
+      "outputTokens": 54,
+      "costUsd": 0.00003301,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 923,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": [
+        {
+          "path": "/price",
+          "reason": "not_found",
+          "detail": "the page states no value: Currently unavailable."
+        },
+        {
+          "path": "/rating",
+          "reason": "unparseable",
+          "detail": "unparseable: no number in \"No customer reviews\""
+        }
+      ]
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 903,
+      "calls": 1,
+      "inputTokens": 1702,
+      "outputTokens": 41,
+      "costUsd": 0.0001015,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 897,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 865,
+      "calls": 1,
+      "inputTokens": 1702,
+      "outputTokens": 41,
+      "costUsd": 0.00003238,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 862,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "multilingual-de",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 5,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 989,
+      "calls": 1,
+      "inputTokens": 1702,
+      "outputTokens": 41,
+      "costUsd": 0.0001015,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 984,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 0.8,
+      "recall": 0.8,
+      "correct": 4,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1036,
+      "calls": 1,
+      "inputTokens": 785,
+      "outputTokens": 58,
+      "costUsd": 0.00006245,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1034,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "conflict:sku",
+        "structured_value_not_visible:images"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 0.8,
+      "recall": 0.8,
+      "correct": 4,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1166,
+      "calls": 1,
+      "inputTokens": 785,
+      "outputTokens": 77,
+      "costUsd": 0.00007005,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1164,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "llm_response:invalid block id replaced by null",
+        "conflict:sku",
+        "structured_value_not_visible:images",
+        "ungrounded_values_rejected:1"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "next-data",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 0.8,
+      "recall": 0.8,
+      "correct": 4,
+      "returned": 5,
+      "expected": 5,
+      "latencyMs": 1338,
+      "calls": 1,
+      "inputTokens": 785,
+      "outputTokens": 86,
+      "costUsd": 0.00007365,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1336,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [
+        "conflict:sku",
+        "structured_value_not_visible:images",
+        "ungrounded_values_rejected:1",
+        "citation_mismatch:/sku"
+      ],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 1,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 1058,
+      "calls": 1,
+      "inputTokens": 9051,
+      "outputTokens": 59,
+      "costUsd": 0.00047615,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 1050,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 2,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 902,
+      "calls": 1,
+      "inputTokens": 9051,
+      "outputTokens": 59,
+      "costUsd": 0.00007295,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 895,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    },
+    {
+      "fixture": "value-at-end",
+      "repeat": 3,
+      "status": "complete",
+      "expectedStatus": "complete",
+      "method": "mixed",
+      "precision": 1,
+      "recall": 1,
+      "correct": 4,
+      "returned": 4,
+      "expected": 4,
+      "latencyMs": 971,
+      "calls": 1,
+      "inputTokens": 9051,
+      "outputTokens": 59,
+      "costUsd": 0.00007295,
+      "truncated": false,
+      "resolvedModels": [
+        "openai/gpt-5-nano"
+      ],
+      "resolvedProviders": [
+        "OpenAI"
+      ],
+      "attempts": [
+        {
+          "ok": true,
+          "purpose": "extract",
+          "latencyMs": 963,
+          "resolvedModel": "openai/gpt-5-nano",
+          "resolvedProvider": "OpenAI"
+        }
+      ],
+      "warnings": [],
+      "missing": []
+    }
+  ]
+}

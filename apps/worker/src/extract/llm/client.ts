@@ -94,6 +94,13 @@ const MIN_AFFORDABLE_OUTPUT_TOKENS = 256;
 // Input token estimates are approximate; price them with headroom.
 const INPUT_COST_MARGIN = 1.1;
 
+/** Most a call can cost: its input estimate with margin plus every output token asked for. */
+function worstCaseUsd(caps: ModelCapabilities, inputTokens: number, maxTokens: number): number {
+  const inRate = caps.inputCostPerMTok ?? 0;
+  const outRate = caps.outputCostPerMTok ?? 0;
+  return (inputTokens * INPUT_COST_MARGIN * inRate + maxTokens * outRate) / 1_000_000;
+}
+
 const DOWNGRADE: Readonly<Record<JsonMode, JsonMode | null>> = {
   json_schema: 'json_object',
   json_object: 'none',
@@ -197,7 +204,14 @@ export class ModelClient {
         }
         state.budgetStop = undefined;
         const inputEstimate = this.#inputEstimate(effective, req, opts, state);
-        const outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote, inputEstimate);
+        // Held while the call runs, so concurrent calls on this budget see it as spent.
+        const release = opts.budget.reserve(worstCaseUsd(effective, inputEstimate, affordable.maxOutputTokens));
+        let outcome: Outcome;
+        try {
+          outcome = await this.#attempt(provider, effective, attemptReq, opts, attemptNote, inputEstimate);
+        } finally {
+          release();
+        }
         state.attempts.push(outcome.record);
         opts.budget.charge(outcome.record.costUsd);
         if (outcome.ok) return { response: outcome.response, model: effective, attempts: state.attempts };

@@ -16,6 +16,8 @@ export class Budget {
   readonly maxCostUsd?: number;
   readonly #now: () => number;
   #spentUsd = 0;
+  /** Worst-case cost of calls in flight (concurrent chunk calls share one budget). */
+  #reservedUsd = 0;
 
   constructor(opts: BudgetOptions) {
     if (!Number.isFinite(opts.deadlineMs)) throw new RangeError('Budget: deadlineMs must be a finite epoch ms value');
@@ -35,9 +37,29 @@ export class Budget {
     return this.#spentUsd;
   }
 
-  /** Spend still allowed (never negative); Infinity without a cap. */
+  /** Worst-case cost of the calls in flight. */
+  get reservedUsd(): number {
+    return this.#reservedUsd;
+  }
+
+  /** Spend still allowed, net of calls in flight (never negative); Infinity without a cap. */
   remainingUsd(): number {
-    return this.maxCostUsd === undefined ? Number.POSITIVE_INFINITY : Math.max(0, this.maxCostUsd - this.#spentUsd);
+    return this.maxCostUsd === undefined ? Number.POSITIVE_INFINITY : Math.max(0, this.maxCostUsd - this.#spentUsd - this.#reservedUsd);
+  }
+
+  /**
+   * Holds `usd` (a call's worst-case cost) until the returned release runs,
+   * so concurrent calls cannot together pass the cap. Release is idempotent.
+   */
+  reserve(usd: number): () => void {
+    const amount = Number.isFinite(usd) && usd > 0 ? usd : 0;
+    this.#reservedUsd += amount;
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.#reservedUsd = Math.max(0, this.#reservedUsd - amount);
+    };
   }
 
   /** Adds spend. Non-finite or negative amounts (bad usage data) count as 0. */

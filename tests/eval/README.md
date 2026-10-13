@@ -110,7 +110,7 @@ why its recall is low; few wrong values got through. Gemini 3.8 Flash costs
 eight times as much as Flash-Lite and was no more accurate here.
 
 Most of the status gaps came from the engine, not the models, and were
-fixed afterwards. Two values were marked `unparseable` and left the record
+fixed afterwards (results below). Two values were marked `unparseable` and left the record
 `partial` when the page said the value is absent: "Contact sales" for a
 price, and "TBA". A number the page states as a word or a CSS class was
 rejected for want of grounding: "512 GB …" for an integer field, "Three"
@@ -127,3 +127,28 @@ The first run also showed three request-shape problems:
   the provider retries once without it for unknown models.
 * Haiku's listing answers ran past the planned output size. Output is now
   planned with 2× headroom.
+
+### After the engine fixes
+
+The same full-engine run (14 fixtures, 3 repeats per model), after the
+fixes in commit "engine: fix what the live benchmark found wrong". The raw
+files are in `results/after-fixes/`.
+
+| model | precision | recall | status accuracy | p50 | total cost |
+|---|---|---|---|---|---|
+| `google/gemini-2.5-flash-lite` | 100% | 100% | **100%** (was 85.7%) | 756 ms | $0.015 |
+| `openai/gpt-5-nano` | 99.1% | 84.5% (was 80.9%) | 78.6% (was 61.9%) | 1058 ms | $0.008 |
+| `anthropic/claude-haiku-5.5` | 100% | **100%** | **100%** (was 95.2%) | 1643 ms | $0.030 |
+| `google/gemini-3.8-flash` | 100% | 99.1% | 92.9% (was 85.7%) | 1875 ms | $0.124 |
+
+What still misses:
+
+* **Gemini 3.8 Flash on `job-posting`.** It answers `remote: null`, where
+  the page says "On-site" and "not eligible for fully remote work".
+* **GPT-5 Nano.**
+  * Mis-citations: values cited at the "Our pick" card instead of the
+    comparison table. Now kept when the number is printed in the table and
+    on no other card.
+  * "No customer reviews" for a rating. It stays `unparseable`, because
+    "no reviews" may mean 0.
+  * An occasional wrong `availability`.

@@ -4,5 +4,5 @@ export { normalizeValue, isUrlField } from './normalize.js';
 export type { NormalizeContext, NormalizeResult, NormalizeFailureReason } from './normalize.js';
 export { parseLocaleNumber, localeNumberCandidates, findNumericTokens, hasCurrencyMarker } from './numbers.js';
 export type { LocaleNumberOptions, NumericToken } from './numbers.js';
-export { checkGrounding, prepareText, normalizeForMatch, clearPreparedTextCache, PreparedText } from './grounding.js';
+export { checkGrounding, prepareText, normalizeForMatch, clearPreparedTextCache, numberKey, PreparedText } from './grounding.js';
 export type { GroundingContext, GroundingLocation, GroundingOptions, GroundingResult, GroundingText } from './grounding.js';

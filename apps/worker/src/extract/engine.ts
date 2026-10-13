@@ -61,7 +61,7 @@ import {
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
-import { checkGrounding, isUrlField, normalizeValue, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
+import { checkGrounding, isUrlField, normalizeValue, numberKey, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
 
 export type LearningMode = 'background' | 'await' | 'off';
 
@@ -1146,10 +1146,10 @@ class ExtractionRun {
         }
       }
       if (!found && !cited) found = this.groundIn(field, cell.v, undefined, keys);
-      // In a listing, the same small numbers and yes/no words are printed on
-      // every card: found only elsewhere on the page, and not in this
-      // answer's own card, it most likely belongs to another one.
-      if (found?.where === 'document' && home && field.type !== 'string' && field.type !== 'array' && field.type !== 'object') found = null;
+      // In a listing, a number found only elsewhere on the page that is
+      // printed on another card of the same list (and not on this one)
+      // belongs to that card.
+      if (found?.where === 'document' && home && (field.type === 'number' || field.type === 'integer') && this.onAnotherCard(field, cell.v, home)) found = null;
       if (!found) {
         // "N/A", "Not specified": the model's way of saying it found nothing.
         if (isPlaceholderAnswer(cell.v)) return notFound();
@@ -1204,6 +1204,29 @@ class ExtractionRun {
     if (recordGroupId) slot.recordGroupId = recordGroupId;
     if (mismatch && note) slot.citationNote = note;
     return slot;
+  }
+
+  /** Per record group: how many of its records print each number. */
+  private readonly groupNumbers = new Map<string, Map<string, number>>();
+
+  /** True when `raw` normalizes to a number printed on a sibling record of `home` but not on `home` itself. */
+  private onAnotherCard(field: FieldSpec, raw: unknown, home: BlockContext): boolean {
+    const groupId = home.block.recordGroupId;
+    const group = groupId ? this.doc.recordGroups.find((g) => g.id === groupId) : undefined;
+    if (!group) return false;
+    const n = normalizeValue(raw, field, this.nctx);
+    if (!n.ok || typeof n.value !== 'number') return false;
+    let counts = this.groupNumbers.get(group.id);
+    if (!counts) {
+      counts = new Map();
+      for (const id of group.recordIds) {
+        const text = blockContext(this.doc, id)?.block.text;
+        if (text) for (const key of prepareText(text).numbers()) counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      this.groupNumbers.set(group.id, counts);
+    }
+    const key = numberKey(n.value);
+    return (counts.get(key) ?? 0) > 0 && !prepareText(home.block.text).numbers().has(key);
   }
 
   /**

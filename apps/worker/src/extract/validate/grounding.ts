@@ -515,7 +515,7 @@ function decimalDigits(value: number): string | null {
 }
 
 /** Sign-insensitive key: "-20%" on the page grounds a discount reported as 20. */
-function numberKey(value: number): string {
+export function numberKey(value: number): string {
   return String(Math.round(Math.abs(value) * 1e6) / 1e6);
 }
 

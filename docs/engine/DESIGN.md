@@ -302,9 +302,10 @@ in `engine.ts` (`groundIn`, `matchByMeaning`):
 * **In its own listing record.** An answer's home record is the record
   that at least two of its cells cite, more than any other record. A value
   whose citation fails, or that has none, is looked for in that record and
-  accepted with `citation_mismatch`. In a listing with a home record, a
-  number or boolean found only elsewhere on the page is rejected, because
-  the same small values appear on every card.
+  accepted with `citation_mismatch`. A number found only elsewhere on the
+  page is rejected when it is printed on another card of the same list and
+  not on this one: it belongs to that card. A number printed outside the
+  cards, such as in a comparison table, is kept.
 * **With a block-id suffix.** "b22-r3" or "b22.3" reads as `b22`, with the
   warning `block id suffix ignored`.
 * **As model filler.** A model placeholder that is printed nowhere ("N/A",
@@ -317,6 +318,8 @@ unit is the value: "512 GB PCIe 4.0" gives 512. A value printed only in
 another unit of the same quantity is converted when the factor is exact,
 and rounded to the printed precision: "3.09 lb" gives 1.4 kg. Otherwise the
 value is `ambiguous`; "1 TB" for GB could mean decimal or binary units.
+
+A row of star glyphs counts its filled stars: "★★★★☆" is 4 and "★★★½☆" is 3.5.
 
 Text saying there is no value becomes null with reason `not_found` and the
 detail "the page states no value". Examples: "Contact sales", "Price on

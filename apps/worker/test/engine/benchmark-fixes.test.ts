@@ -223,3 +223,32 @@ describe('a yes/no value citing a whole table is checked in its own row and colu
     expect(outcome.missing.find((m) => m.path === '/phones/0/has5g')?.reason).toBe('rejected_ungrounded');
   });
 });
+
+describe('a number found elsewhere on a listing page', () => {
+  it('specs-comparison-table: values cited at the "Our pick" card but printed in the table are kept (GPT-5 Nano)', async () => {
+    const fx = loadFixture('specs-comparison-table');
+    const doc = buildSourceDocument(fx.html, fx.url);
+    const pick = doc.recordGroups[0].recordIds[0];
+    const phone = (fx.gold as Array<Record<string, unknown>>)[0];
+    const outcome = await run(fx, [{
+      model: { v: phone.model, b: pick },
+      price: { v: '$999', b: pick },
+      screenInches: { v: '6.7"', b: pick },
+      batteryMah: { v: '5,000', b: pick },
+      weightG: { v: '221', b: pick },
+    }]);
+    expect(outcome.data).toMatchObject({ phones: [{ model: 'Nova X1 Pro', price: 999, screenInches: 6.7, batteryMah: 5000, weightG: 221 }] });
+    expect(outcome.missing.filter((m) => m.reason === 'rejected_ungrounded')).toEqual([]);
+  });
+
+  it("books-listing: another card's price, cited at this card, is rejected", async () => {
+    const fx = loadFixture('books-listing');
+    const doc = buildSourceDocument(fx.html, fx.url);
+    const gold = fx.gold as Array<{ title: string; price: number }>;
+    const inside = (i: number) => doc.blocks.filter((b) => b.parentId === doc.recordGroups[0].recordIds[i]);
+    const title0 = inside(0).find((b) => b.kind === 'heading')!.id;
+    const price0 = inside(0).find((b) => /^£/.test(b.text))!.id;
+    const outcome = await run(fx, [{ title: { v: gold[0].title, b: title0 }, price: { v: `£${gold[1].price.toFixed(2)}`, b: price0 } }]);
+    expect(outcome.missing.find((m) => m.path === '/books/0/price')?.reason).toBe('rejected_ungrounded');
+  });
+});
