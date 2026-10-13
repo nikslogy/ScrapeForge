@@ -126,7 +126,8 @@ describe.skipIf(!chromiumPath)('SmartRouter with real browser tiers', () => {
       expect(r.html).toContain('Rendered in the browser');
       perRequest.push(hits('/spa') - before);
     }
-    // T1 + T2 + T4 while learning, then T4 alone.
-    expect(perRequest).toEqual([3, 3, 3, 1]);
+    // T1 + T4 while learning (an app shell from T1 skips the second HTTP
+    // client), then T4 alone.
+    expect(perRequest).toEqual([2, 2, 2, 1]);
   }, 60_000);
 });

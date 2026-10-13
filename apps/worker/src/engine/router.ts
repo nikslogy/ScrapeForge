@@ -128,12 +128,75 @@ function judgeResponse(
   tier: number,
   latencyMs: number,
   url: string,
-): { valid: boolean; score: number; reason: string } {
+): { valid: boolean; score: number; reason: string; signals: string[] } {
   if (!isValidContent(html, statusCode, url)) {
-    return { valid: false, score: 0, reason: `invalid content (status=${statusCode} htmlLen=${html.length})` };
+    return { valid: false, score: 0, reason: `invalid content (status=${statusCode} htmlLen=${html.length})`, signals: [] };
   }
   const { score, signals } = calculateQualityScore(html, statusCode, tier, latencyMs);
-  return { valid: true, score, reason: `low quality ${score.toFixed(2)} (${signals[0] || 'no signal'})` };
+  return { valid: true, score, reason: `low quality ${score.toFixed(2)} (${signals[0] || 'no signal'})`, signals };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Why a response was rejected: decides where the request goes next
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * - `server_error`: 5xx with an ordinary body. The site is failing; another
+ *   engine will not fix it. Retry the same tier once, then stop (retryable).
+ * - `rate_limited`: 429/408, or 503 with Retry-After. More engines only hit
+ *   the site harder. Wait (bounded), retry once or take the proxy route,
+ *   then stop (retryable).
+ * - `js_required`: an app shell, a "JavaScript required" notice or a client
+ *   redirect. Another HTTP client gets the same shell: go to a browser.
+ * - `blocked`: a block or challenge page, or a 403. Escalate (TLS identity,
+ *   proxy, browser, stealth).
+ * - `thin`: little content for other reasons. Escalate.
+ */
+export type RejectionClass = 'server_error' | 'rate_limited' | 'js_required' | 'blocked' | 'thin';
+
+/** A transient failure is the site's, not the tier's: never learned against the tier. */
+export function isTransientClass(cls: RejectionClass | undefined): cls is 'server_error' | 'rate_limited' {
+  return cls === 'server_error' || cls === 'rate_limited';
+}
+
+/** Error bodies larger than this, or with scripts, may be challenges in disguise. */
+const PLAIN_ERROR_BODY_BYTES = 4_096;
+
+export function classifyRejection(
+  html: string,
+  statusCode: number,
+  signals: readonly string[],
+  headers: Readonly<Record<string, string>> = {},
+): RejectionClass {
+  if (statusCode === 429 || statusCode === 408 || statusCode >= 500) {
+    const plain = isTransientResponse(html, statusCode) && (html.length <= PLAIN_ERROR_BODY_BYTES || !/<script\b/i.test(html));
+    if (!plain) return 'blocked';
+    if (statusCode === 429 || statusCode === 408 || (statusCode === 503 && headers['retry-after'] !== undefined)) return 'rate_limited';
+    return 'server_error';
+  }
+  if (statusCode === 403 || signals.length === 0) return 'blocked';
+  if (signals.some((s) => s.startsWith('Bot detection indicators'))) return 'blocked';
+  if (signals.some((s) => /content rendered client-side|Client-side redirect|JavaScript required/.test(s))) return 'js_required';
+  return 'thin';
+}
+
+/** Longest wait for a rate limit or server error before the one retry. */
+export const MAX_TRANSIENT_WAIT_MS = 3_000;
+/** Pause before retrying a server error. */
+const SERVER_ERROR_BACKOFF_MS = 500;
+
+/** Retry-After (seconds or an HTTP date) in ms, within [0, cap]; `fallback` when absent or unreadable. */
+export function retryAfterMs(headers: Readonly<Record<string, string>> | undefined, now: number, cap: number, fallback: number): number {
+  const raw = headers?.['retry-after']?.trim();
+  let ms = fallback;
+  if (raw) {
+    if (/^\d+$/.test(raw)) ms = Number(raw) * 1_000;
+    else {
+      const at = Date.parse(raw);
+      if (Number.isFinite(at)) ms = at - now;
+    }
+  }
+  return Math.max(0, Math.min(cap, ms));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -436,6 +499,57 @@ function learnedStart(
  * ('confirm'), so a domain gets back to the simpler method in a few requests
  * instead of waiting for more lucky draws. One failure ends the follow-ups.
  */
+/** Redis key of the strategy for a site, or for one section of it. */
+export function strategyKey(domain: string, section?: string): string {
+  return section === undefined ? `domain:${domain}` : `domain:${domain}|${section}`;
+}
+
+// "en", "en-us", "de_de": a locale prefix, not a section. Only real
+// language codes: "/dp/…" and "/ip/…" are sections.
+const LANGUAGES = new Set([
+  'en', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'sv', 'no', 'nb', 'da', 'fi', 'pl', 'cs', 'sk', 'hu', 'ro', 'bg', 'el', 'ru',
+  'uk', 'tr', 'ar', 'he', 'ja', 'ko', 'zh', 'hi', 'th', 'vi', 'ms', 'hr', 'sl', 'sr', 'lt', 'lv', 'et', 'ca', 'fa',
+]);
+const LOCALE_SEGMENT = { test: (s: string) => /^[a-z]{2}(?:[-_][a-z]{2,4})?$/.test(s) && LANGUAGES.has(s.slice(0, 2)) };
+// Ids, hashes and numbers name one page, not a section.
+const ID_SEGMENT = /^(?:\d+|[0-9a-f]{8,}|[0-9a-f-]{20,}|[a-z0-9]{12,})$/i;
+const MAX_SEGMENT_CHARS = 40;
+
+/**
+ * The site section a URL belongs to, for per-section learning: its first
+ * path segment (after a locale prefix), lower-cased; "/" for the home page
+ * and "/*" when the segment is an id. "/dp/B0CK…" → "/dp", "/en-us/search?q=x"
+ * → "/en-us/search", "/2026/10/x" → "/*".
+ */
+export function pathTemplate(url: string): string {
+  let segments: string[];
+  try {
+    segments = new URL(url).pathname.split('/').filter((x) => x !== '').map((x) => decodeURIComponentSafe(x).toLowerCase());
+  } catch {
+    return '/';
+  }
+  const parts: string[] = [];
+  if (segments.length > 1 && LOCALE_SEGMENT.test(segments[0])) parts.push(segments.shift() as string);
+  const first = segments[0];
+  if (first === undefined) return parts.length > 0 ? `/${parts.join('/')}` : '/';
+  parts.push(ID_SEGMENT.test(first) || first.length > MAX_SEGMENT_CHARS ? '*' : first.replace(/[^\p{L}\p{N}._-]/gu, '_'));
+  return `/${parts.join('/')}`;
+}
+
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** Whether a strategy says anything yet (some tier has enough recent outcomes for a verdict). */
+export function hasEvidence(s: StoredStrategy | null, now: number): boolean {
+  if (!s) return false;
+  return Object.values(s.tiers).some((t) => tierVerdict(t, now).verdict !== 'unknown');
+}
+
 export function planStartTier(
   s: StoredStrategy | null,
   opts: StartPlanOptions,
@@ -558,6 +672,8 @@ interface TierResponse {
   statusCode: number;
   latencyMs: number;
   screenshot?: string;
+  /** Response headers (HTTP tiers), lower-case names. */
+  headers?: Record<string, string>;
 }
 
 /** A browser context could not be acquired: the pool's problem, not the tier's. */
@@ -568,7 +684,7 @@ class ContextAcquireError extends Error {
 }
 
 type AttemptResult =
-  | { kind: 'response'; r: TierResponse; ok: boolean }
+  | { kind: 'response'; r: TierResponse; ok: boolean; cls?: RejectionClass }
   | { kind: 'error'; error: unknown; acquire: boolean };
 
 /** Per-request state shared by the tier attempts. */
@@ -596,6 +712,8 @@ export interface SmartRouterOptions {
   /** A slower strategy read is abandoned and the request starts cold. */
   strategyReadTimeoutMs?: number;
   logger?: Pick<Console, 'warn'>;
+  /** Wait before retrying a rate-limited or failing tier (tests pass a fake). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // Strategy writes queued while Redis is slow or down are dropped beyond this.
@@ -609,6 +727,7 @@ export class SmartRouter {
   private readonly reprobeRate: number;
   private readonly strategyReadTimeoutMs: number;
   private readonly logger: Pick<Console, 'warn'>;
+  private readonly sleep: (ms: number) => Promise<void>;
   // Writes for one domain are chained so this process never loses its own
   // updates; separate workers can still interleave (statistics tolerate it).
   private readonly writeChains = new Map<string, Promise<void>>();
@@ -627,6 +746,7 @@ export class SmartRouter {
     this.reprobeRate = options.reprobeRate ?? DEFAULT_REPROBE_RATE;
     this.strategyReadTimeoutMs = options.strategyReadTimeoutMs ?? DEFAULT_STRATEGY_READ_TIMEOUT_MS;
     this.logger = options.logger ?? console;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
@@ -642,11 +762,16 @@ export class SmartRouter {
     // reflect reality.
     const browserOnly = requiresBrowser || isHardDomain(domain);
 
-    // One proxy per request, resolved alongside the strategy read.
-    const [proxy, strategy] = await Promise.all([
+    // One proxy per request, resolved alongside the strategy reads: the
+    // site's, and its section's (product pages may be server-rendered where
+    // search pages need a browser). The section's wins once it has evidence.
+    const sectionKey = strategyKey(domain, pathTemplate(url));
+    const [proxy, siteStrategy, sectionStrategy] = await Promise.all([
       this.resolveProxy(domain, options.proxy),
-      browserOnly ? Promise.resolve(null) : this.loadStrategy(domain),
+      browserOnly ? Promise.resolve(null) : this.loadStrategy(strategyKey(domain)),
+      browserOnly ? Promise.resolve(null) : this.loadStrategy(sectionKey),
     ]);
+    const strategy = hasEvidence(sectionStrategy, this.now()) ? sectionStrategy : siteStrategy;
     const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], contentRejected: false, outcomes: [] };
 
     try {
@@ -663,7 +788,10 @@ export class SmartRouter {
     } finally {
       // A forced browser request (screenshot, waitFor, mobile) says nothing
       // about whether a cheaper tier would have worked, so it is not learned.
-      if (!requiresBrowser) this.recordOutcomes(domain, c.outcomes);
+      if (!requiresBrowser) {
+        this.recordOutcomes(strategyKey(domain), c.outcomes);
+        this.recordOutcomes(sectionKey, c.outcomes);
+      }
     }
   }
 
@@ -687,23 +815,39 @@ export class SmartRouter {
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
     const httpTimeout = Math.min(options.timeout || 15_000, 15_000);
 
+    // An app shell from one HTTP client is an app shell from the other.
+    let skipHttp = false;
+    // A rate limit is answered on the network route (another IP) or by
+    // waiting, never with more engines.
+    let rateLimited = false;
+
     // ─── Tier 1: plain HTTP with impit defaults ───
     if (startTier <= 1) {
-      const a = await this.attempt(c, 1, () =>
-        tier1Fetch(url, { headers: options.headers, timeout: httpTimeout }),
-      );
+      const fetch1 = () => tier1Fetch(url, { headers: options.headers, timeout: httpTimeout });
+      const a = await this.attempt(c, 1, fetch1);
       if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 1, ...proxyMeta };
+      if (a.kind === 'response' && isTransientClass(a.cls)) {
+        // With a proxy, a rate limit takes the network route (T2) first.
+        if (a.cls === 'rate_limited' && proxy && startTier <= 2) rateLimited = true;
+        else return { ...(await this.retryTransient(c, 1, a.r, a.cls, fetch1)), tierUsed: 1, ...proxyMeta };
+      }
+      if (a.kind === 'response' && a.cls === 'js_required') {
+        skipHttp = true;
+        c.notes.push('T2:skipped (page needs JavaScript)');
+      }
     }
 
     // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
-    if (startTier <= 2) {
-      const a = await this.attempt(c, 2, () =>
-        tier2Fetch(url, { headers: options.headers, timeout: httpTimeout, proxy: proxy?.url }),
-      );
+    if (startTier <= 2 && !skipHttp) {
+      const fetch2 = () => tier2Fetch(url, { headers: options.headers, timeout: httpTimeout, proxy: proxy?.url });
+      const a = await this.attempt(c, 2, fetch2);
       if (a.kind === 'response') {
         if (proxy) this.recordProxyResult(proxy, c.domain, a.ok, a.r.latencyMs);
         if (a.ok) return { ...a.r, tierUsed: 2, ...proxyMeta };
+        if (isTransientClass(a.cls)) return { ...(await this.retryTransient(c, 2, a.r, a.cls, fetch2)), tierUsed: 2, ...proxyMeta };
       }
+      // The proxy route answered with a block or a shell: the ladder decides from here.
+      if (rateLimited) c.notes.push('T1:rate limited; proxy route tried');
     }
 
     // ─── Tier 3: Lightpanda lightweight browser ───
@@ -857,16 +1001,45 @@ export class SmartRouter {
     // try, but a challenge page handed back as a last resort is no success:
     // learned as one, it would make the domain start at the terminal tier.
     const accepted = g.valid && g.score >= MIN_TIER_ACCEPT_QUALITY;
-    c.outcomes.push({ tier, ok: accepted, latencyMs: r.latencyMs });
+    const cls = accepted ? undefined : classifyRejection(r.html, r.statusCode, g.signals, r.headers);
+    // A site that is down or rate-limiting says nothing about the tier:
+    // learned as a failure, an outage would push the domain onto browsers.
+    if (!isTransientClass(cls)) c.outcomes.push({ tier, ok: accepted, latencyMs: r.latencyMs });
     if (accepted) {
       traceAttempt(c.tracer, tier, t0, 'accepted');
     } else {
-      traceAttempt(c.tracer, tier, t0, 'rejected', g.reason);
-      c.notes.push(`T${tier}:${g.reason}`);
-      if (!isTransientResponse(r.html, r.statusCode)) c.contentRejected = true;
+      traceAttempt(c.tracer, tier, t0, 'rejected', `${cls}: ${g.reason}`);
+      c.notes.push(`T${tier}:${cls}: ${g.reason}`);
+      if (!isTransientClass(cls)) c.contentRejected = true;
     }
     const returnable = accepted || (terminal && g.valid && g.score >= TERMINAL_TIER_ACCEPT_QUALITY);
-    return { kind: 'response', r, ok: returnable };
+    return { kind: 'response', r, ok: returnable, ...(cls ? { cls } : {}) };
+  }
+
+  /**
+   * The site is failing or rate-limiting: one retry of the same tier after
+   * a pause (Retry-After when given, bounded), then stop with a retryable
+   * error. No browser can fix either, and more engines only add load.
+   */
+  private async retryTransient(
+    c: RequestContext,
+    tier: number,
+    r: TierResponse,
+    cls: 'server_error' | 'rate_limited',
+    fetch: () => Promise<TierResponse | null>,
+  ): Promise<TierResponse> {
+    const cap = Math.min(MAX_TRANSIENT_WAIT_MS, (c.options.timeout ?? 60_000) / 4);
+    const wait = cls === 'rate_limited' ? retryAfterMs(r.headers, this.now(), cap, cap) : Math.min(SERVER_ERROR_BACKOFF_MS, cap);
+    const asked = cls === 'rate_limited' ? retryAfterMs(r.headers, this.now(), Number.POSITIVE_INFINITY, 0) : 0;
+    if (asked > cap) {
+      c.notes.push(`T${tier}:${cls}, Retry-After ${Math.ceil(asked / 1000)} s is past what this request can wait`);
+      throw this.exhausted(c);
+    }
+    await this.sleep(wait);
+    const again = await this.attempt(c, tier, fetch);
+    if (again.kind === 'response' && again.ok) return again.r;
+    c.notes.push(`T${tier}:${cls} again after ${wait} ms; no other engine can fix this`);
+    throw this.exhausted(c);
   }
 
   private exhausted(c: RequestContext): TiersExhaustedError {
@@ -916,11 +1089,11 @@ export class SmartRouter {
 
   // ── Domain strategy cache ──────────────────────────────
 
-  private async loadStrategy(domain: string): Promise<StoredStrategy | null> {
+  private async loadStrategy(key: string): Promise<StoredStrategy | null> {
     let timer: NodeJS.Timeout | undefined;
     try {
       const raw = await Promise.race([
-        this.redis.get(`domain:${domain}`),
+        this.redis.get(key),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`timed out after ${this.strategyReadTimeoutMs} ms`)),
@@ -931,7 +1104,7 @@ export class SmartRouter {
       return parseStrategy(raw);
     } catch (err) {
       // Without statistics the request simply escalates from the bottom.
-      this.logger.warn(`[router] domain strategy read failed for ${domain}: ${describeError(err)}`);
+      this.logger.warn(`[router] domain strategy read failed for ${key.slice('domain:'.length)}: ${describeError(err)}`);
       return null;
     } finally {
       clearTimeout(timer);
@@ -939,20 +1112,19 @@ export class SmartRouter {
   }
 
   /** Fire-and-forget: the response never waits for Redis. */
-  private recordOutcomes(domain: string, outcomes: readonly TierOutcome[]): void {
+  private recordOutcomes(key: string, outcomes: readonly TierOutcome[]): void {
     if (outcomes.length === 0) return;
-    const prev = this.writeChains.get(domain) ?? Promise.resolve();
-    const next = this.background(`domain strategy write for ${domain}`, async () => {
+    const prev = this.writeChains.get(key) ?? Promise.resolve();
+    const next = this.background(`domain strategy write for ${key.slice('domain:'.length)}`, async () => {
       await prev;
-      const key = `domain:${domain}`;
       const now = this.now();
       const updated = applyOutcomes(parseStrategy(await this.redis.get(key)), outcomes, now, this.availableTiers());
       await this.redis.set(key, JSON.stringify(updated), 'EX', STRATEGY_TTL_SECONDS);
     });
     if (!next) return;
-    this.writeChains.set(domain, next);
+    this.writeChains.set(key, next);
     void next.then(() => {
-      if (this.writeChains.get(domain) === next) this.writeChains.delete(domain);
+      if (this.writeChains.get(key) === next) this.writeChains.delete(key);
     });
   }
 

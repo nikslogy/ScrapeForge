@@ -131,10 +131,21 @@ describe('exhausted-tiers classification', () => {
   it('Chromium failing to start for T4 after transient failures: transient', async () => {
     const { router, acquire } = setup();
     m.tier1Fetch.mockImplementation(fail('socket hang up'));
-    m.tier2Fetch.mockImplementation(respond(NGINX_503, 502));
+    m.tier2Fetch.mockImplementation(fail('read ECONNRESET'));
     acquire.mockRejectedValue(new Error('browserType.launch: Target page, context or browser has been closed'));
     const e = await exhausted(router);
     expect(e.message).toMatch(/T5:skipped \(no browser context\)$/);
+    expect(e.transient).toBe(true);
+  });
+
+  it('a site answering 502 twice: transient, and no browser is started (another engine cannot fix it)', async () => {
+    const { router, acquire } = setup();
+    m.tier1Fetch.mockImplementation(fail('socket hang up'));
+    m.tier2Fetch.mockImplementation(respond(NGINX_503, 502));
+    const e = await exhausted(router);
+    expect(m.tier2Fetch).toHaveBeenCalledTimes(2);
+    expect(acquire).not.toHaveBeenCalled();
+    expect(e.message).toMatch(/T2:server_error again after \d+ ms/);
     expect(e.transient).toBe(true);
   });
 

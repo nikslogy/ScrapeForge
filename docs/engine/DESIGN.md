@@ -376,6 +376,52 @@ on a page that takes 1.5 s to fetch completed in 15 ms.
 * **Cost.** Concurrent calls of one request share its `Budget` with
   per-call reservations (see Large inputs).
 
+### Fetch routing (Phase 4)
+
+`engine/router.ts` tries tiers from cheap to expensive:
+
+* T1: HTTP;
+* T2: HTTP with a browser TLS fingerprint, plus the proxy;
+* T3: Lightpanda;
+* T4: browser;
+* T5: stealth browser.
+
+Each request starts at the tier its learned strategy suggests. Since Phase
+4, a rejected response is classified (`classifyRejection`), and the class
+decides what happens next.
+
+| class | when | next |
+|---|---|---|
+| `server_error` | 5xx with an ordinary body (no block markers; small or script-free) | Retry the same tier once after 500 ms, then stop with a retryable error. No browser. |
+| `rate_limited` | 429, 408, or 503 with `Retry-After` | Take the proxy route (T2) when a proxy is set. Otherwise wait `Retry-After` (at most 3 s, and at most a quarter of the timeout) and retry once, then stop with a retryable error. A longer `Retry-After` stops at once. More engines only add load. |
+| `js_required` | App shell, "JavaScript required" notice, or a client-side redirect | Skip the second HTTP client and go to a browser tier. |
+| `blocked` | Block or challenge page, a 403, or a large script-carrying error page | The usual ladder: TLS identity and proxy, then browser, then stealth. |
+| `thin` | Little content for other reasons | The usual ladder. |
+
+The class prefixes the reason in `metadata.timings.attempts` and in the
+exhausted error, e.g. `T1:server_error: invalid content (status=500 …)`. A
+retryable stop raises `TiersExhaustedError` with `transient: true`, and the
+worker retries the job with backoff.
+
+**Outages are not learned.** `server_error` and `rate_limited` outcomes are
+the site's, not the tier's, so they are not recorded against the tier. An
+outage used to teach a domain to start on a browser for a day. Now the next
+request starts where it always did.
+
+**Per-section learning.** Statistics are kept for the site (`domain:{host}`)
+and for its section (`domain:{host}|{section}`). Both expire 24 h after the
+last write.
+
+* The section is the first path segment, lower-cased, after a language
+  prefix such as `/en-us`.
+* An id-like first segment gives `/*`, and the home page is `/`.
+* Examples: `/dp`, `/search`, `/en-us/search`.
+
+A request uses the section's statistics once they reach a verdict (enough
+recent outcomes), otherwise the site's. A site whose product pages are
+server-rendered while its search pages need a browser then pays for the
+browser only on search pages.
+
 ### LLM response protocol
 
 The model returns raw values exactly as shown on the page plus the block id it
@@ -501,7 +547,7 @@ OPENAI_API_KEY) still work when EXTRACT_MODELS is unset.
 | 1 | Source-preserving document, deterministic paths, model layer, validation, grounding, recipes; engine wired into worker and API | done (live-model benchmark pending an API key) |
 | 2 | Large inputs: targeted (BM25 block selection) vs exhaustive (partitioned, ledger, merge by record identity) | done (see "Large inputs (Phase 2)"); tables are not partitioned yet |
 | 3 | Fetch snapshot cache, request coalescing, readiness-based browser waits, concurrency budgets | done (see "Throughput (Phase 3)") |
-| 4 | Router: classify failures, engine vs network route, expiring per-template learning | later |
+| 4 | Router: classify failures, engine vs network route, expiring per-template learning | done (see "Fetch routing (Phase 4)") |
 | 5 | Mixed-load and recovery checks, published limits | later |
 
 Inputs larger than the model budget are never silently cut. Phase 2 sends

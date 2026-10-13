@@ -52,8 +52,11 @@ type StoredStrategy = import('../../src/engine/router.js').StoredStrategy;
 // ── helpers ─────────────────────────────────────────────
 
 const GOOD = smallPage(); // classic example.com: accepted at any tier
+// A page every HTTP tier and the plain browser may get: a challenge, which
+// climbs the whole ladder. (An app shell skips T2 since Phase 4; see
+// router-classification.test.ts.)
 const SHELL =
-  '<!doctype html><html><head><title>App</title><script src="/main.js"></script></head><body><div id="root"></div></body></html>';
+  '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><div id="challenge-running">Checking your browser</div></body></html>';
 const URL_ = 'https://shop.example/item/1';
 const DOMAIN = 'shop.example';
 const T0 = Date.parse('2026-10-01T00:00:00.000Z');
@@ -320,7 +323,8 @@ describe('SmartRouter domain strategy', () => {
     expect(fourth.fetched).toEqual([5]);
     expect(fourth.r.tierUsed).toBe(5);
     expect(redis.strategy()).toMatchObject({ tier: 5, successRate: 1, sampleSize: 4 });
-    expect(redis.set).toHaveBeenLastCalledWith(`domain:${DOMAIN}`, expect.any(String), 'EX', STRATEGY_TTL_SECONDS);
+    expect(redis.set).toHaveBeenCalledWith(`domain:${DOMAIN}`, expect.any(String), 'EX', STRATEGY_TTL_SECONDS);
+    expect(redis.set).toHaveBeenCalledWith(`domain:${DOMAIN}|/item`, expect.any(String), 'EX', STRATEGY_TTL_SECONDS);
   });
 
   it('a domain polled every 4 hours stops paying for T1, T2 and T4 after three requests', async () => {
@@ -496,18 +500,19 @@ describe('SmartRouter domain strategy', () => {
 describe('SmartRouter bookkeeping is off the critical path', () => {
   it('returns before the strategy write completes', async () => {
     const { router, redis } = setup();
-    let finishSet!: () => void;
-    redis.set.mockImplementation(() => new Promise((resolve) => (finishSet = () => resolve('OK'))));
+    const finishers: Array<() => void> = [];
+    redis.set.mockImplementation(() => new Promise((resolve) => finishers.push(() => resolve('OK'))));
     m.tier1Fetch.mockImplementation(ok);
 
     const r = await router.route(URL_, {});
     expect(r.tierUsed).toBe(1);
-    await vi.waitFor(() => expect(redis.set).toHaveBeenCalledTimes(1));
+    // The site's strategy and its section's.
+    await vi.waitFor(() => expect(redis.set).toHaveBeenCalledTimes(2));
     let drained = false;
     const drain = router.drainStrategyWrites().then(() => (drained = true));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(drained).toBe(false);
-    finishSet();
+    for (const finish of finishers) finish();
     await drain;
   });
 
@@ -856,7 +861,7 @@ describe('SmartRouter learns T5 by the normal quality bar', () => {
 
     await expect(router.route(URL_, {}, tracer)).resolves.toMatchObject({ tierUsed: 5 });
     const t5 = tracer.snapshot().attempts.find((a) => a.tier === 5)!;
-    expect(t5).toMatchObject({ outcome: 'rejected', reason: expect.stringMatching(/^low quality 0\.00 /) });
+    expect(t5).toMatchObject({ outcome: 'rejected', reason: expect.stringMatching(/^(?:thin|blocked|js_required): low quality 0\.00 /) });
   });
 
   it('a domain whose every tier returns a sub-bar page goes straight to T5, which still returns it', async () => {

@@ -139,7 +139,7 @@ describe('SmartRouter tracing: escalation', () => {
     expect(r.tierUsed).toBe(4);
     const snap = tracer.snapshot();
     expect(snap.attempts).toEqual([
-      { tier: 1, ms: 120, outcome: 'rejected', reason: 'low quality 0.20 (thin content)' },
+      { tier: 1, ms: 120, outcome: 'rejected', reason: 'thin: low quality 0.20 (thin content)' },
       { tier: 2, ms: 50, outcome: 'error', reason: 'connect ECONNRESET' },
       // Attempt time includes waiting for the browser context.
       { tier: 4, ms: 907, outcome: 'accepted' },
@@ -160,8 +160,8 @@ describe('SmartRouter tracing: escalation', () => {
     await router.route(URL_, {}, tracer);
 
     expect(tracer.snapshot().attempts).toEqual([
-      { tier: 1, ms: 10, outcome: 'rejected', reason: 'invalid content (status=200 htmlLen=7)' },
-      { tier: 2, ms: 20, outcome: 'rejected', reason: 'invalid content (status=403 htmlLen=4)' },
+      { tier: 1, ms: 10, outcome: 'rejected', reason: 'blocked: invalid content (status=200 htmlLen=7)' },
+      { tier: 2, ms: 20, outcome: 'rejected', reason: 'blocked: invalid content (status=403 htmlLen=4)' },
       { tier: 3, ms: 30, outcome: 'error', reason: 'no result' },
       { tier: 4, ms: 47, outcome: 'accepted' },
     ]);
@@ -352,8 +352,8 @@ describe('SmartRouter tracing: browser path', () => {
     expect(tracer.snapshot()).toMatchObject({
       stages: { browser_acquire: 2 },
       attempts: [
-        { tier: 4, ms: 11, outcome: 'rejected', reason: 'low quality 0.20 (thin content)' },
-        { tier: 5, ms: 21, outcome: 'rejected', reason: 'invalid content (status=200 htmlLen=7)' },
+        { tier: 4, ms: 11, outcome: 'rejected', reason: 'thin: low quality 0.20 (thin content)' },
+        { tier: 5, ms: 21, outcome: 'rejected', reason: 'blocked: invalid content (status=200 htmlLen=7)' },
       ],
     });
     // A forced browser request (screenshot) says nothing about cheaper tiers.
@@ -369,7 +369,8 @@ describe('SmartRouter tracing: browser path', () => {
     await router.route('https://www.walmart.com/ip/1', {}, tracer);
     await router.drainStrategyWrites();
 
-    expect(redis.set).toHaveBeenCalledTimes(1);
+    // The site's strategy and its section's ("/ip").
+    expect(redis.set.mock.calls.map((c: unknown[]) => c[0])).toEqual(['domain:www.walmart.com', 'domain:www.walmart.com|/ip']);
     const [key, json, ex, ttl] = redis.set.mock.calls[0] as unknown[];
     expect([key, ex, ttl]).toEqual(['domain:www.walmart.com', 'EX', 86400]);
     expect(JSON.parse(json as string).tiers).toEqual({
@@ -450,7 +451,7 @@ describe('SmartRouter tracing: learned start tier', () => {
 
     expect(r.tierUsed).toBe(2);
     expect(tracer.snapshot().attempts).toEqual([
-      { tier: 1, ms: 30, outcome: 'rejected', reason: 'low quality 0.20 (thin content)' },
+      { tier: 1, ms: 30, outcome: 'rejected', reason: 'thin: low quality 0.20 (thin content)' },
       { tier: 2, ms: 40, outcome: 'accepted' },
     ]);
     expect(m.tier1Fetch).toHaveBeenCalledTimes(1);
@@ -518,8 +519,8 @@ describe('SmartRouter without a tracer', () => {
     expect(plain.acquire).toHaveBeenCalledTimes(traced.acquire.mock.calls.length);
     expect(plain.release).toHaveBeenCalledTimes(traced.release.mock.calls.length);
     expect(plain.redis.set.mock.calls).toEqual(traced.redis.set.mock.calls);
-    // One write per request carrying every attempted tier.
-    expect(plain.redis.set.mock.calls).toHaveLength(1);
+    // One write per request and key (site, section) carrying every attempted tier.
+    expect(plain.redis.set.mock.calls).toHaveLength(2);
     expect(Object.keys(JSON.parse(String(plain.redis.set.mock.calls[0][1])).tiers)).toEqual(['1', '2', '4', '5']);
   });
 
