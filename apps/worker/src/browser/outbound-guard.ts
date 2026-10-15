@@ -82,6 +82,13 @@ export async function checkBrowserUrl(rawUrl: string): Promise<OutboundBlockedEr
  */
 export function createOutboundRouteHandler(options: {
   blockResources: boolean;
+  /**
+   * The request's custom headers, added only to requests for `origin` (the
+   * target's): credentials never go to third-party scripts, CDNs or
+   * trackers the page loads.
+   */
+  extraHeaders?: Readonly<Record<string, string>>;
+  origin?: string;
 }): (route: Route) => Promise<void> {
   return async (route) => {
     const request = route.request();
@@ -90,7 +97,10 @@ export function createOutboundRouteHandler(options: {
       !(options.blockResources && shouldBlockResource(request.resourceType(), url)) &&
       (await checkBrowserUrl(url)) === null;
     try {
-      await (allowed ? route.continue() : route.abort());
+      if (!allowed) await route.abort();
+      else if (options.extraHeaders && options.origin !== undefined && originOf(url) === options.origin) {
+        await route.continue({ headers: { ...request.headers(), ...options.extraHeaders } });
+      } else await route.continue();
     } catch {
       // The page closed during the check, or another handler already
       // resolved the route; either way there is nothing left to do.
@@ -98,12 +108,29 @@ export function createOutboundRouteHandler(options: {
   };
 }
 
-/** Guard every request of `page`. `blockResources` only toggles tracker/media blocking. */
+/**
+ * Guard every request of `page`. `blockResources` only toggles
+ * tracker/media blocking; `extraHeaders` go to `origin` only.
+ */
 export async function installOutboundGuard(
   page: Page,
-  options: { blockResources?: boolean } = {},
+  options: { blockResources?: boolean; extraHeaders?: Readonly<Record<string, string>>; origin?: string } = {},
 ): Promise<void> {
-  await page.route(ALL_URLS, createOutboundRouteHandler({ blockResources: options.blockResources ?? false }));
+  await page.route(
+    ALL_URLS,
+    createOutboundRouteHandler({
+      blockResources: options.blockResources ?? false,
+      ...(options.extraHeaders && options.origin !== undefined ? { extraHeaders: options.extraHeaders, origin: options.origin } : {}),
+    }),
+  );
+}
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }
 
 const contextGuards = new WeakMap<BrowserContext, Promise<void>>();

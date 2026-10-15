@@ -1,4 +1,6 @@
 import type { BrowserContext, Page } from 'patchright';
+import type { CookieInput } from '@scrapeforge/shared';
+import { browserCredentials } from './request-credentials.js';
 import { assertPublicUrl } from '@scrapeforge/shared';
 import {
   assertNavigationAllowed,
@@ -82,6 +84,10 @@ export async function tier4StealthFetch(
     screenshot?: boolean;
     /** Cap for the readiness wait after load (default BROWSER_READY_TIMEOUT_MS or 2.5 s). */
     readyTimeoutMs?: number;
+    /** The request's custom headers: sent to the target's origin only. */
+    headers?: Record<string, string>;
+    /** The request's cookies: added to the context (the pool clears them after the fetch). */
+    cookies?: CookieInput[];
   } = {},
 ): Promise<{
   html: string;
@@ -107,7 +113,12 @@ export async function tier4StealthFetch(
 
     // Always installed: blockResources only toggles tracker/media blocking,
     // never the SSRF check.
-    await installOutboundGuard(page, { blockResources: options.blockResources !== false });
+    const credentials = browserCredentials(target, options.headers, options.cookies);
+    if (credentials.cookies.length > 0) await context.addCookies(credentials.cookies);
+    await installOutboundGuard(page, {
+      blockResources: options.blockResources !== false,
+      ...(credentials.headers ? { extraHeaders: credentials.headers, origin: target.origin } : {}),
+    });
 
     // Simulate human-like behavior
     await page.setExtraHTTPHeaders({

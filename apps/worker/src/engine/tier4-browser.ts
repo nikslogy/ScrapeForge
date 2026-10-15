@@ -1,4 +1,6 @@
 import type { BrowserContext, Page, Request, Response } from 'patchright';
+import type { CookieInput } from '@scrapeforge/shared';
+import { browserCredentials } from './request-credentials.js';
 import { assertPublicUrl, type OutboundBlockedError } from '@scrapeforge/shared';
 import {
   assertNavigationAllowed,
@@ -624,6 +626,10 @@ export async function tier4Fetch(
     screenshot?: boolean;
     /** Cap for the readiness wait after load (default BROWSER_READY_TIMEOUT_MS or 2.5 s). */
     readyTimeoutMs?: number;
+    /** The request's custom headers: sent to the target's origin only. */
+    headers?: Record<string, string>;
+    /** The request's cookies: added to the context (the pool clears them after the fetch). */
+    cookies?: CookieInput[];
   } = {},
 ): Promise<{
   html: string;
@@ -659,7 +665,12 @@ export async function tier4Fetch(
 
     // Always installed: blockResources only toggles tracker/media blocking,
     // never the SSRF check.
-    await installOutboundGuard(page, { blockResources: options.blockResources !== false });
+    const credentials = browserCredentials(target, options.headers, options.cookies);
+    if (credentials.cookies.length > 0) await context.addCookies(credentials.cookies);
+    await installOutboundGuard(page, {
+      blockResources: options.blockResources !== false,
+      ...(credentials.headers ? { extraHeaders: credentials.headers, origin: target.origin } : {}),
+    });
 
     // Mobile emulation: apply viewport + UA at the PAGE level so pooled
     // desktop contexts stay reusable. Overrides cleared on page.close().

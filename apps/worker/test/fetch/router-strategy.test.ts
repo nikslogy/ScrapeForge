@@ -886,3 +886,30 @@ describe('SmartRouter learns T5 by the normal quality bar', () => {
     expect(redis.strategy()!.tiers['5']).toMatchObject({ ok: 1, total: 1, lastOk: true });
   });
 });
+
+describe('SmartRouter and the request credentials', () => {
+  it('a request with cookies or headers skips Lightpanda (T3), which cannot send them', async () => {
+    const { request } = setup();
+    m.isLightpandaConfigured.mockReturnValue(true);
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier3Fetch.mockImplementation(ok);
+    m.tier4Fetch.mockImplementation(ok);
+    expect((await request(URL_, { cookies: [{ name: 'sid', value: 'abc' }] })).fetched).toEqual([1, 2, 4]);
+    expect((await request(URL_, { headers: { Authorization: 'Bearer t' } })).fetched).toEqual([1, 2, 4]);
+    // Without credentials T3 is tried as before.
+    expect((await request('https://other.example/item/1')).fetched).toEqual([1, 2, 3]);
+  });
+
+  it('sends the cookies to the HTTP tiers as a Cookie header, and the cookies and headers to the browser tiers', async () => {
+    const { request } = setup();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(ok);
+    const options = { headers: { Authorization: 'Bearer t' }, cookies: [{ name: 'sid', value: 'abc' }] };
+    await request(URL_, options);
+    expect(m.tier1Fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer t', Cookie: 'sid=abc' } });
+    expect(m.tier2Fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer t', Cookie: 'sid=abc' } });
+    expect(m.tier4Fetch.mock.calls[0][2]).toMatchObject(options);
+  });
+});

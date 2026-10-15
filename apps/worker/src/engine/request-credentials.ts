@@ -1,0 +1,136 @@
+// The request's own cookies and custom headers, applied by every fetch tier.
+//
+// HTTP tiers send matching cookies in a Cookie header; redirect hops that
+// leave the initial origin drop it with Authorization (headersForHop).
+// Browser tiers add the cookies to the (pooled) context, which the pool
+// clears before the next fetch, and add custom headers only to requests for
+// the target's own origin, so credentials never reach third-party scripts,
+// CDNs or trackers the page loads.
+
+import type { CookieInput } from '@scrapeforge/shared';
+
+// A name or value carrying these would split the header or the cookie.
+const UNSAFE_COOKIE_CHARS = /[;\r\n\0]/;
+const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const MAX_COOKIES = 100;
+
+function domainOf(cookie: CookieInput): string | undefined {
+  const d = cookie.domain?.trim().toLowerCase().replace(/^\./, '');
+  return d ? d : undefined;
+}
+
+function pathMatches(requestPath: string, cookiePath: string): boolean {
+  if (requestPath === cookiePath) return true;
+  const prefix = cookiePath.endsWith('/') ? cookiePath : `${cookiePath}/`;
+  return requestPath.startsWith(prefix);
+}
+
+/**
+ * The request's cookies `url` receives: the cookie's domain is the host or
+ * a parent of it (no domain: the host only), its path a prefix of the
+ * URL's path (RFC 6265 domain and path matching). Malformed cookies are
+ * dropped.
+ */
+export function cookiesFor(url: URL, cookies: readonly CookieInput[] | undefined): CookieInput[] {
+  if (!cookies || cookies.length === 0) return [];
+  const host = url.hostname.toLowerCase();
+  const out: CookieInput[] = [];
+  for (const c of cookies.slice(0, MAX_COOKIES)) {
+    if (typeof c?.name !== 'string' || typeof c.value !== 'string') continue;
+    if (!COOKIE_NAME.test(c.name) || UNSAFE_COOKIE_CHARS.test(c.value)) continue;
+    const domain = domainOf(c);
+    if (domain !== undefined && host !== domain && !host.endsWith(`.${domain}`)) continue;
+    if (!pathMatches(url.pathname || '/', c.path?.trim() || '/')) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/** "a=1; b=2" for the cookies `url` receives, or undefined. */
+export function cookieHeader(url: URL, cookies: readonly CookieInput[] | undefined): string | undefined {
+  const matching = cookiesFor(url, cookies);
+  return matching.length > 0 ? matching.map((c) => `${c.name}=${c.value}`).join('; ') : undefined;
+}
+
+/** The custom headers plus the request's cookies (appended to a custom Cookie header, if any). */
+export function headersWithCookies(
+  url: string,
+  headers: Readonly<Record<string, string>> | undefined,
+  cookies: readonly CookieInput[] | undefined,
+): Record<string, string> | undefined {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return headers ? { ...headers } : undefined;
+  }
+  const fromCookies = cookieHeader(target, cookies);
+  if (!fromCookies) return headers ? { ...headers } : undefined;
+  const out: Record<string, string> = {};
+  let existing: string | undefined;
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (name.toLowerCase() === 'cookie') existing = value;
+    else out[name] = value;
+  }
+  out.Cookie = existing ? `${existing}; ${fromCookies}` : fromCookies;
+  return out;
+}
+
+export interface BrowserCookie {
+  name: string;
+  value: string;
+  url?: string;
+  domain?: string;
+  path?: string;
+}
+
+/**
+ * The request's cookies `url` receives, in Playwright's addCookies form: a
+ * host-only cookie is bound to the URL's origin; one with a domain to that
+ * domain (and its subdomains) and its path.
+ */
+export function browserCookies(url: URL, cookies: readonly CookieInput[] | undefined): BrowserCookie[] {
+  return cookiesFor(url, cookies).map((c) => {
+    const domain = domainOf(c);
+    const path = c.path?.trim() || '/';
+    return domain === undefined
+      ? { name: c.name, value: c.value, url: `${url.origin}${path}` }
+      : { name: c.name, value: c.value, domain: `.${domain}`, path };
+  });
+}
+
+/** Custom headers worth adding in a browser: a Cookie header is applied as cookies instead. */
+export function browserHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const out = Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'cookie' && name.toLowerCase() !== 'host'));
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Cookies written in a custom Cookie header ("a=1; b=2"), as host-only cookies. */
+export function cookiesFromHeader(headers: Readonly<Record<string, string>> | undefined): CookieInput[] {
+  const raw = Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === 'cookie')?.[1];
+  if (!raw) return [];
+  const out: CookieInput[] = [];
+  for (const part of raw.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    out.push({ name: part.slice(0, eq).trim(), value: part.slice(eq + 1).trim() });
+  }
+  return out;
+}
+
+/** What a browser tier applies: the request's cookies (and a custom Cookie header's), and its other headers. */
+export function browserCredentials(
+  url: URL,
+  headers: Readonly<Record<string, string>> | undefined,
+  cookies: readonly CookieInput[] | undefined,
+): { cookies: BrowserCookie[]; headers?: Record<string, string> } {
+  const all = [...cookiesFromHeader(headers), ...(cookies ?? [])];
+  const extra = browserHeaders(headers);
+  return { cookies: browserCookies(url, all), ...(extra ? { headers: extra } : {}) };
+}
+
+/** Whether a request has cookies or custom headers a tier must send. */
+export function carriesCredentials(options: { headers?: Readonly<Record<string, string>>; cookies?: readonly CookieInput[] }): boolean {
+  return (options.cookies?.length ?? 0) > 0 || Object.keys(options.headers ?? {}).length > 0;
+}

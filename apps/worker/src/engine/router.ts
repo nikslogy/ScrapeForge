@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis';
 import type { BrowserContext } from 'patchright';
 import { isDnsLookupError, isOutboundBlockedError, type ScrapeOptions } from '@scrapeforge/shared';
+import { carriesCredentials, headersWithCookies } from './request-credentials.js';
 import { tier1Fetch, isValidContent } from './tier1-http.js';
 import { tier2Fetch } from './tier2-tls.js';
 import { tier3Fetch, isLightpandaConfigured } from './tier3-light.js';
@@ -814,6 +815,8 @@ export class SmartRouter {
     const { url, options, proxy } = c;
     const proxyMeta = { proxyTier: proxy?.tier || 'none', proxyCost: proxy?.cost || 0 };
     const httpTimeout = Math.min(options.timeout || 15_000, 15_000);
+    // The request's cookies travel as a Cookie header (dropped on cross-origin hops).
+    const requestHeaders = headersWithCookies(url, options.headers, options.cookies);
 
     // An app shell from one HTTP client is an app shell from the other.
     let skipHttp = false;
@@ -823,7 +826,7 @@ export class SmartRouter {
 
     // ─── Tier 1: plain HTTP with impit defaults ───
     if (startTier <= 1) {
-      const fetch1 = () => tier1Fetch(url, { headers: options.headers, timeout: httpTimeout });
+      const fetch1 = () => tier1Fetch(url, { headers: requestHeaders, timeout: httpTimeout });
       const a = await this.attempt(c, 1, fetch1);
       if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 1, ...proxyMeta };
       if (a.kind === 'response' && isTransientClass(a.cls)) {
@@ -839,7 +842,7 @@ export class SmartRouter {
 
     // ─── Tier 2: HTTP with rotated browser TLS profile + proxy ───
     if (startTier <= 2 && !skipHttp) {
-      const fetch2 = () => tier2Fetch(url, { headers: options.headers, timeout: httpTimeout, proxy: proxy?.url });
+      const fetch2 = () => tier2Fetch(url, { headers: requestHeaders, timeout: httpTimeout, proxy: proxy?.url });
       const a = await this.attempt(c, 2, fetch2);
       if (a.kind === 'response') {
         if (proxy) this.recordProxyResult(proxy, c.domain, a.ok, a.r.latencyMs);
@@ -851,7 +854,9 @@ export class SmartRouter {
     }
 
     // ─── Tier 3: Lightpanda lightweight browser ───
-    if (startTier <= 3 && isLightpandaConfigured()) {
+    // Lightpanda cannot send the request's cookies or headers: a page that
+    // needs them would come back as the logged-out or default version.
+    if (startTier <= 3 && isLightpandaConfigured() && !carriesCredentials(options)) {
       const a = await this.attempt(c, 3, () =>
         tier3Fetch(url, { waitFor: options.waitFor, timeout: options.timeout, proxy: proxy?.url }),
       );
@@ -867,6 +872,8 @@ export class SmartRouter {
             waitFor: options.waitFor,
             timeout: options.timeout,
             blockResources: options.blockResources,
+            headers: options.headers,
+            cookies: options.cookies,
             mobile: options.mobile,
             screenshot: options.screenshot,
           }),
@@ -903,6 +910,8 @@ export class SmartRouter {
             waitFor: options.waitFor,
             timeout: options.timeout,
             blockResources: options.blockResources,
+            headers: options.headers,
+            cookies: options.cookies,
             screenshot: options.screenshot,
           }),
         );
@@ -950,6 +959,8 @@ export class SmartRouter {
             waitFor: options.waitFor,
             timeout: options.timeout,
             blockResources: options.blockResources,
+            headers: options.headers,
+            cookies: options.cookies,
             screenshot: options.screenshot,
           }),
         ),

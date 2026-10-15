@@ -242,10 +242,39 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   smaller context window is skipped for an input that does not fit it.
 * Document building, grounding and recipe induction run on the worker's main
   thread (induction is bounded to ~2 s per learning run, 4 runs in flight).
-* Request `cookies` are validated and enter the cache key, but no fetch
-  tier applies them yet (a gap that predates this package): the page is
-  fetched without them. Custom `headers` are sent by the HTTP tiers (T1,
-  T2) only, not by Lightpanda (T3) or the browser tiers (T4, T5).
+* Request `cookies` and custom `headers` are applied by the HTTP tiers
+  (T1, T2) and the browser tiers (T4, T5), but not by Lightpanda (T3). A
+  request that carries either skips T3. See "Request cookies and headers".
+
+### Request cookies and headers
+
+`engine/request-credentials.ts` decides what each tier sends.
+
+* **HTTP tiers (T1, T2).** Matching cookies go in a `Cookie` header,
+  appended to a custom one if the request has it. A cookie matches by RFC
+  6265 rules:
+  * domain: the host, or a parent domain when the cookie sets one;
+  * path: a prefix of the URL's path.
+
+  `headersForHop` drops `Cookie` and `Authorization` once a redirect
+  leaves the starting origin. A cookie whose name or value would split
+  the header (`;`, CR, LF, NUL) is dropped.
+* **Browser tiers (T4, T5).** The cookies are added to the pooled
+  context, including those from a custom `Cookie` header. Chromium then
+  applies its own domain and path matching. The pool clears every cookie
+  when the context is released, before another fetch can get it.
+* **Custom headers in the browser.** They are added by the page's route
+  handler only to requests for the target's own origin (scheme, host and
+  port). Scripts, images and frames from other origins never see an
+  `Authorization` or any other custom header.
+
+`test/fetch/request-credentials.test.ts` checks this against real servers
+and a real browser:
+
+* the target gets the headers and cookies;
+* a third-party host gets neither;
+* another port of the same host gets no custom headers;
+* the next fetch on the reused context carries nothing over.
 
 ### Large inputs (Phase 2)
 

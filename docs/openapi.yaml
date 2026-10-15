@@ -377,19 +377,23 @@ components:
         headers:
           type: object
           description: |
-            Extra HTTP headers to send with the request. Sent by the plain
-            HTTP fetch tiers only: when the page is rendered in a browser
-            tier, they are not applied. Part of the cache key (as a hash; see
+            Extra HTTP headers to send with the request. The HTTP tiers send
+            them to the target and drop `Authorization` and `Cookie` once a
+            redirect leaves its origin. In a browser tier they are added only
+            to requests for the target's own origin, never to third-party
+            scripts or images. Part of the cache key (as a hash; see
             `cacheTtl`).
           additionalProperties:
             type: string
         cookies:
           type: array
           description: |
-            Cookies for the request. **Known limitation:** they are accepted
-            and validated but currently not applied by any fetch tier, so the
-            page is fetched without them. Part of the cache key (as a hash;
-            see `cacheTtl`).
+            Cookies for the request. A cookie without `domain` is sent to the
+            target host only; one with `domain` also goes to its subdomains.
+            `path` defaults to `/`. HTTP tiers send matching cookies in a
+            `Cookie` header, dropped on cross-origin redirects. Browser tiers
+            add them to a fresh browser context, cleared after the fetch.
+            Part of the cache key (as a hash; see `cacheTtl`).
           items:
             type: object
             required: [name, value]
