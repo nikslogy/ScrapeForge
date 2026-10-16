@@ -701,6 +701,8 @@ interface RequestContext {
   contentRejected: boolean;
   /** Outcomes to fold into the domain strategy once the request is done. */
   outcomes: TierOutcome[];
+  /** The job's deadline: once it fires, no further tier is started. */
+  signal?: AbortSignal;
 }
 
 export interface SmartRouterOptions {
@@ -754,7 +756,7 @@ export class SmartRouter {
    * @param tracer Optional per-request tracer: receives one entry per tier
    *   attempt and the accumulated "browser_acquire" stage.
    */
-  async route(url: string, options: ScrapeOptions, tracer?: StageTracer): Promise<RouterResult> {
+  async route(url: string, options: ScrapeOptions, tracer?: StageTracer, signal?: AbortSignal): Promise<RouterResult> {
     const domain = new URL(url).hostname;
     const requiresBrowser = Boolean(options.screenshot || options.waitFor || options.mobile);
     // Known-hard domains go straight to the browser tier: these sites
@@ -773,7 +775,7 @@ export class SmartRouter {
       browserOnly ? Promise.resolve(null) : this.loadStrategy(sectionKey),
     ]);
     const strategy = hasEvidence(sectionStrategy, this.now()) ? sectionStrategy : siteStrategy;
-    const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], contentRejected: false, outcomes: [] };
+    const c: RequestContext = { url, domain, options, proxy, tracer, notes: [], contentRejected: false, outcomes: [], ...(signal ? { signal } : {}) };
 
     try {
       if (browserOnly) return await this.executeBrowser(c);
@@ -983,6 +985,8 @@ export class SmartRouter {
     fetch: () => Promise<TierResponse | null>,
     terminal = false,
   ): Promise<AttemptResult> {
+    // Past the job deadline nothing is waiting for this request: start no more fetches.
+    if (c.signal?.aborted) throw c.signal.reason;
     const t0 = attemptStart(c.tracer);
     let r: TierResponse | null;
     try {

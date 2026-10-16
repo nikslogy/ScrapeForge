@@ -71,12 +71,20 @@ export class Coalescer {
   /**
    * The leader's stored result, polled until `deadlineMs`. Stops early, with
    * one last read, once the leader no longer holds the key (finished, failed
-   * or expired). Null when no result appeared in time.
+   * or expired). A result `isFinal` rejects while the leader still holds the
+   * key is from an earlier attempt of the same job (a BullMQ retry keeps its
+   * id), and is waited past. Null when no result appeared in time.
    */
-  async waitFor(key: string, leader: string, deadlineMs: number, readResult: (jobId: string) => Promise<string | null>): Promise<string | null> {
+  async waitFor(
+    key: string,
+    leader: string,
+    deadlineMs: number,
+    readResult: (jobId: string) => Promise<string | null>,
+    isFinal: (result: string) => boolean = () => true,
+  ): Promise<string | null> {
     for (;;) {
       const result = await readResult(leader).catch(() => null);
-      if (result !== null) return result;
+      if (result !== null && isFinal(result)) return result;
       let holder: string | null = null;
       try {
         holder = await this.#kv.get(key);

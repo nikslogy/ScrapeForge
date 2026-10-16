@@ -167,6 +167,24 @@ describe('request coalescing', () => {
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
+  it("a failed result from the leader's previous attempt is waited past while the leader holds the key", async () => {
+    const c = new Coalescer(kv(), { pollMs: 20 });
+    const key = flightKey(`cache:${Math.random()}`);
+    const resultKey = `result:${Math.random()}`;
+    // Attempt 1 failed and left its result; the BullMQ retry (same job id) leads again.
+    await redis.set(resultKey, '{"status":"failed"}', 'EX', 60);
+    await c.claim(key, 'lead', 5_000);
+    setTimeout(() => void redis.set(resultKey, '{"status":"completed"}', 'EX', 60).then(() => c.release(key, 'lead')), 120);
+    const completed = (raw: string) => (JSON.parse(raw) as { status: string }).status === 'completed';
+    const got = await c.waitFor(key, 'lead', Date.now() + 5_000, () => redis.get(resultKey), completed);
+    expect(got).toBe('{"status":"completed"}');
+    // A leader that fails for good releases the key: its failure is returned at once.
+    const key2 = flightKey(`cache:${Math.random()}`);
+    await c.claim(key2, 'lead', 5_000);
+    await c.release(key2, 'lead');
+    expect(await c.waitFor(key2, 'lead', Date.now() + 5_000, async () => '{"status":"failed"}', completed)).toBe('{"status":"failed"}');
+  });
+
   it('a store failure makes every job lead (coalescing never fails a job)', async () => {
     const c = new Coalescer({ set: async () => { throw new Error('down'); }, get: async () => null, eval: async () => { throw new Error('down'); } });
     expect(await c.claim('k', 'j', 1_000)).toBeNull();
@@ -246,10 +264,56 @@ describe('per-site fetch limit', () => {
     const hold = await limiter.acquire(`https://${host}/`, Date.now() + 5_000);
     await expect(limiter.acquire(`https://${host}/`, Date.now() + 50)).rejects.toBeInstanceOf(DomainBusyError);
     const ctl = new AbortController();
-    const waiting = limiter.acquire(`https://${host}/`, Date.now() + 5_000, ctl.signal);
+    const waiting = limiter.acquire(`https://${host}/`, Date.now() + 5_000, { signal: ctl.signal });
     ctl.abort(new Error('job deadline'));
     await expect(waiting).rejects.toThrow('job deadline');
     await hold();
+  });
+
+  it('a short lease never shortens the others: the site key lives as long as its longest lease', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 2, pollMs: 10 });
+    const host = `ttl-${Math.random().toString(36).slice(2)}.example`;
+    const long = await limiter.acquire(`https://${host}/a`, Date.now() + 5_000);
+    await limiter.acquire(`https://${host}/b`, Date.now() + 100); // a short job, never released
+    expect(await redis.pttl(domainKey(`https://${host}/`)!)).toBeGreaterThan(4_000);
+    await sleep(250);
+    // The long lease still holds its slot: one is free, not two.
+    const third = await limiter.acquire(`https://${host}/c`, Date.now() + 1_000);
+    await expect(limiter.acquire(`https://${host}/d`, Date.now() + 150)).rejects.toBeInstanceOf(DomainBusyError);
+    await third();
+    await long();
+  });
+
+  it('a lease may outlive the wait deadline (leaseUntil) for fetches still running after it', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 1, pollMs: 10 });
+    const host = `tail-${Math.random().toString(36).slice(2)}.example`;
+    await limiter.acquire(`https://${host}/`, Date.now() + 50, { leaseUntil: Date.now() + 5_000 });
+    await sleep(120);
+    await expect(limiter.acquire(`https://${host}/`, Date.now() + 100)).rejects.toBeInstanceOf(DomainBusyError);
+  });
+
+  it('shares a busy site between tenants: one holding its share waits while another tenant waits', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 4, pollMs: 10 });
+    const host = `fair-${Math.random().toString(36).slice(2)}.example`;
+    const url = `https://${host}/`;
+    const deadline = Date.now() + 5_000;
+    const a = await Promise.all([1, 2, 3, 4].map(() => limiter.acquire(url, deadline, { tenant: 'A' })));
+    const order: string[] = [];
+    const aMore = limiter.acquire(url, deadline, { tenant: 'A' }).then((r) => (order.push('A'), r));
+    const b1 = limiter.acquire(url, deadline, { tenant: 'B' }).then((r) => (order.push('B1'), r));
+    const b2 = limiter.acquire(url, deadline, { tenant: 'B' }).then((r) => (order.push('B2'), r));
+    await sleep(60);
+    // A frees two slots: both go to B (A holds 3 or 2 of 4, at or above its share of 2).
+    await a[0]();
+    await (await b1)();
+    await a[1]();
+    await sleep(60);
+    expect(order.slice(0, 2)).toEqual(['B1', 'B2']);
+    // B is done waiting: A may take the free slots again.
+    await (await b2)();
+    await (await aMore)();
+    expect(order).toEqual(['B1', 'B2', 'A']);
+    for (const r of a.slice(2)) await r();
   });
 
   it('is off with limit 0, and never fails a job when the store is down', async () => {

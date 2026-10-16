@@ -13,7 +13,7 @@ import {
   type ExtractionMetadata,
   type ScrapeOptions,
 } from '@scrapeforge/shared';
-import { SmartRouter, type RouterResult } from './engine/router.js';
+import { MIN_TIER_ACCEPT_QUALITY, SmartRouter, type RouterResult } from './engine/router.js';
 import { Coalescer, flightKey } from './throughput/coalesce.js';
 import { DomainLimiter, domainConcurrency } from './throughput/limits.js';
 import { readSnapshot, snapshotEligible, snapshotTtlSec, snapshotWorthy, writeSnapshot, type PageSnapshot } from './throughput/snapshot.js';
@@ -97,6 +97,9 @@ await browserPool.initialize();
 // Leaves room for structured extraction, which may finish a recipe run up to
 // ~1 s past its own deadline.
 const JOB_DEADLINE_MARGIN_MS = 2_000;
+// An HTTP tier's fetch runs at most this long and cannot be aborted: a site's
+// fetch slot is held this long past the job deadline at most.
+const HTTP_FETCH_TAIL_MS = 15_000;
 
 class JobTimeoutError extends Error {
   readonly code = 'JOB_TIMEOUT' as const;
@@ -314,6 +317,7 @@ function isPermanentFailure(error: unknown, message: string): boolean {
  * leader fails or does not finish in time, the job does the work itself.
  */
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
+  const startedAt = Date.now();
   const { jobId, url, options, userId } = job.data;
   if (!coalescing || !jobId) return runScrapeJob(job);
   // Queued behind an identical request that has finished since: its cached result.
@@ -322,7 +326,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
     if (cached?.status === 'completed') return serveCopy(job, cached, {});
   }
   const timeoutMs = options.timeout ?? 60_000;
-  const key = flightKey(resultCacheKey(userId, url, options));
+  const key = requestFlightKey(job.data);
   const leader = await coalescer.claim(key, jobId, timeoutMs + JOB_DEADLINE_MARGIN_MS + 5_000);
   if (leader === null) {
     try {
@@ -331,15 +335,31 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       await coalescer.release(key, jobId);
     }
   }
-  const copy = await followLeader(job, key, leader, Date.now() + timeoutMs);
-  return copy ?? runScrapeJob(job);
+  const copy = await followLeader(job, key, leader, startedAt + timeoutMs);
+  // On its own after all: within what is left of its own timeout, not a fresh one.
+  return copy ?? runScrapeJob(job, startedAt);
+}
+
+/**
+ * Requests coalesce only with requests that would get the same result: the
+ * result-cache key (tenant, URL, formats, schema, credentials), plus the
+ * limits a result depends on (timeout and spend cap stop extraction early)
+ * and whether the request asked for a fresh page (cacheTtl 0 never reads a
+ * snapshot, so it must not take a copy built from one).
+ */
+function requestFlightKey(data: ScrapeJobData): string {
+  const { url, options, userId } = data;
+  const limits = `t=${options.timeout ?? 60_000};c=${llmSpendCap(options)};fresh=${options.cacheTtl === 0 ? 1 : 0}`;
+  return flightKey(`${resultCacheKey(userId, url, options)}|${limits}`);
 }
 
 /** The leader's completed result as this job's own, or null (it failed, or did not finish in time). */
 async function followLeader(job: Job<ScrapeJobData>, key: string, leader: string, deadlineMs: number): Promise<ScrapeResult | null> {
   const { jobId, url } = job.data;
   await sseEmitter.emit(jobId, 'started', { url, jobId });
-  const leaderResult = parseResult(await coalescer.waitFor(key, leader, deadlineMs, (id) => redis.get(`result:${id}`)));
+  // A failed result while the leader still holds the key is from its previous attempt: keep waiting.
+  const completed = (raw: string): boolean => parseResult(raw)?.status === 'completed';
+  const leaderResult = parseResult(await coalescer.waitFor(key, leader, deadlineMs, (id) => redis.get(`result:${id}`), completed));
   if (!leaderResult || leaderResult.status !== 'completed') return null;
   console.log(`[${jobId}] Coalesced with in-flight job ${leader}`);
   return serveCopy(job, leaderResult, { coalescedWith: leader });
@@ -391,18 +411,21 @@ async function fetchPage(
       snapshotKey,
     };
   }
-  const releaseSlot = await domainLimiter.acquire(url, deadlineMs, signal);
-  try {
-    const rr = await beforeDeadline(signal, jobScopes.run(scope, () => router.route(url, options, tracer)));
-    return { rr, snapshot: null, snapshotKey };
-  } finally {
-    void releaseSlot();
-  }
+  const releaseSlot = await domainLimiter.acquire(url, deadlineMs, { signal, tenant: userId, leaseUntil: deadlineMs + HTTP_FETCH_TAIL_MS });
+  // The slot is held until the router is done with the site, which may be
+  // after the job deadline (an HTTP fetch in flight cannot be aborted).
+  const routed = jobScopes.run(scope, () => router.route(url, options, tracer, signal));
+  routed.then(
+    () => void releaseSlot(),
+    () => void releaseSlot(),
+  );
+  const rr = await beforeDeadline(signal, routed);
+  return { rr, snapshot: null, snapshotKey };
 }
 
-async function runScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
+async function runScrapeJob(job: Job<ScrapeJobData>, startedAt = Date.now()): Promise<ScrapeResult> {
   const { jobId, url, options, userId, apiKeyId } = job.data;
-  const jobStart = Date.now();
+  const jobStart = startedAt;
   const tracer = new StageTracer();
   const timeoutMs = options.timeout ?? 60_000;
 
@@ -441,7 +464,9 @@ async function runScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> {
     const deadlineMs = jobStart + timeoutMs - Math.min(DEADLINE_SAFETY_MARGIN_MS, timeoutMs * 0.1);
     const includeEvidence = options.includeEvidence === true;
     const sourceBlocked = blockedFromQualitySignals(quality, rr.statusCode);
-    if (fetched.snapshotKey && !snapshot && snapshotWorthy(rr.statusCode, Boolean(sourceBlocked), rr.html)) {
+    // Only a page the router's quality gate accepts: a best-effort shell from
+    // the last tier would be served to every retry for the snapshot's life.
+    if (fetched.snapshotKey && !snapshot && quality.score >= MIN_TIER_ACCEPT_QUALITY && snapshotWorthy(rr.statusCode, Boolean(sourceBlocked), rr.html)) {
       void writeSnapshot(
         snapshotKv,
         fetched.snapshotKey,

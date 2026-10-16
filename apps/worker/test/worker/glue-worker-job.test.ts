@@ -89,6 +89,7 @@ vi.mock('../../src/browser/pool.js', () => ({
   },
 }));
 vi.mock('../../src/engine/router.js', () => ({
+  MIN_TIER_ACCEPT_QUALITY: 0.55,
   SmartRouter: class {
     constructor(_redis: unknown, acquire: () => Promise<unknown>, release: (ctx: unknown) => void) {
       h.acquire = acquire;

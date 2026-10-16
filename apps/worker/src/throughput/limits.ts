@@ -4,7 +4,10 @@
 // * DomainLimiter: a cap on fetches in flight per site, across every worker
 //   process, held as expiring leases in a Redis sorted set (one per host).
 //   A crashed worker's leases expire on their own. Too many parallel
-//   requests to one site get it blocked; the limit spreads them out.
+//   requests to one site get it blocked; the limit spreads them out. While
+//   other tenants wait for the site, a tenant holding its share of the
+//   slots (limit / tenants wanting the site) gets no more, so one tenant's
+//   crawl cannot take every slot from the rest.
 
 export class Semaphore {
   readonly limit: number;
@@ -75,21 +78,46 @@ export interface LeaseKv {
 export interface DomainLimiterOptions {
   /** Fetches in flight per host. */
   limit: number;
+  /** How long a waiting tenant counts as waiting after its last try. */
+  waitTtlMs?: number;
   /** How often a waiting fetch retries. */
   pollMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
 
-// KEYS[1] host set; ARGV: now, limit, lease expiry, token.
+// KEYS[1] leases of the host ("tenant|token" → expiry); KEYS[2] tenants
+// waiting for it (tenant → until when it counts as waiting).
+// ARGV: now, limit, lease expiry, "tenant|token", tenant, waiting expiry.
+// Neither key's TTL is ever shortened: it is the latest expiry in the set.
 const ACQUIRE = `
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
-if redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[2]) then
-  redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
-  redis.call('PEXPIREAT', KEYS[1], ARGV[3])
-  return 1
+local now, limit, tenant = tonumber(ARGV[1]), tonumber(ARGV[2]), ARGV[5]
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now)
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+local function wait()
+  redis.call('ZADD', KEYS[2], ARGV[6], tenant)
+  local last = redis.call('ZRANGE', KEYS[2], -1, -1, 'WITHSCORES')
+  redis.call('PEXPIREAT', KEYS[2], last[2])
+  return 0
 end
-return 0`;
+local held = redis.call('ZRANGE', KEYS[1], 0, -1)
+if #held >= limit then return wait() end
+local others = 0
+for _, t in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
+  if t ~= tenant then others = others + 1 end
+end
+if others > 0 then
+  local mine, prefix = 0, tenant .. '|'
+  for _, m in ipairs(held) do
+    if string.sub(m, 1, #prefix) == prefix then mine = mine + 1 end
+  end
+  if mine >= math.ceil(limit / (others + 1)) then return wait() end
+end
+redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+redis.call('ZREM', KEYS[2], tenant)
+local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+redis.call('PEXPIREAT', KEYS[1], last[2])
+return 1`;
 const RELEASE = `return redis.call('ZREM', KEYS[1], ARGV[1])`;
 
 /** Default fetches in flight per site (FETCH_DOMAIN_CONCURRENCY overrides; 0 turns the limit off). */
@@ -112,47 +140,61 @@ export function domainKey(url: string): string | null {
   }
 }
 
+export interface AcquireOptions {
+  signal?: AbortSignal;
+  /** Who is asking: slots are shared fairly between tenants waiting for one site. */
+  tenant?: string;
+  /** When the lease expires if never released (default: the wait deadline). */
+  leaseUntil?: number;
+}
+
 export class DomainLimiter {
   readonly #kv: LeaseKv;
   readonly #limit: number;
   readonly #pollMs: number;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #now: () => number;
+  readonly #waitTtlMs: number;
   #seq = 0;
 
   constructor(kv: LeaseKv, opts: DomainLimiterOptions) {
     this.#kv = kv;
     this.#limit = opts.limit;
     this.#pollMs = opts.pollMs ?? 100;
+    this.#waitTtlMs = opts.waitTtlMs ?? Math.max(2_000, this.#pollMs * 10);
     this.#sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#now = opts.now ?? Date.now;
   }
 
   /**
    * Waits for a slot for `url`'s site until `deadlineMs`; the lease expires
-   * then at the latest. Returns its release. With the limit off, an
-   * unparseable URL, or a store failure, it returns at once: a limiter
-   * never fails a job. Rejects only if `signal` aborts or the deadline
-   * passes while waiting.
+   * at `leaseUntil` (default the deadline) at the latest. Returns its
+   * release. With the limit off, an unparseable URL, or a store failure, it
+   * returns at once: a limiter never fails a job. Rejects only if `signal`
+   * aborts or the deadline passes while waiting.
    */
-  async acquire(url: string, deadlineMs: number, signal?: AbortSignal): Promise<() => Promise<void>> {
+  async acquire(url: string, deadlineMs: number, opts: AcquireOptions = {}): Promise<() => Promise<void>> {
     const key = domainKey(url);
     if (this.#limit <= 0 || key === null) return async () => undefined;
-    const token = `${process.pid}:${++this.#seq}:${Math.random().toString(36).slice(2)}`;
+    const { signal } = opts;
+    // "|" separates the tenant from the token in a lease.
+    const tenant = (opts.tenant ?? '').replace(/\|/g, '_') || '-';
+    const member = `${tenant}|${process.pid}:${++this.#seq}:${Math.random().toString(36).slice(2)}`;
+    const leaseUntil = Math.ceil(Math.max(deadlineMs, opts.leaseUntil ?? deadlineMs));
     for (;;) {
       if (signal?.aborted) throw signal.reason;
       const now = this.#now();
       if (now >= deadlineMs) throw new DomainBusyError(url);
       let granted: unknown;
       try {
-        granted = await this.#kv.eval(ACQUIRE, 1, key, now, this.#limit, Math.ceil(deadlineMs), token);
+        granted = await this.#kv.eval(ACQUIRE, 2, key, `${key}:waiting`, now, this.#limit, leaseUntil, member, tenant, now + this.#waitTtlMs);
       } catch {
         return async () => undefined;
       }
       if (granted === 1) {
         return async () => {
           try {
-            await this.#kv.eval(RELEASE, 1, key, token);
+            await this.#kv.eval(RELEASE, 1, key, member);
           } catch {
             // The lease expires on its own.
           }

@@ -188,6 +188,15 @@ describe('routing by why a tier failed', () => {
     expect(acquire).toHaveBeenCalled();
   });
 
+  it('past the job deadline no further tier is started', async () => {
+    const { router, acquire } = setup();
+    const deadline = new AbortController();
+    deadline.abort(new Error('job deadline'));
+    await expect(router.route(`${site.origin}/shell`, {}, undefined, deadline.signal)).rejects.toThrow('job deadline');
+    expect(hits('/shell')).toBe(0);
+    expect(acquire).not.toHaveBeenCalled();
+  });
+
   it('an outage is not learned against the tier: the domain still starts at T1', async () => {
     const { router, redis } = setup();
     for (let i = 0; i < 4; i++) await failure(router.route(`${site.origin}/boom`, {}));
