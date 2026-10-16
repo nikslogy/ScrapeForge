@@ -59,6 +59,7 @@ import {
   type NormalizedSchema,
   type RecipeKey,
   type RecordGroup,
+  type SourceBlock,
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
@@ -306,51 +307,151 @@ function alnum(text: string): string {
   return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-/**
- * Cells of the one table row (rendered "a | b | c") that has a cell equal to
- * one of the answer's own values, narrowed to the field's column when one
- * header names it ("5G" for has5g, "Battery (mAh)" for batteryMah). Null
- * when no single row is named.
- */
-function tableCells(text: string, keys: readonly string[], field: FieldSpec): string[] | null {
-  const wanted = new Set(keys.map(looseText).filter((k) => k.length >= 2));
-  if (wanted.size === 0) return null;
-  const rows = text
-    .split('\n')
-    .slice(0, MAX_TABLE_ROWS)
-    .filter((line) => line.includes(' | '))
-    .map((line) => line.split(' | ').map((c) => c.trim()));
-  if (rows.length < 2) return null;
-  const hits = rows.slice(1).filter((cells) => cells.some((c) => wanted.has(looseText(c))));
-  if (hits.length !== 1) return null;
-  const [row] = hits;
-  const header = rows[0];
-  if (header.length === row.length) {
-    const col = fieldColumn(header, field);
-    if (col >= 0) return [row[col]];
-  }
-  return row;
+/** Header text that names a column: at most this many chars are compared. */
+const MAX_HEADER_CHARS = 200;
+
+/** A table block parsed once per run: rows, and which rows print each cell text. */
+interface TableIndex {
+  header: readonly string[];
+  rows: ReadonlyArray<readonly string[]>;
+  /** looseText(cell) → indexes of the rows holding it. */
+  rowsByCell: Map<string, number[]>;
+  /** Field name → column index (memo of fieldColumn). */
+  columns: Map<string, number>;
+  /** Every row has at most two cells: a "Spec | Value" table. */
+  keyValue: boolean;
 }
 
-/** Index of the one header that names the field (longest match wins), or -1. */
-function fieldColumn(header: readonly string[], field: FieldSpec): number {
-  const name = alnum(field.name);
-  let best = -1;
-  let bestLen = 0;
+const tableIndexes = new WeakMap<SourceBlock, TableIndex>();
+
+function tableIndex(block: SourceBlock): TableIndex | null {
+  const cached = tableIndexes.get(block);
+  if (cached) return cached;
+  let header: readonly string[];
+  let rows: ReadonlyArray<readonly string[]>;
+  if (block.table) {
+    header = block.table.headers;
+    rows = block.table.rows.slice(0, MAX_TABLE_ROWS);
+  } else {
+    // A table block without its parsed grid: the rendered "a | b | c" lines, first one the header.
+    const lines = block.text
+      .split('\n')
+      .filter((line) => line.includes(' | '))
+      .slice(0, MAX_TABLE_ROWS + 1)
+      .map((line) => line.split(' | ').map((c) => c.trim()));
+    if (lines.length < 2) return null;
+    [header, ...rows] = lines;
+  }
+  if (rows.length === 0) return null;
+  const rowsByCell = new Map<string, number[]>();
+  rows.forEach((cells, r) => {
+    for (const cell of cells) {
+      if (cell === '' || cell.length > MEANING_MAX_CHARS) continue;
+      const key = looseText(cell);
+      const at = rowsByCell.get(key);
+      if (!at) rowsByCell.set(key, [r]);
+      else if (at[at.length - 1] !== r) at.push(r);
+    }
+  });
+  const keyValue = header.length <= 2 && rows.every((cells) => cells.length <= 2);
+  const index: TableIndex = { header, rows, rowsByCell, columns: new Map(), keyValue };
+  tableIndexes.set(block, index);
+  return index;
+}
+
+/**
+ * The cells of a cited table that can hold this answer's value, or null when
+ * the table does not say which:
+ * - a "Spec | Value" table: the value cell of the row whose first cell names
+ *   the field ("Weight" for weightLb);
+ * - otherwise the row the answer names (the row holding the most of its own
+ *   values that appear in that row only), narrowed to the field's column
+ *   when a header names it ("5G" for has5g, "Battery (mAh)" for batteryMah).
+ */
+function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpec): string[] | null {
+  const t = tableIndex(block);
+  if (!t) return null;
+  let col = t.columns.get(field.name);
+  if (col === undefined) {
+    col = columnFor(t.header, field);
+    t.columns.set(field.name, col);
+  }
+  if (col < 0 && t.keyValue) {
+    const named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
+    return named >= 0 ? [t.rows[named][1] ?? ''] : null;
+  }
+  // Values printed in several rows ("Acme" for a brand) say nothing about which row.
+  const votes = new Map<number, number>();
+  for (const key of new Set(keys.map(looseText))) {
+    if (key.length < 2) continue;
+    const at = t.rowsByCell.get(key);
+    if (at?.length === 1) votes.set(at[0], (votes.get(at[0]) ?? 0) + 1);
+  }
+  let row = -1;
+  let best = 0;
   let tie = false;
-  header.forEach((h, i) => {
-    // "Battery (mAh)" → "battery", "Price*" → "price".
-    const key = alnum(h.replace(/\([^)]*\)|\[[^\]]*\]/g, ''));
-    if (key.length < 2 || !(name.includes(key) || key.includes(name))) return;
-    if (key.length > bestLen) [best, bestLen, tie] = [i, key.length, false];
-    else if (key.length === bestLen) tie = true;
+  for (const [r, n] of votes) {
+    if (n > best) [row, best, tie] = [r, n, false];
+    else if (n === best) tie = true;
+  }
+  if (row < 0 || tie) return null;
+  const cells = t.rows[row];
+  // Body rows drop trailing empty cells: a column past the row's end is empty.
+  if (col >= 0) return col < cells.length ? [cells[col]] : [];
+  return [...cells];
+}
+
+/**
+ * Index of the one label (header or first-column cell) that names the field,
+ * or -1. An exact name wins ("Battery (mAh)" or "Battery" for battery);
+ * then the longest label inside the field name ("5G" for has5g); then the
+ * shortest one that contains it ("Warranty" before "Extended warranty").
+ */
+function columnFor(labels: readonly string[], field: FieldSpec): number {
+  const name = alnum(field.name);
+  if (name.length < 2) return -1;
+  let best = -1;
+  let bestRank = -Infinity;
+  let tie = false;
+  labels.forEach((label, i) => {
+    const h = label.slice(0, MAX_HEADER_CHARS);
+    // "Battery (mAh)" → "battery", "Price*" → "price". Linear: no nested brackets.
+    const bare = alnum(h.replace(/\([^()]*\)|\[[^[\]]*\]/g, ''));
+    const full = alnum(h);
+    let rank: number;
+    if (full === name || bare === name) rank = 3_000;
+    else if (bare.length >= 2 && name.includes(bare)) rank = 2_000 + bare.length;
+    else if (bare.length >= 2 && bare.includes(name)) rank = 1_000 - bare.length;
+    else return;
+    if (rank > bestRank) [best, bestRank, tie] = [i, rank, false];
+    else if (rank === bestRank) tie = true;
   });
   return tie ? -1 : best;
 }
 
-/** A number with at least three significant digits ("512", "47.82"), so finding it somewhere on the page means something. */
-function isDistinctiveNumber(text: string): boolean {
-  return (text.match(/\d/g) ?? []).join('').replace(/^0+/, '').length >= 3;
+/** A number with at least three significant digits (512, 47.82), so finding it somewhere on the page means something. */
+function isDistinctiveNumber(value: number): boolean {
+  return (String(value).match(/\d/g) ?? []).join('').replace(/^0+/, '').length >= 3;
+}
+
+/** Attribute values that read as yes/no or as a small count whatever the attribute means (data-index="0", data-quantity="1"). */
+const BARE_ATTR_VALUE = /^(?:[+-]?\d+(?:[.,]\d+)?|true|false|yes|no|y|n|on|off)$/i;
+/** Attributes that carry the value of the attribute naming them (itemprop="ratingValue" content="4.5"). */
+const VALUE_ATTRS = new Set(['content', 'value', 'datetime']);
+/** Words that tell yes/no fields apart from the thing they are about ("hasWarranty" → "warranty"). */
+const FIELD_PREFIX = /^(?:has|is|can|supports|includes|with|offers)(?=[a-z0-9])/;
+
+/**
+ * Whether an attribute says something about the field: its name, or for a
+ * value attribute the itemprop/name/property it belongs to, names the field
+ * ("data-in-stock" for inStock, "data-rating" for rating).
+ */
+function attrNamesField(name: string, attrs: Readonly<Record<string, string>>, field: FieldSpec): boolean {
+  const stem = alnum(field.name).replace(FIELD_PREFIX, '');
+  if (stem.length < 3) return false;
+  const labels = [alnum(name.replace(/^(?:data|aria)-/, ''))];
+  if (VALUE_ATTRS.has(name)) for (const k of ['itemprop', 'name', 'property']) if (attrs[k]) labels.push(alnum(attrs[k]));
+  return labels.some((l) => l.length >= 3 && (l.includes(stem) || stem.includes(l)));
 }
 
 /** A block's text, then its sentences and lines (bounded) when it has several. */
@@ -1468,9 +1569,11 @@ class ExtractionRun {
     const g = checkGrounding(raw, sources, { derived: false });
     if (near(g)) return { where: g.where };
     let byNumber: GroundingResult | undefined;
+    let asNumber: number | undefined;
     if (typeof raw === 'string' && (field.type === 'number' || field.type === 'integer')) {
       const n = normalizeValue(raw, field, this.nctx);
       if (n.ok && typeof n.value === 'number' && !n.steps.some((s) => s.startsWith('convert:'))) {
+        asNumber = n.value;
         byNumber = checkGrounding(n.value, sources, { derived: false });
         if (near(byNumber)) return { where: byNumber.where };
       }
@@ -1479,9 +1582,9 @@ class ExtractionRun {
     if (meaning) return { where: 'block', meaning };
     if (g.grounded && g.where === 'document') return { where: 'document' };
     // A number found only as the number it normalizes to, somewhere on the
-    // page, and with no citation to say where: only when it is distinctive
-    // ("512", "47.82"; never "1" or "4").
-    if (!ctx && byNumber?.grounded && byNumber.where === 'document' && typeof raw === 'string' && isDistinctiveNumber(raw)) return { where: 'document' };
+    // page, and with no citation to say where: only when that number is
+    // distinctive (512, 47.82; never 1 or 4.5, whatever text came with it).
+    if (!ctx && byNumber?.grounded && byNumber.where === 'document' && asNumber !== undefined && isDistinctiveNumber(asNumber)) return { where: 'document' };
     return null;
   }
 
@@ -1493,29 +1596,37 @@ class ExtractionRun {
    * the cited block (its sentences and lines, when it is long) and its
    * record's attributes are normalized with the field's own rules; the
    * value is accepted only when one of them converts to exactly the same
-   * value, and, for a yes/no field, none of them to the opposite. Strings
-   * never take this path: their meaning is too loose to compare. Returns a
-   * note for the evidence, or null.
+   * value, and, for a yes/no field, none of the block's texts (nor an
+   * attribute named for the field) to the opposite. A bare "0", "1" or
+   * "true" in an attribute (data-index, data-quantity) counts only when the
+   * attribute is named for the field. Strings never take this path: their
+   * meaning is too loose to compare. Returns a note for the evidence, or null.
    */
   private matchByMeaning(field: FieldSpec, raw: unknown, ctx: BlockContext, keys: readonly string[] = []): string | null {
     if (field.type !== 'boolean' && field.type !== 'number' && field.type !== 'integer') return null;
     const target = normalizeValue(raw, field, this.nctx);
     if (!target.ok || isEmptyRaw(target.value)) return null;
-    // A whole table cited: only the row this answer names, in the field's column when the header says which.
-    const row = ctx.block.kind === 'table' ? tableCells(ctx.block.text, keys, field) : null;
-    const candidates: string[] = row ?? [...textPieces(ctx.block.text)];
+    // A whole table cited: only the cells that can hold this answer's value, when the table says which.
+    const cells = ctx.block.kind === 'table' ? tableCells(ctx.block, keys, field) : null;
+    // `veto`: a candidate that may contradict a yes/no answer (the block's own words, or an attribute named for the field).
+    const candidates: Array<{ text: string; veto: boolean }> = (cells ?? textPieces(ctx.block.text)).map((text) => ({ text, veto: true }));
     const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
     for (const attrs of attrSets) {
       for (const [name, value] of Object.entries(attrs)) {
         // Links and image paths hold digits that mean nothing ("/3f/c6/…").
         if (MEANING_SKIP_ATTRS.has(name) || /[/\\=?&#]|:\/\//.test(value)) continue;
-        candidates.push(value);
+        const named = attrNamesField(name, attrs, field);
+        if (named || !BARE_ATTR_VALUE.test(value.trim())) candidates.push({ text: value, veto: named });
         // Class lists carry one token per fact ("star-rating Three").
-        if (/\s/.test(value)) candidates.push(...value.split(/\s+/).slice(0, MEANING_MAX_TOKENS));
+        if (/\s/.test(value)) {
+          for (const token of value.split(/\s+/).slice(0, MEANING_MAX_TOKENS)) {
+            if (named || !BARE_ATTR_VALUE.test(token)) candidates.push({ text: token, veto: named });
+          }
+        }
       }
     }
     let match: string | null = null;
-    for (const candidate of candidates) {
+    for (const { text: candidate, veto } of candidates) {
       const text = candidate.trim();
       if (text === '' || text.length > MEANING_MAX_CHARS) continue;
       const n = normalizeValue(text, field, this.nctx);
@@ -1523,7 +1634,7 @@ class ExtractionRun {
       if (n.value === target.value) {
         match ??= `matched by meaning: "${text.slice(0, 60)}" in ${ctx.block.id}`;
         if (field.type !== 'boolean') return match;
-      } else if (field.type === 'boolean') {
+      } else if (field.type === 'boolean' && veto) {
         return null; // the block says both: not a confirmation
       }
     }
