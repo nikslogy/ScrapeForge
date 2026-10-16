@@ -136,3 +136,75 @@ describe('text that states there is no value', () => {
     expect(normalized('Not available', inStock)).toMatchObject({ ok: true, value: false });
   });
 });
+
+// After the adversarial review of the unit rules.
+describe('one unit after several numbers', () => {
+  it.each([
+    ['31.2 x 22.1 x 1.5 cm', spec('widthCm', 'number')],
+    ['128/256/512GB', spec('storageGb', 'integer')],
+    ['2–3 kg', spec('weightKg', 'number')],
+    ['5 to 7 kg', spec('weightKg', 'number')],
+    ['60 x 90 cm', spec('widthCm', 'number')],
+    ['5-7 lb', spec('weightKg', 'number')],
+  ])('%s is several values, not the last one', (raw, field) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+
+  it('a pack count is not a size: "6 x 330 ml" is 330 ml', () => {
+    expect(normalized('6 x 330 ml', spec('volumeMl', 'number'))).toMatchObject({ ok: true, value: 330 });
+    expect(normalized('2 x 16 GB', spec('ramGb', 'integer'))).toMatchObject({ ok: true, value: 16 });
+  });
+
+  it('specs with one number in the unit are unchanged', () => {
+    expect(normalized('512 GB PCIe 4.0 NVMe SSD', spec('storageGb', 'integer'))).toMatchObject({ ok: true, value: 512 });
+    expect(normalized('16 GB LPDDR5X-8533', spec('ramGb', 'integer'))).toMatchObject({ ok: true, value: 16 });
+    expect(normalized('1.4 kg (3.09 lb)', spec('weightKg', 'number'))).toMatchObject({ ok: true, value: 1.4 });
+  });
+});
+
+describe('feet and inches', () => {
+  it.each([
+    [`6'2"`, spec('heightCm', 'number'), 188],
+    [`6 ft 2 in`, spec('heightCm', 'number'), 188],
+    [`5′10″`, spec('heightInches', 'number'), 70],
+    [`6'2"`, spec('heightFt', 'number'), 6.17],
+    [`6'2" (188 cm)`, spec('heightCm', 'number'), 188],
+  ])('%s for %s is one length', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it('several heights, or a field with no unit, stay ambiguous', () => {
+    expect(normalized(`6'2" – 6'4"`, spec('heightCm', 'number'))).toMatchObject({ ok: false, reason: 'ambiguous' });
+    expect(normalized(`6'2"`, spec('height', 'number'))).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+});
+
+describe('words that only look like units', () => {
+  it('"pounds" in a price field is money, not a mass', () => {
+    expect(fieldUnit(spec('price', 'number', 'Price in pounds'))).toBeUndefined();
+    expect(fieldUnit(spec('priceLb', 'number'))).toBeUndefined();
+    expect(fieldUnit(spec('weight', 'number', 'Weight in pounds'))?.id).toBe('lb');
+    expect(normalized('£24.99 (2.5 kg)', spec('price', 'number', 'Price in pounds'))).not.toMatchObject({ ok: true, value: 5.51 });
+  });
+
+  it('"Min" ending a name is a minimum unless a time word comes before it', () => {
+    expect(fieldUnit(spec('priceMin', 'number'))).toBeUndefined();
+    expect(fieldUnit(spec('salaryMin', 'number'))).toBeUndefined();
+    expect(fieldUnit(spec('cookTimeMin', 'integer'))?.id).toBe('min');
+    expect(fieldUnit(spec('durationMins', 'integer'))?.id).toBe('min');
+    expect(normalized('From $45 for 30 min', spec('priceMin', 'number'))).not.toMatchObject({ ok: true, value: 30 });
+  });
+});
+
+describe('no-value markers and star glyphs, more forms', () => {
+  it('"k. A." (keine Angabe) states no value, with or without its last dot', () => {
+    expect(normalized('k. A.', spec('price', 'number'))).toEqual({ ok: true, value: null, steps: ['no-value'] });
+    expect(normalized('k.A.', spec('price', 'number'))).toEqual({ ok: true, value: null, steps: ['no-value'] });
+    expect(normalized('k. A.', spec('inStock', 'boolean'))).toEqual({ ok: true, value: null, steps: ['no-value'] });
+  });
+
+  it('emoji stars with a variation selector count', () => {
+    expect(normalized('⭐️⭐️⭐️⭐️', spec('rating', 'number'))).toMatchObject({ ok: true, value: 4 });
+    expect(normalized('⭐️⭐️⭐️☆☆', spec('rating', 'number'))).toMatchObject({ ok: true, value: 3 });
+  });
+});

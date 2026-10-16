@@ -19,7 +19,7 @@ import {
   stripCurrencySymbols,
   type NumericToken,
 } from './numbers.js';
-import { convertUnit, fieldUnit, unitAfter, type Unit } from './units.js';
+import { convertUnit, feetAndInches, fieldUnit, INCH_UNIT, unitAfter, type Unit } from './units.js';
 
 export { findNumericTokens, localeNumberCandidates, parseLocaleNumber } from './numbers.js';
 export type { LocaleNumberOptions, NumericToken } from './numbers.js';
@@ -116,7 +116,7 @@ const NO_NUMBER_PHRASES = [
   'unknown', 'not (?:specified|listed|stated|disclosed|provided|rated)', 'no (?:price|rating)(?: yet)?',
   'unlimited', 'varies', 'variable', 'see (?:details|store|below|website|site)',
   // de, fr, es, it, pt, nl
-  '(?:preis )?auf anfrage', 'k\\. ?a\\.', 'keine angabe', 'nicht (?:verfügbar|lieferbar|angegeben)', 'ausverkauft', 'demnächst',
+  '(?:preis )?auf anfrage', 'k\\. ?a\\.?', 'keine angabe', 'nicht (?:verfügbar|lieferbar|angegeben)', 'ausverkauft', 'demnächst',
   '(?:prix )?sur demande', 'nous contacter', 'épuisée?', 'bientôt disponible', 'non disponible', 'indisponible',
   '(?:precio )?(?:a consultar|bajo pedido)', 'consultar', 'agotado', 'próximamente', 'no disponible',
   '(?:prezzo )?su richiesta', 'esaurito', 'non disponibile', 'prossimamente',
@@ -133,7 +133,7 @@ function statesNoNumber(text: string): boolean {
 
 const NO_BOOLEAN = new RegExp(
   `^(?:${['n/a', 'n\\.a\\.?', 'tba', 'tbd', 'tbc', 'to be (?:announced|determined|confirmed)', 'unknown',
-    'not (?:specified|stated|disclosed|provided|applicable)', 'keine angabe', 'k\\. ?a\\.'].join('|')})$`,
+    'not (?:specified|stated|disclosed|provided|applicable)', 'keine angabe', 'k\\. ?a\\.?'].join('|')})$`,
   'u',
 );
 
@@ -212,6 +212,17 @@ interface Reading {
  * quantity: the usual rules decide.
  */
 function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], unit: Unit, integer: boolean): NormalizeResult | null {
+  if (unit.dim === 'length') {
+    const height = feetAndInches(text);
+    // "6'2" (188 cm)" for a field in cm: the value printed in the field's unit wins.
+    const printedInUnit = unit.id !== 'in' && readings.some((r) => r.unit?.id === unit.id);
+    if (height === 'ambiguous' && !printedInUnit) return fail('ambiguous', `several heights in ${quote(text)}`);
+    if (height && height !== 'ambiguous' && !printedInUnit) {
+      const value = convertUnit(height.inches, String(height.inches), INCH_UNIT, unit);
+      if (value !== null) return finishNumber(value, ['extract-number', 'feet-inches', ...(unit.id === 'in' ? [] : [`convert:in-${unit.id}`])], integer);
+    }
+  }
+  readings = spreadUnits(text, tokens, readings, unit);
   const same = readings.filter((r) => r.unit?.id === unit.id);
   const sameValues = [...new Set(same.map((r) => r.value))];
   if (sameValues.length > 1) return fail('ambiguous', `several values in ${unit.id} in ${quote(text)}: ${sameValues.slice(0, 3).join(', ')}`);
@@ -231,6 +242,38 @@ function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], u
   const values = [...new Set(converted as number[])];
   if (values.length > 1) return fail('ambiguous', `several values in ${quote(text)}: ${values.slice(0, 3).join(', ')}`);
   return finishNumber(values[0], ['extract-number', ...others[0].reading.steps, `convert:${from.id}-${unit.id}`], integer);
+}
+
+// Between numbers that one trailing unit covers: "31.2 x 22.1 x 1.5 cm", "128/256/512 GB", "2–3 kg", "5 to 7 kg".
+const UNIT_SEQUENCE_JOINER = /^\s*(?:[x×*/\-‐‑‒–—]|to|and|or|&)\s*$/iu;
+const TIMES_JOINER = /^\s*[x×*]\s*$/iu;
+/** "6 x 330 ml": a pack of six, whose unit size is the value. Not for lengths ("60 x 90 cm" is a size). */
+const MAX_PACK_COUNT = 24;
+
+/**
+ * Numbers in a sequence ending in a unit take that unit, so the sequence
+ * reads as several values in it instead of the last number alone.
+ */
+function spreadUnits(text: string, tokens: NumericToken[], readings: Reading[], field: Unit): Reading[] {
+  const out = readings.slice();
+  for (let i = out.length - 2; i >= 0; i--) {
+    const next = out[i + 1].unit;
+    if (out[i].unit || !next || out[i].steps.includes('scale-suffix')) continue;
+    const between = text.slice(tokens[i].end, tokens[i + 1].start);
+    if (!UNIT_SEQUENCE_JOINER.test(between)) continue;
+    const pack =
+      TIMES_JOINER.test(between) &&
+      field.dim !== 'length' &&
+      field.dim !== 'pixels' &&
+      (i === 0 || !UNIT_SEQUENCE_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start))) &&
+      Number.isInteger(out[i].value) &&
+      out[i].value > 0 &&
+      out[i].value <= MAX_PACK_COUNT &&
+      !/[.,]/.test(tokens[i].text);
+    if (pack) continue;
+    out[i] = { ...out[i], unit: next };
+  }
+  return out;
 }
 
 function readToken(text: string, token: NumericToken, integer: boolean, ctx: NormalizeContext): Reading | null | 'ambiguous' {
@@ -266,8 +309,8 @@ function isRatingScale(text: string, [value, scale]: NumericToken[]): boolean {
 
 /** "★★★★☆" → 4, "★★★½" → 3.5: filled stars (and one half) out of a row of star glyphs. */
 function countStars(text: string): number | null {
-  // NFKC turns "½" into "1⁄2".
-  const glyphs = text.replace(/\s+/g, '').replace('1\u20442', '½');
+  // NFKC turns "½" into "1⁄2"; emoji stars usually carry a variation selector ("⭐️").
+  const glyphs = text.replace(/[\s\uFE0E\uFE0F]+/g, '').replace('1\u20442', '½');
   if (!/^[★⭐☆✩✰]*[½⯪⯨]?[☆✩✰]*$/u.test(glyphs) || !/[★⭐]/u.test(glyphs)) return null;
   const full = (glyphs.match(/[★⭐]/gu) ?? []).length;
   return /[½⯪⯨]/u.test(glyphs) ? full + 0.5 : full;

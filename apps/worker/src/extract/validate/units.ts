@@ -50,7 +50,8 @@ const DEFS: readonly UnitDef[] = [
   { id: 'w', dim: 'power', words: ['watt', 'watts'], symbols: ['W'] },
   { id: 'kw', dim: 'power', words: ['kw', 'kilowatt', 'kilowatts'] },
   { id: 's', dim: 'duration', toBase: 1, words: ['sec', 'secs', 'second', 'seconds'] },
-  { id: 'min', dim: 'duration', toBase: 60, words: ['min', 'mins', 'minute', 'minutes'] },
+  // "priceMin" is a minimum, not minutes: "min" names minutes only after a time word (below).
+  { id: 'min', dim: 'duration', toBase: 60, words: ['min', 'mins', 'minute', 'minutes'], nameWords: ['mins', 'minute', 'minutes'] },
   { id: 'h', dim: 'duration', toBase: 3600, words: ['hr', 'hrs', 'hour', 'hours'], symbols: ['h'] },
   { id: 'hz', dim: 'frequency', toBase: 1, words: ['hz', 'hertz'] },
   { id: 'khz', dim: 'frequency', toBase: 1e3, words: ['khz'] },
@@ -73,6 +74,11 @@ const SYMBOLS = DEFS.flatMap((def) => (def.symbols ?? []).map((s) => [s, def] as
 
 // Words that name a unit after a number but are ordinary words in prose.
 const DESCRIPTION_SKIP = new Set(['gr', 'kilo', 'kilos', 'min', 'sec', 'secs']);
+// A field about money: "pounds" there is sterling, not a mass.
+const MONEY_FIELD = /price|cost|fee|amount|salary|wage|pay|rent|budget|revenue|income|currency|sterling|gbp|£/i;
+const CURRENCY_POUND = new Set(['pound', 'pounds']);
+// "cookTimeMin", "durationMin": minutes. "priceMin", "ageMin": a minimum.
+const TIME_WORD = /^(?:time|duration|runtime|length|prep|cook|cooking|total|wait|waiting|delivery|travel|commute|drive|driving|walk|walking|read|reading|play|playing|video|ride|flight|charge|charging)$/i;
 
 const MAX_FIELD_TEXT = 300;
 
@@ -84,10 +90,11 @@ const MAX_FIELD_TEXT = 300;
 export function fieldUnit(field: { name: string; description?: string }): Unit | undefined {
   const found = new Set<UnitDef>();
   const description = (field.description ?? '').slice(0, MAX_FIELD_TEXT);
+  const money = MONEY_FIELD.test(field.name.slice(0, MAX_FIELD_TEXT)) || MONEY_FIELD.test(description);
   // "in GB", "(kg)", "[mAh]"; not "per kg" (a price per kilogram is not a mass).
   for (const m of description.matchAll(/(?:\bin\s+|\(\s*|\[\s*)([a-zA-Z]+)\b/g)) {
     const word = m[1].toLowerCase();
-    if (DESCRIPTION_SKIP.has(word)) continue;
+    if (DESCRIPTION_SKIP.has(word) || (money && CURRENCY_POUND.has(word))) continue;
     const def = BY_WORD.get(word) ?? SYMBOLS.find(([symbol]) => symbol === m[1])?.[1];
     if (def) found.add(def);
   }
@@ -98,8 +105,9 @@ export function fieldUnit(field: { name: string; description?: string }): Unit |
     .filter((w) => w !== '');
   // "weightKg" asks for kilograms; "pricePerKg" is a price.
   if (words.length > 1 && words[words.length - 2].toLowerCase() !== 'per') {
-    const def = BY_NAME_WORD.get(words[words.length - 1].toLowerCase());
-    if (def) found.add(def);
+    const last = words[words.length - 1].toLowerCase();
+    const def = last === 'min' && TIME_WORD.test(words[words.length - 2]) ? BY_WORD.get('min') : BY_NAME_WORD.get(last);
+    if (def && !(money && def.id === 'lb')) found.add(def);
   }
   if (found.size !== 1) return undefined;
   const [def] = found;
@@ -146,3 +154,22 @@ function significantDigits(printed: string): number {
   const digits = printed.replace(/[^\d]/g, '').replace(/^0+/, '');
   return digits.length;
 }
+
+// 6'2", 5′10″, 6 ft 2 in, 6’ 2”: one length in feet and inches.
+const FEET_INCHES =
+  /(\d{1,2}(?:\.\d+)?)\s*(?:'|′|’|ft\.?|feet|foot)\s*(\d{1,2}(?:\.\d+)?)\s*(?:"|″|”|′′|''|’’|in\.?|inch(?:es)?)?(?![\p{L}\d])/giu;
+
+/**
+ * A height printed in feet and inches, as inches (6'2" → 74), with the
+ * text it was read from. 'ambiguous' when the text holds several.
+ */
+export function feetAndInches(text: string): { inches: number; printed: string } | 'ambiguous' | null {
+  const found = [...text.matchAll(FEET_INCHES)].filter((m) => Number(m[2]) < 12);
+  if (found.length === 0) return null;
+  const values = new Set(found.map((m) => Number(m[1]) * 12 + Number(m[2])));
+  if (values.size > 1) return 'ambiguous';
+  return { inches: [...values][0], printed: found[0][0] };
+}
+
+/** The inch, as a unit to convert from. */
+export const INCH_UNIT: Unit = unitOf(INCH);
