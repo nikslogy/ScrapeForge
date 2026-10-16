@@ -184,6 +184,9 @@ describe('words that only look like units', () => {
     expect(fieldUnit(spec('price', 'number', 'Price in pounds'))).toBeUndefined();
     expect(fieldUnit(spec('priceLb', 'number'))).toBeUndefined();
     expect(fieldUnit(spec('weight', 'number', 'Weight in pounds'))?.id).toBe('lb');
+    // Whole words only: "display" is not "pay".
+    expect(fieldUnit(spec('displayWeightLb', 'number'))?.id).toBe('lb');
+    expect(fieldUnit(spec('shippingWeight', 'number', 'Shipping weight in pounds'))?.id).toBe('lb');
     expect(normalized('£24.99 (2.5 kg)', spec('price', 'number', 'Price in pounds'))).not.toMatchObject({ ok: true, value: 5.51 });
   });
 

@@ -67,6 +67,7 @@ vi.mock('../../src/browser/pool.js', () => ({
   },
 }));
 vi.mock('../../src/engine/router.js', () => ({
+  MIN_TIER_ACCEPT_QUALITY: 0.55,
   SmartRouter: class {
     async route() {
       return { html: h.html, statusCode: 200, tierUsed: 1, proxyTier: 'none', latencyMs: 5, proxyCost: 0 };

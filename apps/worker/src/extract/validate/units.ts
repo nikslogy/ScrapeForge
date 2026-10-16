@@ -74,11 +74,27 @@ const SYMBOLS = DEFS.flatMap((def) => (def.symbols ?? []).map((s) => [s, def] as
 
 // Words that name a unit after a number but are ordinary words in prose.
 const DESCRIPTION_SKIP = new Set(['gr', 'kilo', 'kilos', 'min', 'sec', 'secs']);
-// A field about money: "pounds" there is sterling, not a mass.
-const MONEY_FIELD = /price|cost|fee|amount|salary|wage|pay|rent|budget|revenue|income|currency|sterling|gbp|£/i;
+// A field about money: "pounds" there is sterling, not a mass. Whole words
+// only ("displayWeightLb" is not about pay).
+const MONEY_WORDS = new Set([
+  'price', 'prices', 'cost', 'costs', 'fee', 'fees', 'amount', 'salary', 'salaries', 'wage', 'wages', 'pay', 'rent',
+  'budget', 'revenue', 'income', 'currency', 'sterling', 'gbp', 'msrp',
+]);
 const CURRENCY_POUND = new Set(['pound', 'pounds']);
 // "cookTimeMin", "durationMin": minutes. "priceMin", "ageMin": a minimum.
-const TIME_WORD = /^(?:time|duration|runtime|length|prep|cook|cooking|total|wait|waiting|delivery|travel|commute|drive|driving|walk|walking|read|reading|play|playing|video|ride|flight|charge|charging)$/i;
+const TIME_WORD = /^(?:time|duration|runtime|prep|cook|cooking|total|wait|waiting|delivery|travel|commute|drive|driving|walk|walking|read|reading|play|playing|video|ride|flight|charge|charging)$/i;
+
+function nameWords(text: string): string[] {
+  return text
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .split(/[^\p{L}\p{N}£]+/u)
+    .filter((w) => w !== '')
+    .map((w) => w.toLowerCase());
+}
+
+function isMoneyField(name: string, description: string): boolean {
+  return description.includes('£') || [...nameWords(name), ...nameWords(description)].some((w) => MONEY_WORDS.has(w));
+}
 
 const MAX_FIELD_TEXT = 300;
 
@@ -90,7 +106,7 @@ const MAX_FIELD_TEXT = 300;
 export function fieldUnit(field: { name: string; description?: string }): Unit | undefined {
   const found = new Set<UnitDef>();
   const description = (field.description ?? '').slice(0, MAX_FIELD_TEXT);
-  const money = MONEY_FIELD.test(field.name.slice(0, MAX_FIELD_TEXT)) || MONEY_FIELD.test(description);
+  const money = isMoneyField(field.name.slice(0, MAX_FIELD_TEXT), description);
   // "in GB", "(kg)", "[mAh]"; not "per kg" (a price per kilogram is not a mass).
   for (const m of description.matchAll(/(?:\bin\s+|\(\s*|\[\s*)([a-zA-Z]+)\b/g)) {
     const word = m[1].toLowerCase();
