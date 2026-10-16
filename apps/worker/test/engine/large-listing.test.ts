@@ -10,7 +10,7 @@ import { estimateTokens, type FakeHandler } from '../../src/extract/llm/index.js
 import { loadFixture } from '../../../../tests/fixtures/extraction/load.js';
 import { oracleHandler } from '../../../../tests/engine/oracle.js';
 import { scoreExtraction } from '../../../../tests/engine/scoring.js';
-import { fakeClient, items, listing, LISTING_SCHEMA, LISTING_URL, listingModel, request } from './helpers.js';
+import { billed, fakeClient, items, listing, LISTING_SCHEMA, LISTING_URL, listingModel, request } from './helpers.js';
 
 /** Wraps a handler so that output beyond maxOutputTokens is cut (finishReason 'length'), as real providers do. */
 function honoursOutputLimit(handler: FakeHandler): FakeHandler {
@@ -90,7 +90,8 @@ describe('listings that do not fit one call: partitioned (Phase 2)', () => {
   });
 
   it('the cost cap stops further chunks; what was answered is returned and the rest reported', async () => {
-    const { client, provider } = fakeClient(honoursOutputLimit(listingModel), {
+    // Billed by tokens at $1,000/M: the whole listing costs about $61.
+    const { client } = fakeClient(billed(listingModel), {
       maxOutputTokens: 8_192, contextTokens: 128_000, inputCostPerMTok: 1_000, outputCostPerMTok: 1_000,
     });
     const out = await extractStructured(
@@ -98,10 +99,14 @@ describe('listings that do not fit one call: partitioned (Phase 2)', () => {
       { modelClient: client, recipeStore: null, learning: 'off' },
     );
     expect(out.status).toBe('partial');
-    expect(out.scope.partitions!.skipped + out.scope.partitions!.failed).toBeGreaterThan(0);
+    expect(out.scope.partitions!.skipped).toBeGreaterThan(0);
     expect(out.llm.costUsd).toBeLessThanOrEqual(30);
-    expect(len(out.data, 'items')).toBeGreaterThan(0);
-    expect(provider.calls.length).toBeLessThan(out.scope.partitions!.chunks);
+    // Most of the cap is used: smaller chunks are sent when a whole one no longer fits.
+    expect(out.llm.costUsd).toBeGreaterThan(25);
+    expect(len(out.data, 'items')).toBeGreaterThan(300);
+    const gap = out.missing.find((m) => m.path === '/items')!;
+    expect(gap.reason).toBe('not_processed');
+    expect(gap.detail).toMatch(/\(cost_cap\)/);
   });
 
   it('a listing that fits is still sent whole and complete', async () => {

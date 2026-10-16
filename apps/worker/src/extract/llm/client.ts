@@ -78,6 +78,11 @@ export interface CompleteOptions {
   budget: Budget;
   /** Approximate input tokens (system + user); models whose context cannot hold it are skipped. */
   estimatedInputTokens?: number;
+  /**
+   * false: a timeout ends the call at once (no retry, no other model). For a
+   * caller that answers a timeout by sending less (a listing chunk is halved).
+   */
+  retryOnTimeout?: boolean;
 }
 
 export interface CompleteResult {
@@ -101,7 +106,8 @@ const MIN_AFFORDABLE_OUTPUT_TOKENS = 256;
 const INPUT_COST_MARGIN = 1.1;
 
 /** Most a call can cost: its input estimate with margin plus every output token asked for. */
-function worstCaseUsd(caps: ModelCapabilities, inputTokens: number, maxTokens: number): number {
+/** Most a call can cost: its input (with the estimate margin) and every output token it may produce. */
+export function worstCaseUsd(caps: ModelCapabilities, inputTokens: number, maxTokens: number): number {
   const inRate = caps.inputCostPerMTok ?? 0;
   const outRate = caps.outputCostPerMTok ?? 0;
   return (inputTokens * INPUT_COST_MARGIN * inRate + maxTokens * outRate) / 1_000_000;
@@ -265,6 +271,11 @@ export class ModelClient {
             break;
           }
           case 'timeout':
+            if (opts.retryOnTimeout === false) throw this.#fail(err, state);
+            if (retried) break;
+            note = `retry after ${err.category}`;
+            retried = retry = true;
+            break;
           case 'network':
             if (retried) break;
             note = `retry after ${err.category}`;

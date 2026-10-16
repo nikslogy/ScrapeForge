@@ -7,6 +7,7 @@ import { loadFixture } from '../../../../tests/fixtures/extraction/load.js';
 import { oracleHandler } from '../../../../tests/engine/oracle.js';
 import { scoreExtraction } from '../../../../tests/engine/scoring.js';
 import { buildSourceDocument, queryTerms, scoreBlocks, selectBlocks } from '../../src/extract/document/index.js';
+import { estimateTokens } from '../../src/extract/llm/index.js';
 import { normalizeSchema } from '../../src/extract/schema/index.js';
 import { extractStructured } from '../../src/extract/index.js';
 import { fakeClient } from './helpers.js';
@@ -71,15 +72,18 @@ describe('targeted selection', () => {
     expect(rank).toBeLessThan(10);
   });
 
-  it('keeps the top of the page and stays within the budget, in document order', () => {
+  it('keeps the top of the page and stays within the token budget, in document order', () => {
     const doc = buildSourceDocument(fixture.html, fixture.url);
     const fields = normalizeSchema(fixture.schema).fields;
-    const { blockIds } = selectBlocks(doc, fields, 4_000);
+    const { blockIds, priority } = selectBlocks(doc, fields, 1_200);
     expect(blockIds[0]).toBe(doc.blocks[0].id);
     const order = blockIds.map((id) => doc.blocks.findIndex((b) => b.id === id));
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    const chars = blockIds.reduce((n, id) => n + doc.blocks.find((b) => b.id === id)!.text.length, 0);
-    expect(chars).toBeLessThanOrEqual(4_000);
+    const tokens = blockIds.reduce((n, id) => n + estimateTokens(doc.blocks.find((b) => b.id === id)!.text), 0);
+    expect(tokens).toBeLessThanOrEqual(1_200);
+    // The same blocks, in the order they were chosen: the top of the page first.
+    expect([...priority].sort()).toEqual([...blockIds].sort());
+    expect(priority[0]).toBe(doc.blocks[0].id);
   });
 
   it('has no effect on pages that fit', async () => {

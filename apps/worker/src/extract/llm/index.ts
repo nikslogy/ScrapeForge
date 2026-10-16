@@ -16,6 +16,7 @@ export {
   DEFAULT_PER_CALL_TIMEOUT_MS,
   ModelClient,
   QUOTA_TRIP_MS,
+  worstCaseUsd,
   type ClientAttemptRecord,
   type CompleteOptions,
   type CompleteResult,

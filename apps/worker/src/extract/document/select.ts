@@ -7,21 +7,28 @@
 // attributes the renderer shows. The top of the page is always kept (title,
 // price and summary usually live there), and each hit brings its neighbours
 // (labels such as "Price" are often the block before the value). The
-// selection is rendered in document order by renderBlocks.
+// selection is rendered in document order by renderBlocks. It is sized in
+// tokens, not characters: a Cyrillic or CJK page holds far fewer characters
+// per token than an English one.
 
+import { estimateTokens } from '../llm/tokens.js';
 import type { FieldSpec, SourceBlock, SourceDocument } from '../types.js';
 
 export interface BlockSelection {
   /** Chosen block ids, in document order. */
   blockIds: string[];
+  /** The same ids in the order they were chosen (top of the page, then by relevance): the last are the first to drop. */
+  priority: string[];
   /** Blocks that scored above zero for the query. */
   matched: number;
 }
 
 /** Share of the budget always given to the top of the page. */
 const LEAD_SHARE = 0.15;
-/** Rendering overhead per block ("[b123] ", attribute braces, newline). */
-const LINE_OVERHEAD = 12;
+/** Rendering overhead per block in tokens ("[b123] ", attribute braces, newline). */
+const LINE_OVERHEAD_TOKENS = 4;
+/** Rendering overhead per attribute in tokens (name, quotes, separator). */
+const ATTR_OVERHEAD_TOKENS = 3;
 /** Neighbours brought along with each hit, before and after. */
 const NEIGHBOURS_BEFORE = 1;
 const NEIGHBOURS_AFTER = 1;
@@ -104,10 +111,10 @@ function blockTerms(b: SourceBlock): string[] {
   return tokenize(parts.join(' '));
 }
 
-/** Rendered size of one block, roughly as renderBlocks prints it. */
-function blockChars(b: SourceBlock): number {
-  let n = b.text.length + LINE_OVERHEAD;
-  if (b.attrs) for (const v of Object.values(b.attrs)) n += Math.min(v.length, 300) + 8;
+/** Rendered size of one block in tokens, roughly as renderBlocks prints it. */
+function blockTokens(b: SourceBlock): number {
+  let n = estimateTokens(b.text) + LINE_OVERHEAD_TOKENS;
+  if (b.attrs) for (const v of Object.values(b.attrs)) n += estimateTokens(v.slice(0, 300)) + ATTR_OVERHEAD_TOKENS;
   return n;
 }
 
@@ -141,42 +148,45 @@ export function scoreBlocks(doc: SourceDocument, query: Map<string, number>): Fl
 }
 
 /**
- * Blocks to send for `fields` within about `maxChars` of rendering: the top
- * of the page, then the best-scoring blocks with their neighbours. The
- * caller renders them with renderBlocks({ blockIds, maxChars }), which keeps
- * document order and never exceeds maxChars.
+ * Blocks to send for `fields` within about `maxTokens` of rendering: the
+ * top of the page, then the best-scoring blocks with their neighbours. The
+ * caller renders them with renderBlocks({ blockIds }), which keeps document
+ * order; when the rendering is still too large it drops blocks from the end
+ * of `priority`, never the relevant ones further down the page.
  */
-export function selectBlocks(doc: SourceDocument, fields: readonly FieldSpec[], maxChars: number): BlockSelection {
+export function selectBlocks(doc: SourceDocument, fields: readonly FieldSpec[], maxTokens: number): BlockSelection {
   const blocks = doc.blocks;
   const chosen = new Uint8Array(blocks.length);
+  const priority: string[] = [];
   let used = 0;
   const take = (i: number): boolean => {
     if (i < 0 || i >= blocks.length || chosen[i]) return true;
-    const size = blockChars(blocks[i]);
-    if (used + size > maxChars) return false;
+    const size = blockTokens(blocks[i]);
+    if (used + size > maxTokens) return false;
     chosen[i] = 1;
+    priority.push(blocks[i].id);
     used += size;
     return true;
   };
 
   // The top of the page.
-  const lead = maxChars * LEAD_SHARE;
+  const lead = maxTokens * LEAD_SHARE;
   for (let i = 0; i < blocks.length && used < lead; i++) if (!take(i)) break;
 
   const scores = scoreBlocks(doc, queryTerms(fields));
   const order = [...scores.keys()].filter((i) => scores[i] > 0).sort((a, b) => scores[b] - scores[a] || a - b);
   for (const i of order) {
-    if (used >= maxChars) break;
+    if (used >= maxTokens) break;
     take(i);
     for (let k = 1; k <= NEIGHBOURS_BEFORE; k++) take(i - k);
     for (let k = 1; k <= NEIGHBOURS_AFTER; k++) take(i + k);
   }
   // Room left: the rest in document order.
-  for (let i = 0; i < blocks.length && used < maxChars; i++) take(i);
+  for (let i = 0; i < blocks.length && used < maxTokens; i++) take(i);
 
   const blockIds: string[] = [];
   chosen.forEach((c, i) => {
     if (c) blockIds.push(blocks[i].id);
   });
-  return { blockIds, matched: order.length };
+  return { blockIds, priority, matched: order.length };
 }

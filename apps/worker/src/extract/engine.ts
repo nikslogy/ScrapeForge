@@ -13,7 +13,7 @@
 import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { roundMs, StageTracer } from '../tracing.js';
-import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, selectBlocks, type BlockContext } from './document/index.js';
+import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, selectBlocks, type BlockContext, type BlockSelection } from './document/index.js';
 import {
   Budget,
   buildExtractionPrompt,
@@ -21,6 +21,8 @@ import {
   estimateTokens,
   parseExtractionResponse,
   planInputBudget,
+  requestedOutputTokens,
+  worstCaseUsd,
   type ModelClient,
   type ParsedCell,
   type ParsedRecord,
@@ -133,6 +135,8 @@ const SPLIT_CATEGORIES: ReadonlySet<LlmErrorCategory> = new Set(['output_truncat
 const DEFAULT_PARTITION_CONCURRENCY = 4;
 /** Unprocessed record ranges named in the list-level missing detail. */
 const MAX_REPORTED_GAPS = 5;
+/** Ranges of cards a short chunk answer left out that are asked for separately; more become one span. */
+const MAX_REASK_RUNS = 3;
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -581,12 +585,17 @@ interface Chunk {
   from: number;
   to: number;
   depth: number;
+  /** Cards an earlier answer left out, asked for again (once). */
+  reask?: boolean;
+  /** Not started before this many chunk calls have settled (it waits for a sibling's reservation to clear). */
+  notBefore?: number;
 }
 
 interface ChunkEntry {
   from: number;
   to: number;
-  status: 'done' | 'failed' | 'skipped';
+  /** short: answered, but with fewer records than cards sent (beyond the promo-slot tolerance). */
+  status: 'done' | 'failed' | 'skipped' | 'short';
   reason?: string;
   returned?: number;
 }
@@ -1100,8 +1109,8 @@ class ExtractionRun {
       // A single answer on a page that does not fit: send the blocks most
       // relevant to the fields instead of the first ones.
       if (rendered.truncated && !recordCap && shape === 'object' && !this.disabled.has('select')) {
-        const selection = selectBlocks(this.doc, fields, Math.floor(maxChars * SELECTION_FILL));
-        rendered = this.render(maxChars, inputTokens, undefined, selection.blockIds);
+        const selection = selectBlocks(this.doc, fields, Math.floor(Math.min(inputTokens, maxChars / CHARS_PER_TOKEN) * SELECTION_FILL));
+        rendered = this.renderSelection(selection, maxChars, inputTokens);
         this.selectedInput = true;
         this.warnings.add(`input_selected:${rendered.includedIds.length}_of_${this.doc.blocks.length}_blocks`);
       } else if (rendered.truncated) {
@@ -1141,6 +1150,7 @@ class ExtractionRun {
     call: ModelCall,
     renderedText: string,
     outputTokens: number,
+    opts: { retryOnTimeout?: boolean } = {},
   ): Promise<{ records: ParsedRecord[] } | { failure: { category: LlmErrorCategory; message: string } }> {
     const prompt = buildExtractionPrompt({ schema: call.reduced, renderedBlocks: renderedText, url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint });
     const estimatedInputTokens =
@@ -1151,13 +1161,13 @@ class ExtractionRun {
       maxOutputTokens: outputTokens,
       responseSchema: prompt.responseSchema,
       temperature: 0,
-    }, 'extract', estimatedInputTokens);
+    }, 'extract', estimatedInputTokens, opts);
     if (!first.ok) return { failure: first.failure };
     const parsed = this.parse(first.text, call.reduced, call.parseSource);
     if (parsed.ok) return { records: parsed.records };
     if (parsed.category !== 'parse_error') return { failure: { category: parsed.category, message: parsed.message } };
     const repair = buildRepairPrompt(first.text, parsed.message);
-    const repaired = await this.complete(call.client, call.budget, { system: repair.system, user: repair.user, maxOutputTokens: outputTokens, temperature: 0 }, 'repair', estimateTokens(repair.system) + estimateTokens(repair.user));
+    const repaired = await this.complete(call.client, call.budget, { system: repair.system, user: repair.user, maxOutputTokens: outputTokens, temperature: 0 }, 'repair', estimateTokens(repair.system) + estimateTokens(repair.user), opts);
     if (!repaired.ok) return { failure: repaired.failure };
     const again = this.parse(repaired.text, call.reduced, call.parseSource);
     return again.ok ? { records: again.records } : { failure: { category: again.category, message: again.message } };
@@ -1186,7 +1196,9 @@ class ExtractionRun {
     const perRecordChars = Math.max(1, sampleChars / sample.length);
     const inputCap = Math.max(1, Math.floor((maxChars * SELECTION_FILL) / perRecordChars));
     const perChunk = Math.max(1, Math.min(outputCap, inputCap));
-    if (perChunk >= total) return null;
+    // The listing fits one call but the page does not (a long intro or menu
+    // above the grid): send the records alone rather than the top of the page.
+    if (perChunk >= total) return whole.truncated ? { group, perChunk: total } : null;
     return { group, perChunk };
   }
 
@@ -1202,40 +1214,140 @@ class ExtractionRun {
     }
     const answered: Array<{ from: number; records: ParsedRecord[] }> = [];
     let sentBlocks = 0;
-    const concurrency = Math.max(1, Math.min(this.partitionConcurrency(), queue.length));
-    const worker = async (): Promise<void> => {
-      for (let chunk = queue.shift(); chunk; chunk = queue.shift()) {
-        if (!call.budget.canSpend()) {
+    const frame = estimateTokens(buildExtractionPrompt({ schema: call.reduced, renderedBlocks: '', url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint }).user);
+
+    const prepare = (chunk: Chunk) => {
+      const rendered = renderBlocks(this.doc, { blockIds: ids.slice(chunk.from, chunk.to), maxChars });
+      const tooBig = rendered.truncated || estimateTokens(rendered.text) > maxChars / CHARS_PER_TOKEN;
+      const tokens = Math.min(outputTokens, this.plannedOutputTokens(call.primary, chunk.to - chunk.from, call.fields.length));
+      const inputTokens = frame + estimateTokens(rendered.text);
+      // worstUsd: every token max_tokens allows; plannedUsd: the answer as planned, without headroom.
+      const worstUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, tokens));
+      const plannedUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, Math.ceil(tokens / OUTPUT_HEADROOM)));
+      return { rendered, tooBig, tokens, worstUsd, plannedUsd };
+    };
+    const splittable = (chunk: Chunk): boolean => chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS;
+    const halve = (chunk: Chunk, why: string): void => {
+      const mid = chunk.from + Math.ceil((chunk.to - chunk.from) / 2);
+      queue.unshift({ from: chunk.from, to: mid, depth: chunk.depth + 1 }, { from: mid, to: chunk.to, depth: chunk.depth + 1 });
+      this.warnings.add(`partition_chunk_split:${why}`);
+    };
+    // Set once the cap could not pay for a chunk that cannot be made smaller: the rest is skipped without trying.
+    let capReached = false;
+
+    // Calls in flight, and how many have settled (a chunk waiting on a sibling's reservation counts them).
+    const running = new Set<Promise<void>>();
+    let settled = 0;
+    const limit = Math.max(1, this.partitionConcurrency());
+
+    const runChunk = async (chunk: Chunk, prepared: ReturnType<typeof prepare>): Promise<void> => {
+      const { rendered, tooBig, tokens } = prepared;
+      const n = chunk.to - chunk.from;
+      const canSplit = splittable(chunk);
+      // A chunk that can be halved is not retried whole after a timeout: the halves answer sooner.
+      const result = tooBig
+        ? { failure: { category: 'input_too_large' as LlmErrorCategory, message: 'chunk does not fit the input budget' } }
+        : await this.callAndParse(call, rendered.text, tokens, { retryOnTimeout: !canSplit });
+      if ('records' in result) {
+        sentBlocks += rendered.includedIds.length;
+        answered.push({ from: chunk.from, records: result.records });
+        const returned = result.records.length;
+        const allowance = Math.max(1, Math.floor(n * LIST_COVERAGE_TOLERANCE));
+        // An empty answer may be right (the group is not what the schema asks
+        // for); it is a gap only when other chunks found records (below).
+        if (returned === 0 || returned >= n - allowance) {
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned });
+          return;
+        }
+        // Fewer records than cards: ask again for the cards the answer left out (once).
+        const runs = chunk.reask ? null : this.uncoveredRuns(result.records, ids, chunk, call.fields);
+        if (runs && runs.length > 0) {
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned });
+          queue.unshift(...runs.map((r) => ({ ...r, depth: chunk.depth, reask: true })));
+          this.warnings.add('partition_chunk_reasked');
+          return;
+        }
+        ledger.push({ from: chunk.from, to: chunk.to, status: 'short', returned, reason: `returned ${returned} of ${n}` });
+        return;
+      }
+      const category = result.failure.category;
+      if (category === 'budget_exhausted') {
+        if (call.budget.remainingMs() <= 0) {
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: 'deadline' });
+        } else if (running.size > 1) {
+          // Siblings hold reservations far above what they will spend: wait for one to settle.
+          queue.unshift({ ...chunk, notBefore: settled + 2 });
+        } else if (canSplit && call.budget.canSpend()) {
+          // What is left cannot cover this chunk's input: half as many cards may fit.
+          halve(chunk, 'cost_cap');
+        } else {
+          capReached = true;
+          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: 'cost_cap' });
+        }
+        return;
+      }
+      if (SPLIT_CATEGORIES.has(category) && canSplit) {
+        // Halve and retry both halves first.
+        halve(chunk, category);
+        return;
+      }
+      ledger.push({ from: chunk.from, to: chunk.to, status: 'failed', reason: category });
+    };
+
+    while (queue.length > 0 || running.size > 0) {
+      while (queue.length > 0 && running.size < limit) {
+        const chunk = queue[0];
+        if (call.budget.remainingMs() <= 0 || !call.budget.canSpend() || capReached) {
+          queue.shift();
           ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: call.budget.remainingMs() <= 0 ? 'deadline' : 'cost_cap' });
           continue;
         }
-        const rendered = renderBlocks(this.doc, { blockIds: ids.slice(chunk.from, chunk.to), maxChars });
-        const tooBig = rendered.truncated || estimateTokens(rendered.text) > maxChars / CHARS_PER_TOKEN;
-        const result = tooBig
-          ? { failure: { category: 'input_too_large' as LlmErrorCategory, message: 'chunk does not fit the input budget' } }
-          : await this.callAndParse(call, rendered.text, Math.min(outputTokens, this.plannedOutputTokens(call.primary, chunk.to - chunk.from, call.fields.length)));
-        if ('records' in result) {
-          sentBlocks += rendered.includedIds.length;
-          answered.push({ from: chunk.from, records: result.records });
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned: result.records.length });
-          continue;
+        if (running.size > 0 && chunk.notBefore !== undefined && settled < chunk.notBefore) break;
+        const prepared = prepare(chunk);
+        if (!prepared.tooBig) {
+          // Under a cost cap, a chunk the cap cannot cover next to the calls in flight waits for them.
+          if (running.size > 0 && call.budget.remainingUsd() < prepared.worstUsd) break;
+          // Alone, and what is left cannot pay for its planned answer: a cut-off (billed) answer would
+          // follow. Half as many cards may fit.
+          if (running.size === 0 && splittable(chunk) && call.budget.remainingUsd() < prepared.plannedUsd) {
+            queue.shift();
+            halve(chunk, 'cost_cap');
+            continue;
+          }
         }
-        const category = result.failure.category;
-        if (SPLIT_CATEGORIES.has(category) && chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS) {
-          // Halve and retry both halves first.
-          const mid = chunk.from + Math.ceil((chunk.to - chunk.from) / 2);
-          queue.unshift({ from: chunk.from, to: mid, depth: chunk.depth + 1 }, { from: mid, to: chunk.to, depth: chunk.depth + 1 });
-          this.warnings.add(`partition_chunk_split:${category}`);
-          continue;
-        }
-        ledger.push({ from: chunk.from, to: chunk.to, status: 'failed', reason: category });
+        queue.shift();
+        const task: Promise<void> = runChunk(chunk, prepared).finally(() => {
+          running.delete(task);
+          settled++;
+        });
+        running.add(task);
       }
-    };
-    await Promise.all(Array.from({ length: concurrency }, worker));
+      if (running.size === 0) break;
+      await Promise.race(running);
+    }
+
+    // Other chunks found records: a chunk that answered none left its cards out.
+    if (answered.some((a) => a.records.length > 0)) {
+      for (const e of ledger) {
+        const n = e.to - e.from;
+        if (e.status === 'done' && e.returned === 0 && n > Math.max(1, Math.floor(n * LIST_COVERAGE_TOLERANCE))) {
+          e.status = 'short';
+          e.reason = `returned 0 of ${n}`;
+        }
+      }
+    }
 
     // Merge in page order; an answer repeated for the same card is kept once.
     answered.sort((a, b) => a.from - b.from);
-    ledger.sort((a, b) => a.from - b.from);
+    ledger.sort((a, b) => a.from - b.from || a.to - b.to);
+    // Neighbouring pieces skipped for the same reason are one gap.
+    for (let i = ledger.length - 1; i > 0; i--) {
+      const [prev, cur] = [ledger[i - 1], ledger[i]];
+      if (prev.status === 'skipped' && cur.status === 'skipped' && prev.reason === cur.reason && prev.to === cur.from) {
+        prev.to = cur.to;
+        ledger.splice(i, 1);
+      }
+    }
     const records: Array<Map<string, LlmSlot>> = [];
     const seen = new Set<string>();
     let parsedCount = 0;
@@ -1256,10 +1368,10 @@ class ExtractionRun {
     if (duplicates > 0) this.warnings.add(`partition_duplicates_dropped:${duplicates}`);
     this.blocksSentToModel = sentBlocks;
     this.strategy = 'partitioned';
-    const done = ledger.filter((e) => e.status === 'done');
+    const answeredChunks = ledger.filter((e) => e.status === 'done' || e.status === 'short');
     this.partition = {
       chunks: ledger.length,
-      done: done.length,
+      done: answeredChunks.length,
       failed: ledger.filter((e) => e.status === 'failed').length,
       skipped: ledger.filter((e) => e.status === 'skipped').length,
       recordsPerChunk: plan.perChunk,
@@ -1267,22 +1379,51 @@ class ExtractionRun {
     this.warnings.add(`partitioned:${ledger.length}_chunks_of_${plan.perChunk}`);
     const gaps = ledger.filter((e) => e.status !== 'done');
     if (gaps.length > 0) {
-      const missingRecords = gaps.reduce((n, e) => n + (e.to - e.from), 0);
+      const missingRecords = gaps.reduce((n, e) => n + (e.to - e.from) - (e.status === 'short' ? (e.returned ?? 0) : 0), 0);
       const ranges = gaps.slice(0, MAX_REPORTED_GAPS).map((e) => `${e.from + 1}–${e.to} (${e.reason})`).join(', ');
       const more = gaps.length > MAX_REPORTED_GAPS ? `, and ${gaps.length - MAX_REPORTED_GAPS} more` : '';
       this.coverageGap = true;
+      // A provider failure only when every gap is one; the request's own deadline or cost cap is not.
       const allProviderFailures = gaps.every((e) => e.status === 'failed' && e.reason !== 'output_truncated' && e.reason !== 'input_too_large');
       this.listGap = {
         reason: allProviderFailures ? 'provider_failure' : 'not_processed',
         detail: `${missingRecords} of ${ids.length} records were not processed: records ${ranges}${more}`,
       };
     }
-    if (done.length === 0) {
+    if (answeredChunks.length === 0) {
       const reason = gaps[0]?.reason ?? 'unknown';
       this.warnings.add(`llm_failed:${reason}`);
-      return { ran: true, records: [], failure: { reason: reason === 'output_truncated' ? 'truncated' : 'provider_failure', detail: this.listGap?.detail ?? reason } };
+      const failure: MissingReason = reason === 'output_truncated' ? 'truncated' : this.listGap?.reason ?? 'provider_failure';
+      return { ran: true, records: [], failure: { reason: failure, detail: this.listGap?.detail ?? reason } };
     }
     return { ran: true, records, parsedCount };
+  }
+
+  /**
+   * Record ranges [from, to) of a chunk that its answer did not cover, judged
+   * by the cards its records cite; null when too few records cite a card to
+   * tell. Several runs become one span (the dedupe drops what is answered twice).
+   */
+  private uncoveredRuns(records: ParsedRecord[], ids: readonly string[], chunk: Chunk, fields: FieldSpec[]): Array<{ from: number; to: number }> | null {
+    const covered = new Set<string>();
+    let homed = 0;
+    for (const r of records) {
+      const home = this.homeRecord(r, fields);
+      if (home) {
+        covered.add(home.block.id);
+        homed++;
+      }
+    }
+    if (homed < records.length * 0.8) return null;
+    const runs: Array<{ from: number; to: number }> = [];
+    for (let i = chunk.from; i < chunk.to; i++) {
+      if (covered.has(ids[i])) continue;
+      const last = runs[runs.length - 1];
+      if (last && last.to === i) last.to = i + 1;
+      else runs.push({ from: i, to: i + 1 });
+    }
+    if (runs.length > MAX_REASK_RUNS) return [{ from: runs[0].from, to: runs[runs.length - 1].to }];
+    return runs;
   }
 
   private partitionConcurrency(): number {
@@ -1329,6 +1470,30 @@ class ExtractionRun {
   }
 
   /**
+   * Renders a block selection within the input budget. When the estimate
+   * says it is still too large (dense scripts tokenize worse than the
+   * selection assumed), the blocks chosen last (least relevant) are
+   * dropped, never the relevant ones further down the page.
+   */
+  private renderSelection(selection: BlockSelection, maxChars: number, inputTokens: number): ReturnType<typeof renderBlocks> {
+    const inDocOrder = (keep: readonly string[]): string[] => {
+      const set = new Set(keep);
+      return selection.blockIds.filter((id) => set.has(id));
+    };
+    let keep = selection.priority;
+    let rendered = renderBlocks(this.doc, { blockIds: selection.blockIds });
+    for (let i = 0; i < 8 && keep.length > 1; i++) {
+      const tokens = estimateTokens(rendered.text);
+      if (rendered.text.length <= maxChars && tokens <= inputTokens) return rendered;
+      const share = Math.min(maxChars / Math.max(1, rendered.text.length), inputTokens / Math.max(1, tokens)) * 0.95;
+      keep = keep.slice(0, Math.max(1, Math.floor(keep.length * Math.min(0.95, Math.max(0.5, share)))));
+      rendered = renderBlocks(this.doc, { blockIds: inDocOrder(keep) });
+    }
+    // Still too large (one huge block): cut it as any rendering is cut.
+    return this.render(maxChars, inputTokens, undefined, inDocOrder(keep));
+  }
+
+  /**
    * Records of the largest group the output limit can hold, when fewer than
    * the group has (null otherwise). Applies only when the usual reservation
    * (OUTPUT_TOKENS_PER_CELL) exceeds the limit; the answer size is then
@@ -1364,9 +1529,10 @@ class ExtractionRun {
     request: { system: string; user: string; maxOutputTokens: number; responseSchema?: Record<string, unknown>; temperature: number },
     purpose: 'extract' | 'repair',
     estimatedInputTokens: number,
+    opts: { retryOnTimeout?: boolean } = {},
   ): Promise<{ ok: true; text: string } | { ok: false; failure: { category: LlmErrorCategory; message: string } }> {
     try {
-      const res = await client.complete(request, { purpose, budget, estimatedInputTokens });
+      const res = await client.complete(request, { purpose, budget, estimatedInputTokens, ...opts });
       this.attempts.push(...res.attempts);
       return { ok: true, text: res.response.text };
     } catch (err) {
@@ -1680,12 +1846,16 @@ class ExtractionRun {
       } else if (llm.failure) {
         out.set(field.name, { value: null, missing: { reason: llm.failure.reason, detail: llm.failure.detail } });
       } else {
-        // Asked, but the model returned no record at all.
+        // Asked, but the model returned no record at all: as for a field it
+        // left empty, not found only when it saw the whole page.
+        if (this.selectedInput) this.selectionIncomplete = true;
         out.set(field.name, {
           value: null,
           missing: this.truncated
             ? { reason: 'not_processed', detail: 'input was truncated; the value may be in the part not sent to the model' }
-            : { reason: 'not_found' },
+            : this.selectedInput
+              ? { reason: 'not_processed', detail: 'only the parts of the page most relevant to the fields were sent; the value may be in the rest' }
+              : { reason: 'not_found' },
         });
       }
     }
@@ -1758,6 +1928,8 @@ class ExtractionRun {
       // An empty list: the missing entry is the list itself.
       const why =
         llm.failure ??
+        // Chunks of the listing were not processed: that, not "no records", is why it is empty.
+        this.listGap ??
         (droppedWithProblems
           ? { reason: droppedWithProblems.reason, detail: `${droppedWithProblems.count} record(s) were reported but none of their values could be accepted` }
           : this.truncated

@@ -1,7 +1,7 @@
 // Shared helpers for engine tests: an in-memory recipe store, model clients
 // over scripted fake providers, small pages and response builders.
 
-import { CircuitBreaker, FakeProvider, fakeCaps, ModelClient, type FakeHandler } from '../../src/extract/llm/index.js';
+import { CircuitBreaker, estimateTokens, FakeProvider, fakeCaps, ModelClient, type FakeHandler } from '../../src/extract/llm/index.js';
 import { RecipeStore, type RecipeKv, type RecipeStoreOptions } from '../../src/extract/recipe/index.js';
 import type { ExtractRequest, ModelCapabilities } from '../../src/extract/types.js';
 import { buildSourceDocument } from '../../src/extract/document/index.js';
@@ -184,3 +184,21 @@ export const listingModel: FakeHandler = (_caps, req) => {
     });
   return { text: JSON.stringify({ records }), finishReason: 'stop', inputTokens: 500, outputTokens: 100, costUsd: 0.001, latencyMs: 1 };
 };
+
+/**
+ * Wraps a handler as a real provider behaves: output beyond max_tokens is
+ * cut off (finishReason 'length'), and the call is billed for the tokens
+ * sent and produced at the model's rates.
+ */
+export function billed(handler: FakeHandler): FakeHandler {
+  return async (caps, req, i) => {
+    const r = await handler(caps, req, i);
+    const limit = Math.min(caps.maxOutputTokens, req.maxOutputTokens);
+    const produced = estimateTokens(r.text);
+    const out = produced > limit
+      ? { ...r, text: r.text.slice(0, Math.floor((r.text.length * limit) / produced)), finishReason: 'length' as const, outputTokens: limit }
+      : { ...r, outputTokens: produced };
+    const inputTokens = estimateTokens(req.system) + estimateTokens(req.user);
+    return { ...out, inputTokens, costUsd: (inputTokens * (caps.inputCostPerMTok ?? 0) + out.outputTokens * (caps.outputCostPerMTok ?? 0)) / 1e6 };
+  };
+}

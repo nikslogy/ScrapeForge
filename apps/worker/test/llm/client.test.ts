@@ -211,6 +211,16 @@ describe('ModelClient', () => {
     expect(result.attempts[1].note).toBe('retry after timeout');
   });
 
+  it('retryOnTimeout: false ends the call at the first timeout (the caller sends less instead)', async () => {
+    const s = setup([OR_A, GROQ], {
+      openrouter: [fakeError('timeout'), ok()],
+      groq: [ok()],
+    });
+    const err = await failure(s.client.complete(REQ, { purpose: 'extract', budget: s.budget, retryOnTimeout: false }));
+    expect(err.category).toBe('timeout');
+    expect(err.attempts?.map((a) => a.model)).toEqual(['a']);
+  });
+
   it('unsupported_request: retries once with a weaker JSON mode', async () => {
     const schemaModel = { ...OR_A, jsonMode: 'json_schema' as const };
     const s = setup([schemaModel, GROQ], { openrouter: [fakeError('unsupported_request', { status: 400 }), ok()] });
