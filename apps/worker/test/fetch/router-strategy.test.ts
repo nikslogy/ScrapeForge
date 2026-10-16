@@ -41,10 +41,14 @@ vi.mock('../../src/proxy/manager.js', () => ({
 
 const {
   SmartRouter,
+  TiersExhaustedError,
   applyOutcomes,
   parseStrategy,
+  pathTemplate,
   planStartTier,
   redactReason,
+  strategyKey,
+  MAX_SECTIONS_PER_HOST,
   STRATEGY_TTL_SECONDS,
 } = await import('../../src/engine/router.js');
 type StoredStrategy = import('../../src/engine/router.js').StoredStrategy;
@@ -911,5 +915,110 @@ describe('SmartRouter and the request credentials', () => {
     expect(m.tier1Fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer t', Cookie: 'sid=abc' } });
     expect(m.tier2Fetch.mock.calls[0][1]).toMatchObject({ headers: { Authorization: 'Bearer t', Cookie: 'sid=abc' } });
     expect(m.tier4Fetch.mock.calls[0][2]).toMatchObject(options);
+  });
+});
+
+// ── after the review: failing sites in browser tiers, re-probes, bounded sections ──
+
+describe('a failing site, whatever tier meets it', () => {
+  const DOWN = '<html><body><h1>503 Service Unavailable</h1><p>We are down for maintenance and will be back shortly.</p></body></html>';
+  const down = () => Promise.resolve(page(DOWN, 503));
+
+  function quickRouter(redis = new FakeRedis(), random = () => 0.99) {
+    const acquire = vi.fn(async () => ({}) as BrowserContext);
+    const router = new SmartRouter(redis as unknown as Redis, acquire, vi.fn(), { now: () => T0, random, logger: { warn: vi.fn() }, sleep: async () => undefined });
+    return { router, redis, acquire };
+  }
+  const learned = (tier: number) =>
+    JSON.stringify({ v: 2, requests: 5, tiers: { [tier]: { ok: 5, total: 5, lastAt: T0, lastOkAt: T0, lastOk: true } } });
+
+  async function failure(p: Promise<unknown>) {
+    const e = await p.then(() => { throw new Error('expected a failure'); }, (err: unknown) => err);
+    expect(e).toBeInstanceOf(TiersExhaustedError);
+    return e as InstanceType<typeof TiersExhaustedError>;
+  }
+
+  it('a 503 at T4 (learned) is retried once, then a retryable error: no stealth tier, and no error page as a result', async () => {
+    const { router, redis } = quickRouter();
+    redis.store.set(strategyKey(DOMAIN), learned(4));
+    m.tier4Fetch.mockImplementation(down);
+    const e = await failure(router.route(URL_, {}));
+    expect(e.transient).toBe(true);
+    expect(m.tier4Fetch).toHaveBeenCalledTimes(2);
+    expect(m.tier4StealthFetch).not.toHaveBeenCalled();
+  });
+
+  it('the browser-only path (screenshot) does the same, and a 503 from the stealth tier is no result either', async () => {
+    const { router } = quickRouter();
+    m.tier4Fetch.mockImplementation(down);
+    expect((await failure(router.route(URL_, { screenshot: true }))).transient).toBe(true);
+    expect(m.tier4StealthFetch).not.toHaveBeenCalled();
+
+    vi.resetAllMocks();
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(down);
+    expect((await failure(router.route(URL_, { screenshot: true }))).transient).toBe(true);
+  });
+
+  it('a retry answered with something else goes on up the ladder from that answer', async () => {
+    const { router } = quickRouter();
+    // A deploy: one 503, then the bot wall the site always shows HTTP clients.
+    m.tier1Fetch.mockImplementationOnce(down).mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(ok);
+    const r = await router.route(URL_, {});
+    expect(r.tierUsed).toBe(4);
+    expect(m.tier1Fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('a site failing after another tier was blocked is still a retryable error', async () => {
+    const { router } = quickRouter();
+    m.tier1Fetch.mockImplementation(() => Promise.resolve(page('<h1>Access denied</h1>', 403)));
+    m.tier2Fetch.mockImplementation(() => Promise.resolve(page('<html><body><h1>502 Bad Gateway</h1><hr><center>nginx</center></body></html>', 502)));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.contentRejected).toBe(true);
+    expect(e.transient).toBe(true);
+  });
+
+  it('a re-probe below the learned tier that meets a failing site goes on to the learned tier', async () => {
+    const { router, redis } = quickRouter(new FakeRedis(), () => 0);
+    redis.store.set(strategyKey(DOMAIN), learned(4));
+    m.tier1Fetch.mockImplementation(down);
+    m.tier4Fetch.mockImplementation(ok);
+    const r = await router.route(URL_, {});
+    expect(r.tierUsed).toBe(4);
+    expect(m.tier1Fetch).toHaveBeenCalledTimes(1);
+    expect(m.tier2Fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('sections are bounded', () => {
+  it('a long multi-word slug at the root is one page, not a section', () => {
+    expect(pathTemplate('https://blog.example/how-to-fix-a-leaky-faucet/')).toBe('/*');
+    expect(pathTemplate('https://shop.example/new-arrivals')).toBe('/new-arrivals');
+    expect(pathTemplate('https://shop.example/t-shirts-and-tops')).toBe('/t-shirts-and-tops');
+  });
+
+  it(`at most ${MAX_SECTIONS_PER_HOST} sections per site get their own strategy`, async () => {
+    // FakeRedis plus the section set the router's script keeps.
+    class SectionRedis extends FakeRedis {
+      sets = new Map<string, Set<string>>();
+      eval = vi.fn(async (_script: string, _n: number, key: string, section: string, max: number) => {
+        const set = this.sets.get(key) ?? new Set<string>();
+        this.sets.set(key, set);
+        if (set.has(section)) return 1;
+        if (set.size >= Number(max)) return 0;
+        set.add(section);
+        return 1;
+      });
+    }
+    const redis = new SectionRedis();
+    const router = new SmartRouter(redis as unknown as Redis, vi.fn(), vi.fn(), { now: () => T0, random: () => 0.99, logger: { warn: vi.fn() } });
+    m.tier1Fetch.mockImplementation(ok);
+    for (let i = 0; i < MAX_SECTIONS_PER_HOST + 4; i++) await router.route(`https://${DOMAIN}/section${i}/page`, {});
+    await router.drainStrategyWrites();
+    const sectionKeys = [...redis.store.keys()].filter((k) => k.startsWith(`domain:${DOMAIN}|`));
+    expect(sectionKeys).toHaveLength(MAX_SECTIONS_PER_HOST);
+    expect(redis.store.has(`domain:${DOMAIN}`)).toBe(true);
   });
 });

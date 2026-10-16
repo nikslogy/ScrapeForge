@@ -10,6 +10,7 @@ import { resultCacheKey, snapshotCacheKey, type ScrapeOptions } from '@scrapefor
 import { ensureRedis, shutdownRedis } from '../../../../tests/latency/lib/redis-instance.js';
 import { Coalescer, flightKey } from '../../src/throughput/coalesce.js';
 import { DomainBusyError, DomainLimiter, domainConcurrency, domainKey, Semaphore } from '../../src/throughput/limits.js';
+import { SECTION_ADD } from '../../src/engine/router.js';
 import {
   decodeSnapshot,
   encodeSnapshot,
@@ -324,6 +325,19 @@ describe('per-site fetch limit', () => {
     expect(domainConcurrency({})).toBe(6);
     expect(domainConcurrency({ FETCH_DOMAIN_CONCURRENCY: '0' })).toBe(0);
     expect(domainKey('not a url')).toBeNull();
+  });
+});
+
+describe('per-site section set (router)', () => {
+  it('admits known sections and at most `max` new ones, and keeps the set alive', async () => {
+    const key = `domain-sections:${Math.random().toString(36).slice(2)}.example`;
+    const add = (section: string) => redis.eval(SECTION_ADD, 1, key, section, 2, 60);
+    expect(await add('/a')).toBe(1);
+    expect(await add('/b')).toBe(1);
+    expect(await add('/c')).toBe(0);
+    expect(await add('/a')).toBe(1);
+    expect(await redis.scard(key)).toBe(2);
+    expect(await redis.ttl(key)).toBeGreaterThan(50);
   });
 });
 

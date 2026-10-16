@@ -110,6 +110,20 @@ describe('classifyRejection', () => {
     expect(classifyRejection(body, code, signals(body, code), headers)).toBe(expected);
   });
 
+  it('a small 429 or 5xx that runs a challenge script is blocked, whatever its size', () => {
+    const kasada =
+      '<html><head><script>window.KPSDK={};KPSDK.now=typeof performance!=="undefined"&&performance.now?performance.now.bind(performance):Date.now.bind(Date);KPSDK.start=KPSDK.now();</script>' +
+      '<script src="/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/ips.js?tkrm_alpekz_s1.3=0"></script></head><body></body></html>';
+    expect(classifyRejection(kasada, 429, signals(kasada, 429))).toBe('blocked');
+    // A loader with no vendor marker but no message either.
+    const silent = '<html><head><script src="/challenge.js"></script></head><body><div id="c"></div></body></html>';
+    expect(classifyRejection(silent, 503, signals(silent, 503))).toBe('blocked');
+    expect(classifyRejection('Too Many Requests', 429, [], { 'x-kpsdk-ct': 'abc' })).toBe('blocked');
+    // A maintenance page with an analytics tag says what it is: a server error.
+    const maintenance = '<html><body><h1>Down for maintenance</h1><p>We will be back in a few minutes. Thanks for your patience.</p><script src="/ga.js"></script></body></html>';
+    expect(classifyRejection(maintenance, 503, signals(maintenance, 503))).toBe('server_error');
+  });
+
   it('an app shell needs JavaScript; a challenge is blocked', () => {
     expect(classifyRejection(SHELL, 200, signals(SHELL))).toBe('js_required');
     expect(classifyRejection(CHALLENGE, 200, [])).toBe('blocked');
