@@ -9,7 +9,7 @@ import { setOutboundPolicyForTests } from '@scrapeforge/shared';
 import { BrowserPool } from '../../src/browser/pool.js';
 import { SmartRouter } from '../../src/engine/router.js';
 import { tier4Fetch } from '../../src/engine/tier4-browser.js';
-import { browserCredentials, cookieHeader, cookiesFor, headersWithCookies } from '../../src/engine/request-credentials.js';
+import { addBrowserCookies, browserCredentials, cookieHeader, cookiesFor, headersWithCookies, sendableHeaders } from '../../src/engine/request-credentials.js';
 import { findChromium } from '../../../../tests/latency/lib/chromium-path.js';
 import { smallPage } from '../../../../tests/latency/lib/fixtures.js';
 import { PUBLIC_IP, html, redirect, routes, startServer, useFixturePolicy, type FixtureServer } from '../net/fixtures.js';
@@ -57,9 +57,36 @@ describe('cookie matching', () => {
     const c = browserCredentials(new URL('https://shop.example.com/p'), { Cookie: 'pre=0', Authorization: 'Bearer t' }, [{ name: 'sid', value: 'abc', domain: 'example.com' }]);
     expect(c.headers).toEqual({ Authorization: 'Bearer t' });
     expect(c.cookies).toEqual([
-      { name: 'pre', value: '0', url: 'https://shop.example.com/' },
+      { name: 'pre', value: '0', domain: 'shop.example.com', path: '/' },
       { name: 'sid', value: 'abc', domain: '.example.com', path: '/' },
     ]);
+  });
+
+  it('a host-only cookie keeps its own path in a browser (two cookies of one name stay apart)', () => {
+    const c = browserCredentials(new URL('https://h.example/admin/panel'), undefined, [{ name: 'session', value: 'A', path: '/admin' }, { name: 'session', value: 'B' }]);
+    expect(c.cookies).toEqual([
+      { name: 'session', value: 'A', domain: 'h.example', path: '/admin' },
+      { name: 'session', value: 'B', domain: 'h.example', path: '/' },
+    ]);
+  });
+
+  it('drops cookies with any control character, and headers no tier could send', () => {
+    expect(cookiesFor(url, [{ name: 'tab', value: 'a\tb' }, { name: 'soh', value: 'a\u0001b' }, { name: 'del', value: 'a\u007fb' }, { name: 'ok', value: '1' }]).map((c) => c.name)).toEqual(['ok']);
+    expect(sendableHeaders({ 'X Api Key': 'k', 'X-Ok': 'v', 'X-Bad': 'v\r\n', 'X-Tab': 'a\tb' })).toEqual({ 'X-Ok': 'v', 'X-Tab': 'a\tb' });
+    expect(headersWithCookies('https://shop.example.com/', { 'X Api Key': 'k', 'X-Ok': 'v' }, undefined)).toEqual({ 'X-Ok': 'v' });
+    expect(browserCredentials(url, { 'Bad Name': 'x', Authorization: 'Bearer t' }, undefined).headers).toEqual({ Authorization: 'Bearer t' });
+  });
+
+  it('a cookie the browser refuses does not lose the others', async () => {
+    const added: string[] = [];
+    const context = {
+      async addCookies(list: Array<{ name: string }>) {
+        if (list.some((c) => c.name === 'refused')) throw new Error('Invalid cookie fields');
+        added.push(...list.map((c) => c.name));
+      },
+    };
+    await addBrowserCookies(context, [{ name: 'a', value: '1', domain: 'h', path: '/' }, { name: 'refused', value: '2', domain: 'h', path: '/' }, { name: 'b', value: '3', domain: 'h', path: '/' }]);
+    expect(added).toEqual(['a', 'b']);
   });
 });
 
@@ -96,6 +123,8 @@ beforeAll(async () => {
       '/account': html(ECHO_PAGE([samePortless.origin, thirdPartyOrigin])),
       '/classic': html(smallPage()),
       '/to-other': (req, res, body) => redirect(302, `${samePortless.origin}/landing`)(req, res, body),
+      '/with-redirected-image': html(`<!doctype html><html><head><title>Gallery</title></head><body><main><h1>Gallery</h1><p>${'Photos from the account owner, sorted by date and album. '.repeat(8)}</p><img src="/img"></main></body></html>`),
+      '/img': (req, res, body) => redirect(302, `${thirdPartyOrigin}/pixel.gif`)(req, res, body),
     }),
   );
 });
@@ -176,6 +205,50 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
       expect(req.headers.authorization, req.url).toBeUndefined();
       expect(req.headers['x-tenant'], req.url).toBeUndefined();
     }
+  }, 60_000);
+
+  it('a redirect to another origin carries none of the custom headers (navigation and subresources)', async () => {
+    const ctx = await pool.acquire();
+    try {
+      await tier4Fetch(`${site.origin}/to-other`, ctx, { ...OPTIONS, timeout: 15_000 });
+    } finally {
+      pool.release(ctx);
+    }
+    const landing = samePortless.requests.find((x) => x.url === '/landing');
+    expect(landing).toBeDefined();
+    expect(landing!.headers.authorization).toBeUndefined();
+    expect(landing!.headers['x-tenant']).toBeUndefined();
+    // The target's own request got them.
+    const first = site.requests.find((x) => x.url === '/to-other')!;
+    expect(first.headers.authorization).toBe('Bearer secret-token');
+
+    // A same-origin image that redirects to a third-party host.
+    site.requests.length = 0;
+    thirdParty.requests.length = 0;
+    const ctx2 = await pool.acquire();
+    try {
+      await tier4Fetch(`${site.origin}/with-redirected-image`, ctx2, { ...OPTIONS, timeout: 15_000 });
+    } finally {
+      pool.release(ctx2);
+    }
+    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBe('Bearer secret-token');
+    const cdn = thirdParty.requests.find((x) => x.url === '/pixel.gif');
+    expect(cdn).toBeDefined();
+    expect(cdn!.headers.authorization).toBeUndefined();
+    expect(cdn!.headers['x-tenant']).toBeUndefined();
+  }, 60_000);
+
+  it('a request carrying custom headers is fetched through the egress guard too', async () => {
+    // "public.test" resolves only through the egress proxy's (test) resolver:
+    // a fetch that went around the guard would fail here.
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`http://public.test:${site.port}/account`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Your account');
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.find((x) => x.url === '/account')?.headers.authorization).toBe('Bearer secret-token');
   }, 60_000);
 
   it('the next fetch on the same pooled context carries none of them', async () => {

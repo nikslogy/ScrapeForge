@@ -9,10 +9,30 @@
 
 import type { CookieInput } from '@scrapeforge/shared';
 
-// A name or value carrying these would split the header or the cookie.
-const UNSAFE_COOKIE_CHARS = /[;\r\n\0]/;
+// A cookie value with a control character (tab included) or ";" is refused
+// by Chromium and by HTTP clients alike: one such cookie would fail every
+// tier, so it is dropped.
+const UNSAFE_COOKIE_CHARS = /[\x00-\x1f\x7f;]/;
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const MAX_COOKIES = 100;
+// RFC 9110 field names are tokens; values carry no control character but tab.
+const HEADER_NAME = COOKIE_NAME;
+const UNSAFE_HEADER_VALUE = /[\x00-\x08\x0a-\x1f\x7f]/;
+
+/**
+ * Custom headers a tier can send: names that are tokens, values without
+ * control characters. Anything else would make every tier throw (or a
+ * browser request hang), so it is dropped rather than sent.
+ */
+export function sendableHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (typeof value !== 'string' || !HEADER_NAME.test(name) || UNSAFE_HEADER_VALUE.test(value)) continue;
+    out[name] = value;
+  }
+  return out;
+}
 
 function domainOf(cookie: CookieInput): string | undefined {
   const d = cookie.domain?.trim().toLowerCase().replace(/^\./, '');
@@ -55,9 +75,10 @@ export function cookieHeader(url: URL, cookies: readonly CookieInput[] | undefin
 /** The custom headers plus the request's cookies (appended to a custom Cookie header, if any). */
 export function headersWithCookies(
   url: string,
-  headers: Readonly<Record<string, string>> | undefined,
+  given: Readonly<Record<string, string>> | undefined,
   cookies: readonly CookieInput[] | undefined,
 ): Record<string, string> | undefined {
+  const headers = sendableHeaders(given);
   let target: URL;
   try {
     target = new URL(url);
@@ -86,24 +107,41 @@ export interface BrowserCookie {
 
 /**
  * The request's cookies `url` receives, in Playwright's addCookies form: a
- * host-only cookie is bound to the URL's origin; one with a domain to that
- * domain (and its subdomains) and its path.
+ * host-only cookie is bound to the URL's host (a domain without a leading
+ * dot is host-only) and its own path; one with a domain to that domain (and
+ * its subdomains) and its path. The url form is not used: Playwright takes
+ * its path from the URL's directory, so "/account" would become "/".
  */
 export function browserCookies(url: URL, cookies: readonly CookieInput[] | undefined): BrowserCookie[] {
   return cookiesFor(url, cookies).map((c) => {
     const domain = domainOf(c);
     const path = c.path?.trim() || '/';
-    return domain === undefined
-      ? { name: c.name, value: c.value, url: `${url.origin}${path}` }
-      : { name: c.name, value: c.value, domain: `.${domain}`, path };
+    return { name: c.name, value: c.value, domain: domain === undefined ? url.hostname : `.${domain}`, path };
   });
 }
 
 /** Custom headers worth adding in a browser: a Cookie header is applied as cookies instead. */
 export function browserHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> | undefined {
-  if (!headers) return undefined;
-  const out = Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'cookie' && name.toLowerCase() !== 'host'));
+  const sendable = sendableHeaders(headers);
+  if (!sendable) return undefined;
+  const out = Object.fromEntries(Object.entries(sendable).filter(([name]) => name.toLowerCase() !== 'cookie' && name.toLowerCase() !== 'host'));
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Adds the cookies to a browser context; if the batch is refused (a value
+ * the browser will not take), one at a time, skipping the ones refused.
+ */
+export async function addBrowserCookies(
+  context: { addCookies(cookies: BrowserCookie[]): Promise<void> },
+  cookies: BrowserCookie[],
+): Promise<void> {
+  if (cookies.length === 0) return;
+  try {
+    await context.addCookies(cookies);
+  } catch {
+    for (const cookie of cookies) await context.addCookies([cookie]).catch(() => undefined);
+  }
 }
 
 /** Cookies written in a custom Cookie header ("a=1; b=2"), as host-only cookies. */

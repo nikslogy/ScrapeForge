@@ -361,7 +361,11 @@ export class BrowserPool {
   private async createContext(): Promise<PooledContext> {
     const browser = await this.ensureBrowser();
     const fp = generateFingerprint();
-    const context = await browser.newContext(toContextOptions(fp));
+    // The egress guard again for the context: Chromium already uses it (a
+    // launch argument), and with it as the context's proxy the requests
+    // Playwright itself makes for the context (route.fetch, which sends a
+    // request carrying custom headers) go through the guard too.
+    const context = await browser.newContext({ ...toContextOptions(fp), proxy: { server: await this.egressProxy() } });
     const pooled: PooledContext = {
       context,
       useCount: 0,

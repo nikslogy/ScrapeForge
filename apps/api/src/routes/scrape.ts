@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
+import { requestCookiesSchema, requestHeadersSchema } from './credentials.js';
 import { ScrapeJobData, checkPublicUrl, resultCacheKey, type ScrapeOptions } from '@scrapeforge/shared';
 import { customerSchema, extractionOptions, jobRetryOptions } from './extract.js';
 
@@ -17,13 +18,8 @@ const ScrapeRequestSchema = z.object({
   waitFor: optionalStr,
   timeout: z.number().min(1000).max(120000).default(60000),
   proxy: z.enum(['none', 'datacenter', 'residential', 'mobile', 'auto']).default('auto'),
-  headers: z.record(z.string()).optional(),
-  cookies: z.array(z.object({
-    name: z.string(),
-    value: z.string(),
-    domain: z.string().optional(),
-    path: z.string().optional(),
-  })).optional(),
+  headers: requestHeadersSchema.optional(),
+  cookies: requestCookiesSchema.optional(),
   screenshot: z.boolean().default(false),
   mobile: z.boolean().default(false),
   blockResources: z.boolean().default(true),

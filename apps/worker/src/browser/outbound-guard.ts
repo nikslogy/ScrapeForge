@@ -98,12 +98,21 @@ export function createOutboundRouteHandler(options: {
       (await checkBrowserUrl(url)) === null;
     try {
       if (!allowed) await route.abort();
-      else if (options.extraHeaders && options.origin !== undefined && originOf(url) === options.origin) {
-        await route.continue({ headers: { ...request.headers(), ...options.extraHeaders } });
+      else if (options.extraHeaders && options.origin !== undefined && originOf(url) === options.origin && request.resourceType() !== 'media') {
+        // Chromium keeps header overrides on every redirect hop of a
+        // continued request, and the hops never reach this handler: a
+        // target page redirecting to an identity provider (or an image to a
+        // CDN) would carry the credentials there. Fetched here without
+        // following redirects, a 3xx goes back to the browser, whose next
+        // hop comes through this handler with its own origin check.
+        const response = await route.fetch({ headers: { ...request.headers(), ...options.extraHeaders }, maxRedirects: 0 });
+        await route.fulfill({ response });
       } else await route.continue();
     } catch {
-      // The page closed during the check, or another handler already
-      // resolved the route; either way there is nothing left to do.
+      // The page closed during the check, another handler already resolved
+      // the route, or the fetch failed: fail the request rather than leave
+      // it pending until the navigation times out.
+      await route.abort().catch(() => undefined);
     }
   };
 }
