@@ -377,23 +377,28 @@ components:
         headers:
           type: object
           description: |
-            Extra HTTP headers to send with the request. The HTTP tiers send
-            them to the target and drop `Authorization` and `Cookie` once a
-            redirect leaves its origin. In a browser tier they are added only
-            to requests for the target's own origin, never to third-party
-            scripts or images. Part of the cache key (as a hash; see
-            `cacheTtl`).
+            Extra HTTP headers to send with the request (at most 50). Names
+            must be HTTP tokens and values must not contain control
+            characters other than tab; otherwise the request is refused with
+            400. The HTTP tiers send them to the target and drop
+            `Authorization` and `Cookie` once a redirect leaves its origin.
+            In a browser tier they are added only to requests for the
+            target's own origin, never to third-party scripts or images, and
+            never to a redirect hop to another origin. Part of the cache key
+            (as a hash; see `cacheTtl`).
           additionalProperties:
             type: string
         cookies:
           type: array
           description: |
-            Cookies for the request. A cookie without `domain` is sent to the
-            target host only; one with `domain` also goes to its subdomains.
-            `path` defaults to `/`. HTTP tiers send matching cookies in a
-            `Cookie` header, dropped on cross-origin redirects. Browser tiers
-            add them to a fresh browser context, cleared after the fetch.
-            Part of the cache key (as a hash; see `cacheTtl`).
+            Cookies for the request (at most 100). Names must be HTTP tokens
+            and values must not contain `;` or control characters; otherwise
+            the request is refused with 400. A cookie without `domain` is
+            sent to the target host only; one with `domain` also goes to its
+            subdomains. `path` defaults to `/`. HTTP tiers send matching
+            cookies in a `Cookie` header, dropped on cross-origin redirects.
+            Browser tiers add them to a fresh browser context, cleared after
+            the fetch. Part of the cache key (as a hash; see `cacheTtl`).
           items:
             type: object
             required: [name, value]

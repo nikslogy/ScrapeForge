@@ -11,6 +11,8 @@ so it can be checked. Settings marked "env" can be changed per deployment
 | limit | value | source | when exceeded |
 |---|---|---|---|
 | Request body | 1 MiB | `apps/api/src/server.ts` `bodyLimit` | 413 |
+| `headers` | 50; names must be HTTP tokens, values without control characters (tab allowed) | `routes/credentials.ts` | 400 |
+| `cookies` | 100; names must be HTTP tokens, values without `;` or control characters | same | 400 |
 | `timeout` | 1,000–120,000 ms, default 60,000 | `routes/scrape.ts`, `routes/extract.ts` | 400 |
 | `cacheTtl` | 0–2,592,000 s (30 days), default 3,600 | same | 400 |
 | Extraction schema | 64 KiB, nesting depth 10 | `routes/extract.ts` `MAX_SCHEMA_BYTES`, `MAX_SCHEMA_DEPTH` | 400 |
@@ -27,7 +29,7 @@ so it can be checked. Settings marked "env" can be changed per deployment
 | Browser tiers (T4, T5) | `timeout` per navigation | `engine/router.ts` |
 | Browser contexts per worker | 5 (env `MAX_BROWSER_CONTEXTS`) | `worker.ts` |
 | Jobs in flight per worker | env `WORKER_CONCURRENCY`, else `MAX_BROWSER_CONTEXTS` | `worker.ts` |
-| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit) | `throughput/limits.ts` |
+| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit). While other tenants wait, one tenant gets at most its share (6 ÷ tenants waiting). A slot is held until the router is done, at most the job deadline + 15 s | `throughput/limits.ts` |
 | Wait for a rate-limited (429) or failing (5xx) site | one retry after at most 3 s (and at most `timeout` / 4); a longer `Retry-After` fails at once, retryably | `engine/router.ts` `MAX_TRANSIENT_WAIT_MS` |
 | Redirects, private addresses | every hop checked; private, loopback and link-local addresses are refused | `packages/shared/src/net.ts` |
 
@@ -56,10 +58,11 @@ The last two give a retryable failure.
 | limit | value | source | when exceeded |
 |---|---|---|---|
 | Model spend per request | $0.05 (env `EXTRACT_MAX_COST_USD`; a request may ask for less with `maxLlmCostUsd`) | `worker.ts` | remaining calls skipped; `partial` |
-| One model call | 60 s (env `EXTRACT_LLM_TIMEOUT_MS`) | `extract/llm/index.ts` | retried once, then the next configured model; a listing chunk that times out is halved instead |
+| One model call | 60 s (env `EXTRACT_LLM_TIMEOUT_MS`) | `extract/llm/index.ts` | retried once, then the next configured model; a listing chunk that can still be halved is halved at its first timeout instead |
 | Model calls in flight per worker | 16 (env `EXTRACT_LLM_CONCURRENCY`) | `extract/llm/index.ts` | calls wait; a call still waiting at its deadline ends `budget_exhausted` |
 | Listing answered in one call | about 8k output tokens (≈ 100 cards of 4 fields) | `extract/engine.ts` `CHUNK_OUTPUT_TOKENS` | split into chunks |
 | Chunks per listing | 64, 4 in flight (env `EXTRACT_PARTITION_CONCURRENCY`, ≤ 16) | `MAX_CHUNKS` | the rest is reported `not_processed` by record range |
+| Records missing from a chunk's answer | 10% of its cards (promo slots) | `LIST_COVERAGE_TOLERANCE` | the missing cards are asked for once more; then reported `not_processed` |
 | Records from a learned recipe | 5,000 | `extract/recipe/limits.ts` | cut |
 | `missing` entries returned | 1,000 | `MAX_MISSING_ENTRIES` | cut, with warning `missing_entries_capped:N` |
 
@@ -75,8 +78,8 @@ Whatever could not be processed is listed in `missing` with reason
 | cache | lifetime | size | source |
 |---|---|---|---|
 | Results | `cacheTtl` (default 1 h); plain scrapes, and extractions only when `complete` | — | `packages/shared/src/utils.ts` |
-| Fetched pages (snapshots) | 300 s (env `SNAPSHOT_TTL_SEC`; 0 = off); `cacheTtl: 0` bypasses | 4 MB compressed per page | `throughput/snapshot.ts` |
-| Fetch strategy per site and section | 24 h after the last request | — | `engine/router.ts` |
+| Fetched pages (snapshots) | 300 s (env `SNAPSHOT_TTL_SEC`; 0 = off); `cacheTtl: 0` bypasses; only pages the router's quality gate accepts | 4 MB compressed per page | `throughput/snapshot.ts` |
+| Fetch strategy per site and section | 24 h after the last request | 16 sections per site | `engine/router.ts` |
 | Extraction recipes | 14 days | — | `extract/recipe/` |
 
 ## Measured behaviour
