@@ -362,14 +362,19 @@ describe('per-site fetch limit', () => {
 
 describe('per-site section set (router)', () => {
   it('admits known sections and at most `max` new ones, and keeps the set alive', async () => {
-    const key = `domain-sections:${Math.random().toString(36).slice(2)}.example`;
-    const add = (section: string) => redis.eval(SECTION_ADD, 1, key, section, 2, 60);
+    const key = `domain-section-set:${Math.random().toString(36).slice(2)}.example`;
+    const now = Date.now();
+    const add = (section: string, at = now) => redis.eval(SECTION_ADD, 1, key, section, 2, 60, at);
     expect(await add('/a')).toBe(1);
     expect(await add('/b')).toBe(1);
     expect(await add('/c')).toBe(0);
     expect(await add('/a')).toBe(1);
-    expect(await redis.scard(key)).toBe(2);
+    expect(await redis.zcard(key)).toBe(2);
     expect(await redis.ttl(key)).toBeGreaterThan(50);
+    // A section unwritten for the TTL gives its slot up, even while another stays busy.
+    expect(await add('/a', now + 61_000)).toBe(1);
+    expect(await add('/c', now + 61_500)).toBe(1);
+    expect(await redis.zrange(key, 0, -1)).toEqual(['/a', '/c']);
   });
 });
 

@@ -162,8 +162,8 @@ export function isTransientClass(cls: RejectionClass | undefined): cls is 'serve
 
 /** Error bodies larger than this, or with scripts, may be challenges in disguise. */
 const PLAIN_ERROR_BODY_BYTES = 4_096;
-/** A small error page that runs scripts is plain only when it also says something (a challenge prints nothing). */
-const PLAIN_ERROR_MIN_TEXT_CHARS = 40;
+/** A small error page that runs scripts is plain when it prints anything at all (a challenge prints nothing). */
+const PLAIN_ERROR_MIN_TEXT_CHARS = 1;
 /** Bot-defence vendors whose challenge comes as a 429 or 5xx (Kasada answers 429 with its ips.js loader). */
 const CHALLENGE_SIGNATURE = /\bKPSDK\b|\/ips\.js\b|_Incapsula_Resource|cdn-cgi\/challenge-platform|captcha-delivery\.com|\bpx-captcha\b|\/_sec\/cp_challenge/i;
 
@@ -183,11 +183,21 @@ function visibleTextLength(html: string): number {
  */
 function isPlainErrorPage(html: string, statusCode: number, headers: Readonly<Record<string, string>>): boolean {
   if (!isTransientResponse(html, statusCode)) return false;
-  if (Object.keys(headers).some((h) => /^x-kpsdk-/i.test(h))) return false;
+  if (hasChallengeSignature(html, headers)) return false;
   const head = html.length > 64 * 1024 ? html.slice(0, 64 * 1024) : html;
-  if (CHALLENGE_SIGNATURE.test(head)) return false;
   if (!/<script\b/i.test(head)) return true;
   return html.length <= PLAIN_ERROR_BODY_BYTES && visibleTextLength(html) >= PLAIN_ERROR_MIN_TEXT_CHARS;
+}
+
+/** A bot-defence vendor's challenge marker in the body or the headers. */
+function hasChallengeSignature(html: string, headers: Readonly<Record<string, string>> = {}): boolean {
+  if (Object.keys(headers).some((h) => /^x-kpsdk-/i.test(h))) return true;
+  return CHALLENGE_SIGNATURE.test(html.length > 64 * 1024 ? html.slice(0, 64 * 1024) : html);
+}
+
+/** A status that says the site is failing or rate-limiting: never a result. */
+function isErrorStatus(statusCode: number): boolean {
+  return statusCode === 429 || statusCode === 408 || statusCode >= 500;
 }
 
 export function classifyRejection(
@@ -547,15 +557,16 @@ const SLUG_SEGMENT = { test: (s: string) => s.length > 20 && (s.match(/[-_]/g) ?
 const MAX_SEGMENT_CHARS = 40;
 /** Sections learned per site at most; later ones fall back to the site's strategy. */
 export const MAX_SECTIONS_PER_HOST = 16;
-// KEYS[1] the site's set of learned sections; ARGV: section, max, ttl. 1 when the section may be written.
+// KEYS[1] the site's learned sections, scored by their last write (ms);
+// ARGV: section, max, ttl (s), now (ms). A section unwritten for the
+// strategy TTL has no key left and gives its slot up. 1 when the section
+// may be written.
 export const SECTION_ADD = `
-if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[3])
-  return 1
-end
-if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
-redis.call('SADD', KEYS[1], ARGV[1])
-redis.call('EXPIRE', KEYS[1], ARGV[3])
+local now, ttl = tonumber(ARGV[4]), tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - ttl * 1000)
+if not redis.call('ZSCORE', KEYS[1], ARGV[1]) and redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+redis.call('ZADD', KEYS[1], now, ARGV[1])
+redis.call('EXPIRE', KEYS[1], ttl)
 return 1`;
 
 /**
@@ -876,9 +887,11 @@ export class SmartRouter {
     // The next tier the ladder may run; raised when a tier's answer says
     // cheaper ones are pointless.
     let from = startTier;
-    // A re-probe below the learned tier that meets a failing site: on to the learned tier.
+    // A re-probe below the learned tier that meets a failing site: on to the
+    // learned tier. Not for a rate limit: that is answered by waiting (or
+    // another IP), never by more engines.
     const toLearned = (tier: number, cls: string): boolean => {
-      if (c.learnedTier === undefined || c.learnedTier <= tier) return false;
+      if (cls !== 'server_error' || c.learnedTier === undefined || c.learnedTier <= tier) return false;
       c.notes.push(`T${tier}:${cls} on a re-probe; on to the learned T${c.learnedTier}`);
       from = Math.max(from, c.learnedTier);
       return true;
@@ -926,10 +939,14 @@ export class SmartRouter {
     // Lightpanda cannot send the request's cookies or headers: a page that
     // needs them would come back as the logged-out or default version.
     if (from <= 3 && isLightpandaConfigured() && !carriesCredentials(options)) {
-      const a = await this.attempt(c, 3, () =>
-        tier3Fetch(url, { waitFor: options.waitFor, timeout: options.timeout, proxy: proxy?.url }),
-      );
+      const fetch3 = () => tier3Fetch(url, { waitFor: options.waitFor, timeout: options.timeout, proxy: proxy?.url });
+      const a = await this.attempt(c, 3, fetch3);
       if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 3, ...proxyMeta };
+      // The site is failing for this browser too: the same rule as the HTTP tiers.
+      if (a.kind === 'response' && isTransientClass(a.cls)) {
+        const t = await this.retryTransient(c, 3, a.r, a.cls, fetch3);
+        if (t.ok) return { ...t.r, tierUsed: 3, ...proxyMeta };
+      }
     }
 
     // ─── Tier 4: full Patchright headless browser ───
@@ -1005,12 +1022,18 @@ export class SmartRouter {
       };
     }
 
+    // The site is failing for the stealth browser too: retryable, whatever
+    // an earlier tier was refused.
+    if (a5.kind === 'response' && isTransientClass(a5.cls)) throw this.exhausted(c, true);
+
     // Last-resort: return T4's body with a low quality flag baked in via
     // the quality scorer downstream, instead of throwing. This is what the
     // user wants 99% of the time (they already paid for the browser fetch,
     // returning empty markdown is strictly better than 500-ing the API).
-    if (t4Result) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+    // An error status is never a result.
+    if (t4Result && !isErrorStatus(t4Result.statusCode)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
     if (a5.kind === 'error' && a5.acquire && isPoolUnavailable(a5.error)) throw a5.error;
+    if (t4Result) throw this.exhausted(c, hasChallengeSignature(t4Result.html, t4Result.headers) ? undefined : true);
 
     throw this.exhausted(c);
   }
@@ -1051,6 +1074,7 @@ export class SmartRouter {
     if (a5.kind === 'error') throw a5.error;
     // A 5xx or 429 from the stealth tier too is the site failing: a retryable error, not a result.
     if (!a5.ok && isTransientClass(a5.cls)) throw this.exhausted(c, true);
+    if (!a5.ok && isErrorStatus(a5.r.statusCode)) throw this.exhausted(c, hasChallengeSignature(a5.r.html, a5.r.headers) ? undefined : true);
     return { ...a5.r, tierUsed: 5, ...proxyMeta };
   }
 
@@ -1101,13 +1125,17 @@ export class SmartRouter {
     const cls = accepted ? undefined : classifyRejection(r.html, r.statusCode, g.signals, r.headers);
     // A site that is down or rate-limiting says nothing about the tier:
     // learned as a failure, an outage would push the domain onto browsers.
-    if (!isTransientClass(cls)) c.outcomes.push({ tier, ok: accepted, latencyMs: r.latencyMs });
+    // An error status counts against the tier only with a vendor's
+    // challenge marker; a scripted error page without one may just be the
+    // site's own.
+    const definitive = cls !== undefined && !isTransientClass(cls) && (!isErrorStatus(r.statusCode) || hasChallengeSignature(r.html, r.headers));
+    if (accepted || definitive) c.outcomes.push({ tier, ok: accepted, latencyMs: r.latencyMs });
     if (accepted) {
       traceAttempt(c.tracer, tier, t0, 'accepted');
     } else {
       traceAttempt(c.tracer, tier, t0, 'rejected', `${cls}: ${g.reason}`);
       c.notes.push(`T${tier}:${cls}: ${g.reason}`);
-      if (!isTransientClass(cls)) c.contentRejected = true;
+      if (definitive) c.contentRejected = true;
     }
     const returnable = accepted || (terminal && g.valid && g.score >= TERMINAL_TIER_ACCEPT_QUALITY);
     return { kind: 'response', r, ok: returnable, ...(cls ? { cls } : {}) };
@@ -1240,7 +1268,7 @@ export class SmartRouter {
    */
   private async sectionAllowed(domain: string, section: string): Promise<boolean> {
     try {
-      return (await this.redis.eval(SECTION_ADD, 1, `domain-sections:${domain}`, section, MAX_SECTIONS_PER_HOST, STRATEGY_TTL_SECONDS)) !== 0;
+      return (await this.redis.eval(SECTION_ADD, 1, `domain-section-set:${domain}`, section, MAX_SECTIONS_PER_HOST, STRATEGY_TTL_SECONDS, this.now())) !== 0;
     } catch {
       return true;
     }

@@ -124,6 +124,11 @@ describe('classifyRejection', () => {
     expect(classifyRejection(maintenance, 503, signals(maintenance, 503))).toBe('server_error');
   });
 
+  it("nginx's stock 502 page with an analytics tag is a server error (it prints its message)", () => {
+    const nginx = '<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center><script src="/beacon.js"></script></body></html>';
+    expect(classifyRejection(nginx, 502, signals(nginx, 502))).toBe('server_error');
+  });
+
   it('an app shell needs JavaScript; a challenge is blocked', () => {
     expect(classifyRejection(SHELL, 200, signals(SHELL))).toBe('js_required');
     expect(classifyRejection(CHALLENGE, 200, [])).toBe('blocked');

@@ -992,6 +992,70 @@ describe('a failing site, whatever tier meets it', () => {
   });
 });
 
+describe('a failing site after the second review round', () => {
+  const quick = (redis = new FakeRedis(), random = () => 0.99) => {
+    const sleeps: number[] = [];
+    const router = new SmartRouter(redis as unknown as Redis, vi.fn(async () => ({}) as BrowserContext), vi.fn(), {
+      now: () => T0, random, logger: { warn: vi.fn() }, sleep: async (ms: number) => { sleeps.push(ms); },
+    });
+    return { router, redis, sleeps };
+  };
+  const learned = (tier: number) =>
+    JSON.stringify({ v: 2, requests: 5, tiers: { [tier]: { ok: 5, total: 5, lastAt: T0, lastOkAt: T0, lastOk: true } } });
+  async function failure(p: Promise<unknown>) {
+    const e = await p.then(() => { throw new Error('expected a failure'); }, (err: unknown) => err);
+    expect(e).toBeInstanceOf(TiersExhaustedError);
+    return e as InstanceType<typeof TiersExhaustedError>;
+  }
+  // A large error page with scripts: classed blocked (a challenge in disguise), but no vendor marker.
+  const BIG_502 = `<html><body><h1>502</h1><script>${'x'.repeat(5_000)}</script></body></html>`;
+
+  it('an error status is never returned as a result, and is not learned without a vendor marker', async () => {
+    const { router, redis } = quick();
+    m.tier1Fetch.mockImplementation(() => Promise.resolve(page(BIG_502, 502)));
+    m.tier2Fetch.mockImplementation(() => Promise.resolve(page(BIG_502, 502)));
+    m.tier4Fetch.mockImplementation(() => Promise.resolve(page(BIG_502, 502)));
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(BIG_502, 502)));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.transient).toBe(true);
+    await router.drainStrategyWrites();
+    expect(redis.strategy()).toBeNull();
+  });
+
+  it('a 503 at the stealth tier after an earlier block is still retryable', async () => {
+    const { router } = quick();
+    m.tier1Fetch.mockImplementation(() => Promise.resolve(page('<h1>Access denied</h1>', 403)));
+    m.tier2Fetch.mockImplementation(() => Promise.resolve(page('<h1>Access denied</h1>', 403)));
+    m.tier4Fetch.mockImplementation(async () => { throw new Error('page.goto: Timeout 30000ms exceeded'); });
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page('<h1>503 Service Unavailable</h1><p>Back soon.</p>', 503)));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.contentRejected).toBe(true);
+    expect(e.transient).toBe(true);
+  });
+
+  it('a re-probe that meets a rate limit waits as asked, and never goes on to a browser', async () => {
+    const { router, redis, sleeps } = quick(new FakeRedis(), () => 0);
+    redis.store.set(strategyKey(DOMAIN), learned(4));
+    m.tier1Fetch.mockImplementation(() => Promise.resolve({ ...page('Too Many Requests', 429), headers: { 'retry-after': '120' } }));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.transient).toBe(true);
+    expect(m.tier4Fetch).not.toHaveBeenCalled();
+    expect(sleeps).toEqual([]);
+  });
+
+  it('Lightpanda meeting a failing site retries once, then stops retryably without a browser', async () => {
+    const { router } = quick();
+    m.isLightpandaConfigured.mockReturnValue(true);
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier3Fetch.mockImplementation(() => Promise.resolve(page('<h1>503 Service Unavailable</h1><p>Back soon.</p>', 503)));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.transient).toBe(true);
+    expect(m.tier3Fetch).toHaveBeenCalledTimes(2);
+    expect(m.tier4Fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe('sections are bounded', () => {
   it('a long multi-word slug at the root is one page, not a section', () => {
     expect(pathTemplate('https://blog.example/how-to-fix-a-leaky-faucet/')).toBe('/*');
