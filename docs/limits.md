@@ -91,7 +91,7 @@ Source: `npx tsx tests/load/mixed-load.ts --jobs 150 --clients 8`. Setup:
 
 | scenario | result |
 |---|---|
-| 150 mixed jobs, 8 clients | 17 jobs/s. p50 / p95: static page 23 / 425 ms; product with JSON-LD extraction 24 / 423 ms; 500 KB page 384 / 898 ms; client-rendered page (browser) 738 / 1,435 ms; page taking 1.5 s 1,600 / 2,083 ms |
+| 150 mixed jobs, 8 clients | 17–19 jobs/s (18.7 on the latest run, 2026-10-17). p50 / p95: static page 23 / 425 ms; product with JSON-LD extraction 24 / 423 ms; 500 KB page 384 / 898 ms; client-rendered page (browser) 738 / 1,435 ms; page taking 1.5 s 1,600 / 2,083 ms |
 | Failing site (500) and rate-limiting site (429) | every job fails retryably in 0.5–1.8 s, at most 4 fetches per job, and no browser is started |
 | 20 identical requests at once | the origin is fetched once (the rest are coalesced or use the snapshot) |
 | One page, three schemas in a row | one fetch; the second and third requests take about 10 ms |

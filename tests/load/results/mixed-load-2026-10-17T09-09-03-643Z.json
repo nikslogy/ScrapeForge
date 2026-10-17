@@ -1,0 +1,162 @@
+{
+  "startedAt": "2026-10-17T09:08:15.202Z",
+  "jobs": 150,
+  "clients": 8,
+  "workerConcurrency": 8,
+  "browserContexts": 2,
+  "mixed": {
+    "wallMs": 8033,
+    "jobsPerSec": 18.67,
+    "byKind": {
+      "static": {
+        "jobs": 53,
+        "completed": 53,
+        "failed": 0,
+        "p50Ms": 26,
+        "p95Ms": 435,
+        "tiers": [
+          1
+        ]
+      },
+      "product": {
+        "jobs": 37,
+        "completed": 37,
+        "failed": 0,
+        "p50Ms": 16,
+        "p95Ms": 348,
+        "tiers": [
+          1
+        ],
+        "extraction": {
+          "complete": 37
+        }
+      },
+      "spa": {
+        "jobs": 18,
+        "completed": 18,
+        "failed": 0,
+        "p50Ms": 572,
+        "p95Ms": 1283,
+        "tiers": [
+          4
+        ]
+      },
+      "large": {
+        "jobs": 15,
+        "completed": 15,
+        "failed": 0,
+        "p50Ms": 311,
+        "p95Ms": 828,
+        "tiers": [
+          1
+        ]
+      },
+      "slow": {
+        "jobs": 11,
+        "completed": 11,
+        "failed": 0,
+        "p50Ms": 1519,
+        "p95Ms": 1650,
+        "tiers": [
+          1
+        ]
+      },
+      "down": {
+        "jobs": 8,
+        "completed": 0,
+        "failed": 8,
+        "p50Ms": 1318,
+        "p95Ms": 1359,
+        "tiers": []
+      },
+      "limited": {
+        "jobs": 8,
+        "completed": 0,
+        "failed": 8,
+        "p50Ms": 456,
+        "p95Ms": 839,
+        "tiers": []
+      }
+    }
+  },
+  "burst": {
+    "jobs": 20,
+    "originFetches": 1,
+    "coalesced": 7,
+    "cachedOrCoalesced": 7,
+    "p50Ms": 1557,
+    "p95Ms": 1618
+  },
+  "snapshot": {
+    "originFetches": 1,
+    "msPerRequest": [
+      12,
+      8,
+      7
+    ],
+    "snapshotAgeMs": [
+      null,
+      12,
+      19
+    ]
+  },
+  "crashRecovery": {
+    "jobs": 10,
+    "completed": 10,
+    "p50Ms": 34674,
+    "maxMs": 36184,
+    "wallMs": 36185
+  },
+  "redisRestart": {
+    "jobs": 5,
+    "completed": 5,
+    "wallMs": 1034
+  },
+  "checks": [
+    {
+      "name": "A: every job ends as expected (pages complete; 500/429 sites fail retryably)",
+      "ok": true,
+      "detail": "150 jobs, 0 unexpected: []"
+    },
+    {
+      "name": "A: JSON-LD products extract complete without a model",
+      "ok": true,
+      "detail": "37/37 complete"
+    },
+    {
+      "name": "A: a failing site is fetched at most 4 times per job (no browser escalation)",
+      "ok": true,
+      "detail": "fetches per failing job: [4]"
+    },
+    {
+      "name": "B: 20 identical requests fetch the origin once",
+      "ok": true,
+      "detail": "{\"jobs\":20,\"originFetches\":1,\"coalesced\":7,\"cachedOrCoalesced\":7,\"p50Ms\":1557,\"p95Ms\":1618}"
+    },
+    {
+      "name": "C: three schemas on one page fetch it once",
+      "ok": true,
+      "detail": "{\"originFetches\":1,\"msPerRequest\":[12,8,7],\"snapshotAgeMs\":[null,12,19]}"
+    },
+    {
+      "name": "D: every in-flight job finishes after a worker crash",
+      "ok": true,
+      "detail": "{\"jobs\":10,\"completed\":10,\"p50Ms\":34674,\"maxMs\":36184,\"wallMs\":36185}"
+    },
+    {
+      "name": "E: the worker serves new jobs after Redis restarts",
+      "ok": true,
+      "detail": "{\"jobs\":5,\"completed\":5,\"wallMs\":1034}"
+    }
+  ],
+  "workerLogTail": [
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857",
+    "Error: connect ECONNREFUSED 127.0.0.1:39857"
+  ]
+}
