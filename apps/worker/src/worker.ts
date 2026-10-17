@@ -14,6 +14,7 @@ import {
   type ScrapeOptions,
 } from '@scrapeforge/shared';
 import { MIN_TIER_ACCEPT_QUALITY, SmartRouter, type RouterResult } from './engine/router.js';
+import { isValidContent } from './engine/tier1-http.js';
 import { Coalescer, flightKey } from './throughput/coalesce.js';
 import { DomainLimiter, domainConcurrency } from './throughput/limits.js';
 import { readSnapshot, snapshotEligible, snapshotTtlSec, snapshotWorthy, writeSnapshot, type PageSnapshot } from './throughput/snapshot.js';
@@ -97,9 +98,16 @@ await browserPool.initialize();
 // Leaves room for structured extraction, which may finish a recipe run up to
 // ~1 s past its own deadline.
 const JOB_DEADLINE_MARGIN_MS = 2_000;
-// An HTTP tier's fetch runs at most this long and cannot be aborted: a site's
-// fetch slot is held this long past the job deadline at most.
-const HTTP_FETCH_TAIL_MS = 15_000;
+// A site's fetch slot is renewed this often, for this long, while the router
+// is still at the site (an HTTP or Lightpanda fetch in flight cannot be
+// aborted at the job deadline). A crashed worker's slot expires at most this
+// long after its last renewal.
+const LEASE_RENEW_MS = 5_000;
+const LEASE_RENEW_TTL_MS = 15_000;
+// A job that ends up doing the work itself after waiting for an identical
+// request needs at least this much of its timeout left (else it fails,
+// retryably, instead of starting a fetch it cannot finish).
+const MIN_OWN_RUN_MS = 5_000;
 
 class JobTimeoutError extends Error {
   readonly code = 'JOB_TIMEOUT' as const;
@@ -335,7 +343,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<ScrapeResult> 
       await coalescer.release(key, jobId);
     }
   }
-  const copy = await followLeader(job, key, leader, startedAt + timeoutMs);
+  // The leader's own deadline is timeout + margin after it started: wait as long.
+  const copy = await followLeader(job, key, leader, startedAt + timeoutMs + JOB_DEADLINE_MARGIN_MS);
   // On its own after all: within what is left of its own timeout, not a fresh one.
   return copy ?? runScrapeJob(job, startedAt);
 }
@@ -411,14 +420,18 @@ async function fetchPage(
       snapshotKey,
     };
   }
-  const releaseSlot = await domainLimiter.acquire(url, deadlineMs, { signal, tenant: userId, leaseUntil: deadlineMs + HTTP_FETCH_TAIL_MS });
+  const lease = await domainLimiter.acquire(url, deadlineMs, { signal, tenant: userId });
   // The slot is held until the router is done with the site, which may be
-  // after the job deadline (an HTTP fetch in flight cannot be aborted).
+  // after the job deadline (an HTTP fetch in flight cannot be aborted): it is
+  // renewed while the router runs.
   const routed = jobScopes.run(scope, () => router.route(url, options, tracer, signal));
-  routed.then(
-    () => void releaseSlot(),
-    () => void releaseSlot(),
-  );
+  const renewal = setInterval(() => void lease.renew(Date.now() + LEASE_RENEW_TTL_MS), LEASE_RENEW_MS);
+  renewal.unref();
+  const done = (): void => {
+    clearInterval(renewal);
+    void lease();
+  };
+  routed.then(done, done);
   const rr = await beforeDeadline(signal, routed);
   return { rr, snapshot: null, snapshotKey };
 }
@@ -443,6 +456,10 @@ async function runScrapeJob(job: Job<ScrapeJobData>, startedAt = Date.now()): Pr
   }, Math.max(0, jobStart + timeoutMs + JOB_DEADLINE_MARGIN_MS - Date.now()));
 
   try {
+    // A job that waited for an identical request has only what is left of its timeout.
+    if (jobStart + timeoutMs - Date.now() < Math.min(MIN_OWN_RUN_MS, timeoutMs / 4)) {
+      throw new JobTimeoutError(timeoutMs, 'waiting for an identical request in flight');
+    }
     // ── Stage 1: Scrape ────────────────────────────────
     const fetched = await tracer.time('fetch', () =>
       fetchPage(job, scope, deadline.signal, jobStart + timeoutMs + JOB_DEADLINE_MARGIN_MS, tracer),
@@ -466,7 +483,8 @@ async function runScrapeJob(job: Job<ScrapeJobData>, startedAt = Date.now()): Pr
     const sourceBlocked = blockedFromQualitySignals(quality, rr.statusCode);
     // Only a page the router's quality gate accepts: a best-effort shell from
     // the last tier would be served to every retry for the snapshot's life.
-    if (fetched.snapshotKey && !snapshot && quality.score >= MIN_TIER_ACCEPT_QUALITY && snapshotWorthy(rr.statusCode, Boolean(sourceBlocked), rr.html)) {
+    const accepted = quality.score >= MIN_TIER_ACCEPT_QUALITY && isValidContent(rr.html, rr.statusCode, url);
+    if (fetched.snapshotKey && !snapshot && accepted && snapshotWorthy(rr.statusCode, Boolean(sourceBlocked), rr.html)) {
       void writeSnapshot(
         snapshotKv,
         fetched.snapshotKey,

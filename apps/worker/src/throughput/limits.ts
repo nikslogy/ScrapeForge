@@ -4,10 +4,11 @@
 // * DomainLimiter: a cap on fetches in flight per site, across every worker
 //   process, held as expiring leases in a Redis sorted set (one per host).
 //   A crashed worker's leases expire on their own. Too many parallel
-//   requests to one site get it blocked; the limit spreads them out. While
-//   other tenants wait for the site, a tenant holding its share of the
-//   slots (limit / tenants wanting the site) gets no more, so one tenant's
-//   crawl cannot take every slot from the rest.
+//   requests to one site get it blocked; the limit spreads them out. Slots
+//   are shared max-min between the tenants waiting for a site: a tenant
+//   gets a free slot only when no other waiting tenant holds fewer, so one
+//   tenant's crawl cannot take every slot from the rest. A lease is renewed
+//   while its fetch runs, so it never expires under a fetch still running.
 
 export class Semaphore {
   readonly limit: number;
@@ -78,7 +79,7 @@ export interface LeaseKv {
 export interface DomainLimiterOptions {
   /** Fetches in flight per host. */
   limit: number;
-  /** How long a waiting tenant counts as waiting after its last try. */
+  /** How long a waiting tenant counts as waiting after its last try (default 5 polls, at least 1 s). */
   waitTtlMs?: number;
   /** How often a waiting fetch retries. */
   pollMs?: number;
@@ -102,16 +103,15 @@ local function wait()
 end
 local held = redis.call('ZRANGE', KEYS[1], 0, -1)
 if #held >= limit then return wait() end
-local others = 0
-for _, t in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
-  if t ~= tenant then others = others + 1 end
+-- Max-min: no slot while another waiting tenant holds fewer.
+local counts = {}
+for _, m in ipairs(held) do
+  local t = string.match(m, '^(.-)|') or ''
+  counts[t] = (counts[t] or 0) + 1
 end
-if others > 0 then
-  local mine, prefix = 0, tenant .. '|'
-  for _, m in ipairs(held) do
-    if string.sub(m, 1, #prefix) == prefix then mine = mine + 1 end
-  end
-  if mine >= math.ceil(limit / (others + 1)) then return wait() end
+local mine = counts[tenant] or 0
+for _, t in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
+  if t ~= tenant and (counts[t] or 0) < mine then return wait() end
 end
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
 redis.call('ZREM', KEYS[2], tenant)
@@ -119,6 +119,21 @@ local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
 redis.call('PEXPIREAT', KEYS[1], last[2])
 return 1`;
 const RELEASE = `return redis.call('ZREM', KEYS[1], ARGV[1])`;
+// KEYS[1] leases; ARGV: until, member. Moves the lease's expiry later (never earlier), and the key's with it.
+const RENEW = `
+local cur = redis.call('ZSCORE', KEYS[1], ARGV[2])
+if not cur then return 0 end
+if tonumber(ARGV[1]) > tonumber(cur) then redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]) end
+local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+redis.call('PEXPIREAT', KEYS[1], last[2])
+return 1`;
+
+/** A held slot: call it to release; renew() keeps it past its expiry while the fetch runs. */
+export type Lease = (() => Promise<void>) & { renew(untilMs: number): Promise<void> };
+
+function noLease(): Lease {
+  return Object.assign(async () => undefined, { renew: async () => undefined });
+}
 
 /** Default fetches in flight per site (FETCH_DOMAIN_CONCURRENCY overrides; 0 turns the limit off). */
 export const DEFAULT_DOMAIN_CONCURRENCY = 6;
@@ -161,7 +176,7 @@ export class DomainLimiter {
     this.#kv = kv;
     this.#limit = opts.limit;
     this.#pollMs = opts.pollMs ?? 100;
-    this.#waitTtlMs = opts.waitTtlMs ?? Math.max(2_000, this.#pollMs * 10);
+    this.#waitTtlMs = opts.waitTtlMs ?? Math.max(1_000, this.#pollMs * 5);
     this.#sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#now = opts.now ?? Date.now;
   }
@@ -173,9 +188,9 @@ export class DomainLimiter {
    * returns at once: a limiter never fails a job. Rejects only if `signal`
    * aborts or the deadline passes while waiting.
    */
-  async acquire(url: string, deadlineMs: number, opts: AcquireOptions = {}): Promise<() => Promise<void>> {
+  async acquire(url: string, deadlineMs: number, opts: AcquireOptions = {}): Promise<Lease> {
     const key = domainKey(url);
-    if (this.#limit <= 0 || key === null) return async () => undefined;
+    if (this.#limit <= 0 || key === null) return noLease();
     const { signal } = opts;
     // "|" separates the tenant from the token in a lease.
     const tenant = (opts.tenant ?? '').replace(/\|/g, '_') || '-';
@@ -189,16 +204,24 @@ export class DomainLimiter {
       try {
         granted = await this.#kv.eval(ACQUIRE, 2, key, `${key}:waiting`, now, this.#limit, leaseUntil, member, tenant, now + this.#waitTtlMs);
       } catch {
-        return async () => undefined;
+        return noLease();
       }
       if (granted === 1) {
-        return async () => {
+        const release = async (): Promise<void> => {
           try {
             await this.#kv.eval(RELEASE, 1, key, member);
           } catch {
             // The lease expires on its own.
           }
         };
+        const renew = async (untilMs: number): Promise<void> => {
+          try {
+            await this.#kv.eval(RENEW, 1, key, Math.ceil(untilMs), member);
+          } catch {
+            // Best effort: the lease keeps its current expiry.
+          }
+        };
+        return Object.assign(release, { renew });
       }
       await this.#sleep(Math.min(this.#pollMs, Math.max(1, deadlineMs - now)));
     }

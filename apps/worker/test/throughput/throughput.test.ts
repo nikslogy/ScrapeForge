@@ -317,6 +317,38 @@ describe('per-site fetch limit', () => {
     for (const r of a.slice(2)) await r();
   });
 
+  it('a renewed lease outlives its first expiry while its fetch runs', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 1, pollMs: 10 });
+    const host = `renew-${Math.random().toString(36).slice(2)}.example`;
+    const lease = await limiter.acquire(`https://${host}/`, Date.now() + 80);
+    await lease.renew(Date.now() + 5_000);
+    await sleep(150);
+    await expect(limiter.acquire(`https://${host}/`, Date.now() + 100)).rejects.toBeInstanceOf(DomainBusyError);
+    await lease();
+    await (await limiter.acquire(`https://${host}/`, Date.now() + 1_000))();
+  });
+
+  it('max-min between tenants: a freed slot goes to the waiting tenant holding the fewest', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 6, pollMs: 10 });
+    const url = `https://maxmin-${Math.random().toString(36).slice(2)}.example/`;
+    const deadline = Date.now() + 5_000;
+    const held: Record<string, Array<() => Promise<void>>> = { A: [], B: [], C: [] };
+    for (const t of ['A', 'B', 'C']) for (let i = 0; i < 2; i++) held[t].push(await limiter.acquire(url, deadline, { tenant: t }));
+    const order: string[] = [];
+    const d = limiter.acquire(url, deadline, { tenant: 'D' }).then((r) => (order.push('D'), r));
+    const a = limiter.acquire(url, deadline, { tenant: 'A' }).then((r) => (order.push('A'), r));
+    await sleep(60);
+    // A frees one of its two: A (now 1) must not take it back ahead of D (0).
+    await held.A[0]();
+    await sleep(80);
+    expect(order).toEqual(['D']);
+    await held.B[0]();
+    await (await a)();
+    expect(order).toEqual(['D', 'A']);
+    await (await d)();
+    for (const r of [held.A[1], held.B[1], ...held.C]) await r();
+  });
+
   it('is off with limit 0, and never fails a job when the store is down', async () => {
     const off = new DomainLimiter(kv(), { limit: 0 });
     await (await off.acquire('https://a.example/', Date.now() + 1_000))();
