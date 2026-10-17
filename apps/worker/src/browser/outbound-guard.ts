@@ -83,11 +83,17 @@ export async function checkBrowserUrl(rawUrl: string): Promise<OutboundBlockedEr
 export function createOutboundRouteHandler(options: {
   blockResources: boolean;
   /**
-   * The request's custom headers, added only to requests for `origin` (the
-   * target's): credentials never go to third-party scripts, CDNs or
-   * trackers the page loads.
+   * Headers a browser sends anyway (Accept-Language, User-Agent): set on
+   * Chromium's own request for `origin` (the target's). Harmless should a
+   * redirect carry them on.
    */
   extraHeaders?: Readonly<Record<string, string>>;
+  /**
+   * Any other custom header (Authorization, an API key): it may be a
+   * credential. Sent to `origin` only, by a request that does not follow
+   * redirects (below), on documents, XHR and fetch requests.
+   */
+  secretHeaders?: Readonly<Record<string, string>>;
   origin?: string;
 }): (route: Route) => Promise<void> {
   return async (route) => {
@@ -97,17 +103,31 @@ export function createOutboundRouteHandler(options: {
       !(options.blockResources && shouldBlockResource(request.resourceType(), url)) &&
       (await checkBrowserUrl(url)) === null;
     try {
-      if (!allowed) await route.abort();
-      else if (options.extraHeaders && options.origin !== undefined && originOf(url) === options.origin && request.resourceType() !== 'media') {
-        // Chromium keeps header overrides on every redirect hop of a
-        // continued request, and the hops never reach this handler: a
-        // target page redirecting to an identity provider (or an image to a
-        // CDN) would carry the credentials there. Fetched here without
-        // following redirects, a 3xx goes back to the browser, whose next
-        // hop comes through this handler with its own origin check.
-        const response = await route.fetch({ headers: { ...request.headers(), ...options.extraHeaders }, maxRedirects: 0 });
-        await route.fulfill({ response });
-      } else await route.continue();
+      const target = options.origin !== undefined && originOf(url) === options.origin;
+      if (!allowed) {
+        await route.abort();
+      } else if (target && options.secretHeaders && SECRET_HEADER_TYPES.has(request.resourceType())) {
+        // Chromium keeps a continued request's header overrides on every
+        // redirect hop, and the hops never reach this handler: a target
+        // redirecting to an identity provider would carry the credential
+        // there. Fetched here without following redirects, a 3xx goes back
+        // to the browser, which follows it without the credential (and the
+        // tier navigates again to a same-origin redirect target: see
+        // needsCredentialedRenavigation). The body is released once served.
+        const response = await route.fetch({
+          headers: { ...request.headers(), ...options.extraHeaders, ...options.secretHeaders },
+          maxRedirects: 0,
+        });
+        try {
+          await route.fulfill({ response });
+        } finally {
+          await response.dispose().catch(() => undefined);
+        }
+      } else if (target && options.extraHeaders) {
+        await route.continue({ headers: { ...request.headers(), ...options.extraHeaders } });
+      } else {
+        await route.continue();
+      }
     } catch {
       // The page closed during the check, another handler already resolved
       // the route, or the fetch failed: fail the request rather than leave
@@ -118,18 +138,47 @@ export function createOutboundRouteHandler(options: {
 }
 
 /**
+ * Requests that get the secret headers: what a page loads as itself or asks
+ * of its API. Not images, scripts or styles (cookies cover those), nor
+ * streams (EventSource), which a fetch here would buffer until they end.
+ */
+const SECRET_HEADER_TYPES: ReadonlySet<string> = new Set(['document', 'xhr', 'fetch']);
+
+/**
+ * A navigation that carried secret headers and ended on another URL of the
+ * target's origin: the redirect hop went without them (see the route
+ * handler), so the tier navigates to that URL again, which gets them.
+ */
+export function needsCredentialedRenavigation(
+  response: { request(): { redirectedFrom(): unknown } } | null,
+  finalUrl: string,
+  origin: string,
+): boolean {
+  if (!response || response.request().redirectedFrom() === null) return false;
+  return originOf(finalUrl) === origin;
+}
+
+/**
  * Guard every request of `page`. `blockResources` only toggles
- * tracker/media blocking; `extraHeaders` go to `origin` only.
+ * tracker/media blocking; `extraHeaders` and `secretHeaders` go to `origin` only.
  */
 export async function installOutboundGuard(
   page: Page,
-  options: { blockResources?: boolean; extraHeaders?: Readonly<Record<string, string>>; origin?: string } = {},
+  options: {
+    blockResources?: boolean;
+    extraHeaders?: Readonly<Record<string, string>>;
+    secretHeaders?: Readonly<Record<string, string>>;
+    origin?: string;
+  } = {},
 ): Promise<void> {
+  const scoped = options.origin !== undefined;
   await page.route(
     ALL_URLS,
     createOutboundRouteHandler({
       blockResources: options.blockResources ?? false,
-      ...(options.extraHeaders && options.origin !== undefined ? { extraHeaders: options.extraHeaders, origin: options.origin } : {}),
+      ...(scoped && options.extraHeaders ? { extraHeaders: options.extraHeaders } : {}),
+      ...(scoped && options.secretHeaders ? { secretHeaders: options.secretHeaders } : {}),
+      ...(scoped ? { origin: options.origin } : {}),
     }),
   );
 }

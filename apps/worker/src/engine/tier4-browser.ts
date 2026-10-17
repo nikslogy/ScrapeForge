@@ -6,6 +6,7 @@ import {
   assertNavigationAllowed,
   ensureContextOutboundGuard,
   installOutboundGuard,
+  needsCredentialedRenavigation,
   monitorOutbound,
   type OutboundMonitor,
 } from '../browser/outbound-guard.js';
@@ -669,7 +670,9 @@ export async function tier4Fetch(
     await addBrowserCookies(context, credentials.cookies);
     await installOutboundGuard(page, {
       blockResources: options.blockResources !== false,
-      ...(credentials.headers ? { extraHeaders: credentials.headers, origin: target.origin } : {}),
+      ...(credentials.headers ? { extraHeaders: credentials.headers } : {}),
+      ...(credentials.secretHeaders ? { secretHeaders: credentials.secretHeaders } : {}),
+      origin: target.origin,
     });
 
     // Mobile emulation: apply viewport + UA at the PAGE level so pooled
@@ -680,16 +683,22 @@ export async function tier4Fetch(
       await page.addInitScript(MOBILE_INIT_SCRIPT);
     }
 
-    const response = await deadline
-      .run('navigation', () =>
-        page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation', 20_000) }),
-      )
-      .catch((err: unknown) => {
-        throw navigationFailure(err, hops);
-      });
+    const navigate = (href: string) =>
+      deadline
+        .run('navigation', () => page.goto(href, { waitUntil: 'domcontentloaded', timeout: deadline.timeoutFor('navigation', 20_000) }))
+        .catch((err: unknown) => {
+          throw navigationFailure(err, hops);
+        });
+    let response = await navigate(target.href);
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
     await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
+    // A same-origin redirect hop went without the request's secret headers:
+    // the redirect target is loaded again, now with them.
+    if (credentials.secretHeaders && needsCredentialedRenavigation(response, page.url(), target.origin)) {
+      response = await navigate(page.url());
+      await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
+    }
 
     const waitFor = options.waitFor;
     if (waitFor) {

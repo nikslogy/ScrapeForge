@@ -13,6 +13,7 @@ describe('request headers', () => {
     [{ 'X-Key:': 'k' }, /HTTP token/],
     [{ 'X-Key': 'k\r\nInjected: 1' }, /control characters/],
     [{ 'X-Key': 'k\n' }, /control characters/],
+    [{ 'X-City': '東京' }, /Latin-1/],
   ])('refuses %j', (headers, message) => {
     const r = requestHeadersSchema.safeParse(headers);
     expect(r.success).toBe(false);

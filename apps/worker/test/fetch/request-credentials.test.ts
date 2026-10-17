@@ -53,28 +53,35 @@ describe('cookie matching', () => {
     expect(headersWithCookies('https://shop.example.com/', { 'X-A': '1' }, undefined)).toEqual({ 'X-A': '1' });
   });
 
-  it('browsers get the cookies (a custom Cookie header too) and the other headers', () => {
-    const c = browserCredentials(new URL('https://shop.example.com/p'), { Cookie: 'pre=0', Authorization: 'Bearer t' }, [{ name: 'sid', value: 'abc', domain: 'example.com' }]);
-    expect(c.headers).toEqual({ Authorization: 'Bearer t' });
+  it('browsers get the cookies (a custom Cookie header too); headers browsers send anyway apart from the others', () => {
+    const c = browserCredentials(
+      new URL('https://shop.example.com/p'),
+      { Cookie: 'pre=0', Authorization: 'Bearer t', 'Accept-Language': 'de-DE', 'X-Tenant': 'acme' },
+      [{ name: 'sid', value: 'abc', domain: 'example.com' }],
+    );
+    expect(c.headers).toEqual({ 'Accept-Language': 'de-DE' });
+    expect(c.secretHeaders).toEqual({ Authorization: 'Bearer t', 'X-Tenant': 'acme' });
     expect(c.cookies).toEqual([
-      { name: 'pre', value: '0', domain: 'shop.example.com', path: '/' },
-      { name: 'sid', value: 'abc', domain: '.example.com', path: '/' },
+      { name: 'pre', value: '0', domain: 'shop.example.com', path: '/', secure: true },
+      { name: 'sid', value: 'abc', domain: '.example.com', path: '/', secure: true },
     ]);
   });
 
   it('a host-only cookie keeps its own path in a browser (two cookies of one name stay apart)', () => {
     const c = browserCredentials(new URL('https://h.example/admin/panel'), undefined, [{ name: 'session', value: 'A', path: '/admin' }, { name: 'session', value: 'B' }]);
     expect(c.cookies).toEqual([
-      { name: 'session', value: 'A', domain: 'h.example', path: '/admin' },
-      { name: 'session', value: 'B', domain: 'h.example', path: '/' },
+      { name: 'session', value: 'A', domain: 'h.example', path: '/admin', secure: true },
+      { name: 'session', value: 'B', domain: 'h.example', path: '/', secure: true },
     ]);
+    // Over plain http they cannot be Secure.
+    expect(browserCredentials(new URL('http://h.example/'), undefined, [{ name: 'a', value: '1' }]).cookies[0].secure).toBeUndefined();
   });
 
   it('drops cookies with any control character, and headers no tier could send', () => {
     expect(cookiesFor(url, [{ name: 'tab', value: 'a\tb' }, { name: 'soh', value: 'a\u0001b' }, { name: 'del', value: 'a\u007fb' }, { name: 'ok', value: '1' }]).map((c) => c.name)).toEqual(['ok']);
-    expect(sendableHeaders({ 'X Api Key': 'k', 'X-Ok': 'v', 'X-Bad': 'v\r\n', 'X-Tab': 'a\tb' })).toEqual({ 'X-Ok': 'v', 'X-Tab': 'a\tb' });
+    expect(sendableHeaders({ 'X Api Key': 'k', 'X-Ok': 'v', 'X-Bad': 'v\r\n', 'X-Tab': 'a\tb', 'X-City': '東京', 'X-Latin': 'Zürich' })).toEqual({ 'X-Ok': 'v', 'X-Tab': 'a\tb', 'X-Latin': 'Zürich' });
     expect(headersWithCookies('https://shop.example.com/', { 'X Api Key': 'k', 'X-Ok': 'v' }, undefined)).toEqual({ 'X-Ok': 'v' });
-    expect(browserCredentials(url, { 'Bad Name': 'x', Authorization: 'Bearer t' }, undefined).headers).toEqual({ Authorization: 'Bearer t' });
+    expect(browserCredentials(url, { 'Bad Name': 'x', Authorization: 'Bearer t' }, undefined).secretHeaders).toEqual({ Authorization: 'Bearer t' });
   });
 
   it('a cookie the browser refuses does not lose the others', async () => {
@@ -125,6 +132,18 @@ beforeAll(async () => {
       '/to-other': (req, res, body) => redirect(302, `${samePortless.origin}/landing`)(req, res, body),
       '/with-redirected-image': html(`<!doctype html><html><head><title>Gallery</title></head><body><main><h1>Gallery</h1><p>${'Photos from the account owner, sorted by date and album. '.repeat(8)}</p><img src="/img"></main></body></html>`),
       '/img': (req, res, body) => redirect(302, `${thirdPartyOrigin}/pixel.gif`)(req, res, body),
+      '/reports': (req, res, body) => redirect(301, '/reports/')(req, res, body),
+      '/reports/': (req, res) => {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        const ok = req.headers.authorization === 'Bearer secret-token';
+        res.end(`<!doctype html><html><head><title>Reports</title></head><body><main><h1>${ok ? 'Quarterly reports' : 'Login required'}</h1><p>${'Revenue, costs and margins for every region and quarter of the year. '.repeat(8)}</p></main></body></html>`);
+      },
+      '/live': html(`<!doctype html><html><head><title>Live</title></head><body><main><h1>Live feed</h1><p>${'Updates from the account appear here as they happen. '.repeat(8)}</p><p id="feed">waiting</p><script>new EventSource('/events').onmessage = (e) => { document.getElementById('feed').textContent = 'got:' + e.data; };</script></main></body></html>`),
+      '/events': (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        res.write('data: hello\n\n');
+        // The stream stays open, as a live feed does.
+      },
     }),
   );
 });
@@ -231,7 +250,8 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
     } finally {
       pool.release(ctx2);
     }
-    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBe('Bearer secret-token');
+    // Credential headers go to documents, XHR and fetch requests, not images (cookies cover those).
+    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBeUndefined();
     const cdn = thirdParty.requests.find((x) => x.url === '/pixel.gif');
     expect(cdn).toBeDefined();
     expect(cdn!.headers.authorization).toBeUndefined();
@@ -249,6 +269,38 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
       pool.release(ctx);
     }
     expect(site.requests.find((x) => x.url === '/account')?.headers.authorization).toBe('Bearer secret-token');
+  }, 60_000);
+
+  it('a redirect within the target origin keeps the credential (the redirect target is loaded with it)', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/reports`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Quarterly reports');
+    } finally {
+      pool.release(ctx);
+    }
+  }, 60_000);
+
+  it('headers a browser sends anyway ride on Chromium\'s own request (its fingerprint and Sec-Fetch headers kept)', async () => {
+    const ctx = await pool.acquire();
+    try {
+      await tier4Fetch(`${site.origin}/classic`, ctx, { headers: { 'Accept-Language': 'de-DE' }, timeout: 15_000 });
+    } finally {
+      pool.release(ctx);
+    }
+    const doc = site.requests.find((x) => x.url === '/classic')!;
+    expect(doc.headers['accept-language']).toBe('de-DE');
+    expect(doc.headers['sec-fetch-mode']).toBe('navigate');
+  }, 60_000);
+
+  it('a stream on the target origin still streams when the request carries a credential', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/live`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('got:hello');
+    } finally {
+      pool.release(ctx);
+    }
   }, 60_000);
 
   it('the next fetch on the same pooled context carries none of them', async () => {

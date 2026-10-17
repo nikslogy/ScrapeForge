@@ -118,6 +118,36 @@ describe('createOutboundRouteHandler', () => {
     expect(calls).toEqual(['abort']);
   });
 
+  it('secret headers: documents, XHR and fetch are fetched without following redirects, the body released once served; streams and images are continued', async () => {
+    const origin = 'http://public.test';
+    const secrets = createOutboundRouteHandler({ blockResources: false, origin, extraHeaders: { 'Accept-Language': 'de' }, secretHeaders: { Authorization: 'Bearer t' } });
+    for (const type of ['document', 'xhr', 'fetch']) {
+      const order: string[] = [];
+      const response = { dispose: vi.fn(async () => void order.push('dispose')) };
+      const route = {
+        request: () => ({ ...fakeRequest(`${origin}/api`, type), headers: () => ({ accept: '*/*' }) }),
+        fetch: vi.fn(async () => (order.push('fetch'), response)),
+        fulfill: vi.fn(async () => void order.push('fulfill')),
+        continue: vi.fn(async () => void order.push('continue')),
+        abort: vi.fn(async () => void order.push('abort')),
+      };
+      await secrets(route as unknown as Route);
+      expect(order, type).toEqual(['fetch', 'fulfill', 'dispose']);
+      expect(route.fetch).toHaveBeenCalledWith({ headers: { accept: '*/*', 'Accept-Language': 'de', Authorization: 'Bearer t' }, maxRedirects: 0 });
+    }
+    for (const type of ['eventsource', 'image', 'script']) {
+      const route = {
+        request: () => ({ ...fakeRequest(`${origin}/x`, type), headers: () => ({}) }),
+        fetch: vi.fn(),
+        continue: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+      };
+      await secrets(route as unknown as Route);
+      expect(route.fetch, type).not.toHaveBeenCalled();
+      expect(route.continue, type).toHaveBeenCalledWith({ headers: { 'Accept-Language': 'de' } });
+    }
+  });
+
   it('keeps the SSRF check when resource blocking is off', async () => {
     const { route, calls } = fakeRoute(`http://${INTERNAL_IP}/font.woff2`, 'font');
     await guard(route);

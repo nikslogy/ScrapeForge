@@ -5,7 +5,10 @@
 // Browser tiers add the cookies to the (pooled) context, which the pool
 // clears before the next fetch, and add custom headers only to requests for
 // the target's own origin, so credentials never reach third-party scripts,
-// CDNs or trackers the page loads.
+// CDNs or trackers the page loads. In a browser, headers browsers send
+// anyway (Accept-Language, User-Agent, ...) are set on Chromium's own
+// request; any other header may be a credential and is sent by a request
+// that cannot follow a redirect to another origin (see outbound-guard.ts).
 
 import type { CookieInput } from '@scrapeforge/shared';
 
@@ -15,9 +18,15 @@ import type { CookieInput } from '@scrapeforge/shared';
 const UNSAFE_COOKIE_CHARS = /[\x00-\x1f\x7f;]/;
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const MAX_COOKIES = 100;
-// RFC 9110 field names are tokens; values carry no control character but tab.
+// RFC 9110 field names are tokens; values are Latin-1 without control
+// characters but tab (HTTP clients refuse anything else).
 const HEADER_NAME = COOKIE_NAME;
-const UNSAFE_HEADER_VALUE = /[\x00-\x08\x0a-\x1f\x7f]/;
+const UNSAFE_HEADER_VALUE = /[^\t\x20-\x7e\x80-\xff]/;
+// Headers a browser sends anyway: never a credential.
+const BROWSER_HEADERS = new Set([
+  'accept', 'accept-language', 'cache-control', 'dnt', 'pragma', 'referer', 'save-data', 'upgrade-insecure-requests', 'user-agent',
+  'x-requested-with',
+]);
 
 /**
  * Custom headers a tier can send: names that are tokens, values without
@@ -103,20 +112,24 @@ export interface BrowserCookie {
   url?: string;
   domain?: string;
   path?: string;
+  secure?: boolean;
 }
 
 /**
  * The request's cookies `url` receives, in Playwright's addCookies form: a
  * host-only cookie is bound to the URL's host (a domain without a leading
  * dot is host-only) and its own path; one with a domain to that domain (and
- * its subdomains) and its path. The url form is not used: Playwright takes
- * its path from the URL's directory, so "/account" would become "/".
+ * its subdomains) and its path. For an https target they are Secure, as the
+ * site set them (a __Secure- or __Host- cookie is refused otherwise, and the
+ * others would also go out over plain http). The url form is not used:
+ * Playwright takes its path from the URL's directory ("/account" → "/").
  */
 export function browserCookies(url: URL, cookies: readonly CookieInput[] | undefined): BrowserCookie[] {
+  const secure = url.protocol === 'https:';
   return cookiesFor(url, cookies).map((c) => {
     const domain = domainOf(c);
     const path = c.path?.trim() || '/';
-    return { name: c.name, value: c.value, domain: domain === undefined ? url.hostname : `.${domain}`, path };
+    return { name: c.name, value: c.value, domain: domain === undefined ? url.hostname : `.${domain}`, path, ...(secure ? { secure } : {}) };
   });
 }
 
@@ -157,15 +170,27 @@ export function cookiesFromHeader(headers: Readonly<Record<string, string>> | un
   return out;
 }
 
-/** What a browser tier applies: the request's cookies (and a custom Cookie header's), and its other headers. */
+/**
+ * What a browser tier applies: the request's cookies (and a custom Cookie
+ * header's); `headers`, those a browser sends anyway; `secretHeaders`, any
+ * other (possibly a credential).
+ */
 export function browserCredentials(
   url: URL,
   headers: Readonly<Record<string, string>> | undefined,
   cookies: readonly CookieInput[] | undefined,
-): { cookies: BrowserCookie[]; headers?: Record<string, string> } {
+): { cookies: BrowserCookie[]; headers?: Record<string, string>; secretHeaders?: Record<string, string> } {
   const all = [...cookiesFromHeader(headers), ...(cookies ?? [])];
-  const extra = browserHeaders(headers);
-  return { cookies: browserCookies(url, all), ...(extra ? { headers: extra } : {}) };
+  const plain: Record<string, string> = {};
+  const secret: Record<string, string> = {};
+  for (const [name, value] of Object.entries(browserHeaders(headers) ?? {})) {
+    (BROWSER_HEADERS.has(name.toLowerCase()) ? plain : secret)[name] = value;
+  }
+  return {
+    cookies: browserCookies(url, all),
+    ...(Object.keys(plain).length > 0 ? { headers: plain } : {}),
+    ...(Object.keys(secret).length > 0 ? { secretHeaders: secret } : {}),
+  };
 }
 
 /** Whether a request has cookies or custom headers a tier must send. */

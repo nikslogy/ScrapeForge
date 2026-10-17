@@ -6,8 +6,10 @@
 import { z } from 'zod';
 
 const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-// Tab is allowed in header values (RFC 9110), not in cookie values.
+// Header values are Latin-1 (what HTTP clients can send) without control
+// characters; tab is allowed (RFC 9110), not in cookie values.
 const HEADER_VALUE_CTL = /[\x00-\x08\x0a-\x1f\x7f]/;
+const HEADER_VALUE_NON_LATIN1 = /[^\x00-\xff]/;
 const COOKIE_VALUE_UNSAFE = /[\x00-\x1f\x7f;]/;
 
 export const MAX_REQUEST_HEADERS = 50;
@@ -23,6 +25,7 @@ export const requestHeadersSchema = z
     for (const [name, value] of entries) {
       if (!TOKEN.test(name)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: 'header name must be an HTTP token (no spaces or separators)' });
       else if (HEADER_VALUE_CTL.test(value)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: 'header value must not contain control characters (CR, LF, ...)' });
+      else if (HEADER_VALUE_NON_LATIN1.test(value)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: 'header value must be Latin-1; percent-encode other characters' });
     }
   });
 
