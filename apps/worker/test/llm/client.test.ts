@@ -211,14 +211,18 @@ describe('ModelClient', () => {
     expect(result.attempts[1].note).toBe('retry after timeout');
   });
 
-  it('retryOnTimeout: false ends the call at the first timeout (the caller sends less instead)', async () => {
+  it('retryOnTimeout: false skips the same-model retry but still tries the next model', async () => {
     const s = setup([OR_A, GROQ], {
       openrouter: [fakeError('timeout'), ok()],
       groq: [ok()],
     });
-    const err = await failure(s.client.complete(REQ, { purpose: 'extract', budget: s.budget, retryOnTimeout: false }));
+    const result = await s.client.complete(REQ, { purpose: 'extract', budget: s.budget, retryOnTimeout: false });
+    expect(result.attempts.map((a) => `${a.model}:${a.errorCategory ?? 'ok'}`)).toEqual(['a:timeout', 'g:ok']);
+
+    const all = setup([OR_A, GROQ], { openrouter: [fakeError('timeout')], groq: [fakeError('timeout')] });
+    const err = await failure(all.client.complete(REQ, { purpose: 'extract', budget: all.budget, retryOnTimeout: false }));
     expect(err.category).toBe('timeout');
-    expect(err.attempts?.map((a) => a.model)).toEqual(['a']);
+    expect(err.attempts?.map((a) => a.model)).toEqual(['a', 'g']);
   });
 
   it('unsupported_request: retries once with a weaker JSON mode', async () => {

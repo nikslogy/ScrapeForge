@@ -79,10 +79,18 @@ export interface CompleteOptions {
   /** Approximate input tokens (system + user); models whose context cannot hold it are skipped. */
   estimatedInputTokens?: number;
   /**
-   * false: a timeout ends the call at once (no retry, no other model). For a
-   * caller that answers a timeout by sending less (a listing chunk is halved).
+   * false: a timeout is not retried on the same model (the next configured
+   * model is still tried). For a caller that answers a timeout by sending
+   * less (a listing chunk is halved).
    */
   retryOnTimeout?: boolean;
+  /**
+   * The answer is expected to need this many tokens: when the cost cap
+   * cannot pay for that much output, the call is refused (budget_exhausted)
+   * rather than sent with max_tokens lowered to an answer that would be cut
+   * off and still billed.
+   */
+  minOutputTokens?: number;
 }
 
 export interface CompleteResult {
@@ -271,8 +279,7 @@ export class ModelClient {
             break;
           }
           case 'timeout':
-            if (opts.retryOnTimeout === false) throw this.#fail(err, state);
-            if (retried) break;
+            if (retried || opts.retryOnTimeout === false) break;
             note = `retry after ${err.category}`;
             retried = retry = true;
             break;
@@ -362,7 +369,8 @@ export class ModelClient {
     const outRate = caps.outputCostPerMTok ?? 0;
     if (!Number.isFinite(remaining) || (inRate <= 0 && outRate <= 0)) return { ok: true, maxOutputTokens: requested };
     const inputCost = (this.#inputEstimate(caps, req, opts, state) * INPUT_COST_MARGIN * inRate) / 1_000_000;
-    const minimal = Math.min(requested, reasoningReserve(caps) + MIN_AFFORDABLE_OUTPUT_TOKENS);
+    const wanted = opts.minOutputTokens !== undefined && Number.isFinite(opts.minOutputTokens) ? Math.max(0, opts.minOutputTokens) : 0;
+    const minimal = Math.min(requested, reasoningReserve(caps) + Math.max(MIN_AFFORDABLE_OUTPUT_TOKENS, wanted));
     const left = remaining - inputCost;
     const fits = outRate <= 0 ? requested : Math.floor((left * 1_000_000) / outRate);
     if (left <= 0 || fits < minimal) {

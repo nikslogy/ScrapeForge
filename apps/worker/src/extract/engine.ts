@@ -13,13 +13,14 @@
 import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { roundMs, StageTracer } from '../tracing.js';
-import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, renderBlocks, selectBlocks, type BlockContext, type BlockSelection } from './document/index.js';
+import { blockContext, buildSourceDocument, documentBuildInfo, HTML_REWRITTEN_WARNING, queryTerms, renderBlocks, scoreBlocks, selectBlocks, type BlockContext, type BlockSelection } from './document/index.js';
 import {
   Budget,
   buildExtractionPrompt,
   buildRepairPrompt,
   estimateTokens,
   parseExtractionResponse,
+  MESSAGE_OVERHEAD_TOKENS,
   planInputBudget,
   requestedOutputTokens,
   worstCaseUsd,
@@ -135,8 +136,6 @@ const SPLIT_CATEGORIES: ReadonlySet<LlmErrorCategory> = new Set(['output_truncat
 const DEFAULT_PARTITION_CONCURRENCY = 4;
 /** Unprocessed record ranges named in the list-level missing detail. */
 const MAX_REPORTED_GAPS = 5;
-/** Ranges of cards a short chunk answer left out that are asked for separately; more become one span. */
-const MAX_REASK_RUNS = 3;
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -588,6 +587,8 @@ interface ModelCall {
 interface PartitionPlan {
   group: RecordGroup;
   perChunk: number;
+  /** The listing fits one call but the page does not: its records are sent without the rest of the page. */
+  recordsOnly?: boolean;
 }
 
 /** Records [from, to) of the partitioned group; depth = times it was halved. */
@@ -597,6 +598,8 @@ interface Chunk {
   depth: number;
   /** Cards an earlier answer left out, asked for again (once). */
   reask?: boolean;
+  /** The chunk's cards when they are not the whole range [from, to) (a re-ask of the cards an answer left out). */
+  cards?: readonly string[];
   /** Not started before this many chunk calls have settled (it waits for a sibling's reservation to clear). */
   notBefore?: number;
 }
@@ -608,6 +611,8 @@ interface ChunkEntry {
   status: 'done' | 'failed' | 'skipped' | 'short';
   reason?: string;
   returned?: number;
+  /** Cards the entry stands for, when not to - from. */
+  size?: number;
 }
 
 interface LlmStageResult {
@@ -1160,7 +1165,7 @@ class ExtractionRun {
     call: ModelCall,
     renderedText: string,
     outputTokens: number,
-    opts: { retryOnTimeout?: boolean } = {},
+    opts: { retryOnTimeout?: boolean; minOutputTokens?: number } = {},
   ): Promise<{ records: ParsedRecord[] } | { failure: { category: LlmErrorCategory; message: string } }> {
     const prompt = buildExtractionPrompt({ schema: call.reduced, renderedBlocks: renderedText, url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint });
     const estimatedInputTokens =
@@ -1207,9 +1212,36 @@ class ExtractionRun {
     const inputCap = Math.max(1, Math.floor((maxChars * SELECTION_FILL) / perRecordChars));
     const perChunk = Math.max(1, Math.min(outputCap, inputCap));
     // The listing fits one call but the page does not (a long intro or menu
-    // above the grid): send the records alone rather than the top of the page.
-    if (perChunk >= total) return whole.truncated ? { group, perChunk: total } : null;
+    // above the grid): send the records alone rather than the top of the
+    // page, but only when they are what the fields are about. A small
+    // "related stories" group must not take the place of a table at the top.
+    if (perChunk >= total) return whole.truncated && this.groupMatchesFields(group, fields, whole.includedIds) ? { group, perChunk: total, recordsOnly: true } : null;
     return { group, perChunk };
+  }
+
+  /**
+   * Whether `group`'s records match the fields at least as well as the
+   * rest of what a top-of-page rendering would send (BM25 over the field
+   * names, descriptions and related words; see document/select.ts).
+   */
+  private groupMatchesFields(group: RecordGroup, fields: FieldSpec[], topIds: readonly string[]): boolean {
+    const scores = scoreBlocks(this.doc, queryTerms(fields));
+    const inGroup = new Set(group.recordIds);
+    const index = new Map(this.doc.blocks.map((b, i) => [b.id, i]));
+    const belongs = (i: number): boolean => {
+      const b = this.doc.blocks[i];
+      return inGroup.has(b.id) || (b.parentId !== undefined && inGroup.has(b.parentId));
+    };
+    let groupScore = 0;
+    this.doc.blocks.forEach((_, i) => {
+      if (belongs(i)) groupScore += scores[i];
+    });
+    let topScore = 0;
+    for (const id of topIds) {
+      const i = index.get(id);
+      if (i !== undefined && !belongs(i)) topScore += scores[i];
+    }
+    return groupScore > 0 && groupScore >= topScore;
   }
 
   private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
@@ -1224,24 +1256,44 @@ class ExtractionRun {
     }
     const answered: Array<{ from: number; records: ParsedRecord[] }> = [];
     let sentBlocks = 0;
-    const frame = estimateTokens(buildExtractionPrompt({ schema: call.reduced, renderedBlocks: '', url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint }).user);
+    const position = new Map(ids.map((id, i) => [id, i]));
+    const cardsOf = (chunk: Chunk): readonly string[] => chunk.cards ?? ids.slice(chunk.from, chunk.to);
+    const perRecordAnswer = this.answerTokensPerRecord(plan.group, call.fields);
 
     const prepare = (chunk: Chunk) => {
-      const rendered = renderBlocks(this.doc, { blockIds: ids.slice(chunk.from, chunk.to), maxChars });
+      const cards = cardsOf(chunk);
+      const rendered = renderBlocks(this.doc, { blockIds: cards, maxChars });
       const tooBig = rendered.truncated || estimateTokens(rendered.text) > maxChars / CHARS_PER_TOKEN;
-      const tokens = Math.min(outputTokens, this.plannedOutputTokens(call.primary, chunk.to - chunk.from, call.fields.length));
-      const inputTokens = frame + estimateTokens(rendered.text);
-      // worstUsd: every token max_tokens allows; plannedUsd: the answer as planned, without headroom.
+      const tokens = Math.min(outputTokens, this.plannedOutputTokens(call.primary, cards.length, call.fields.length));
+      // Priced as the model client prices it: system, user, schema, framing.
+      const prompt = buildExtractionPrompt({ schema: call.reduced, renderedBlocks: rendered.text, url: this.req.url, title: this.doc.title, shapeHint: call.shapeHint });
+      const inputTokens =
+        estimateTokens(prompt.system) + estimateTokens(prompt.user) + MESSAGE_OVERHEAD_TOKENS +
+        (call.primary.jsonMode === 'json_schema' ? estimateTokens(JSON.stringify(prompt.responseSchema)) : 0);
+      // The answer as estimated from the cards themselves (max_tokens adds headroom on top).
+      const answer = Math.min(tokens, Math.ceil(perRecordAnswer * cards.length));
       const worstUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, tokens));
-      const plannedUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, Math.ceil(tokens / OUTPUT_HEADROOM)));
-      return { rendered, tooBig, tokens, worstUsd, plannedUsd };
+      const plannedUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, answer));
+      return { rendered, tooBig, tokens, answer, worstUsd, plannedUsd };
     };
-    const splittable = (chunk: Chunk): boolean => chunk.to - chunk.from > 1 && chunk.depth < MAX_CHUNK_SPLITS;
+    const splittable = (chunk: Chunk): boolean => cardsOf(chunk).length > 1 && chunk.depth < MAX_CHUNK_SPLITS;
+    const piece = (cards: readonly string[], depth: number, explicit: boolean): Chunk => {
+      const from = position.get(cards[0]) ?? 0;
+      const to = (position.get(cards[cards.length - 1]) ?? from) + 1;
+      return explicit ? { from, to, depth, cards } : { from, to, depth };
+    };
     const halve = (chunk: Chunk, why: string): void => {
-      const mid = chunk.from + Math.ceil((chunk.to - chunk.from) / 2);
-      queue.unshift({ from: chunk.from, to: mid, depth: chunk.depth + 1 }, { from: mid, to: chunk.to, depth: chunk.depth + 1 });
+      const cards = cardsOf(chunk);
+      const mid = Math.ceil(cards.length / 2);
+      const explicit = chunk.cards !== undefined;
+      queue.unshift(
+        { ...piece(cards.slice(0, mid), chunk.depth + 1, explicit), ...(chunk.reask ? { reask: true } : {}) },
+        { ...piece(cards.slice(mid), chunk.depth + 1, explicit), ...(chunk.reask ? { reask: true } : {}) },
+      );
       this.warnings.add(`partition_chunk_split:${why}`);
     };
+    const entry = (chunk: Chunk, rest: Omit<ChunkEntry, 'from' | 'to' | 'size'>): ChunkEntry =>
+      ({ from: chunk.from, to: chunk.to, ...(chunk.cards ? { size: chunk.cards.length } : {}), ...rest });
     // Set once the cap could not pay for a chunk that cannot be made smaller: the rest is skipped without trying.
     let capReached = false;
 
@@ -1251,13 +1303,16 @@ class ExtractionRun {
     const limit = Math.max(1, this.partitionConcurrency());
 
     const runChunk = async (chunk: Chunk, prepared: ReturnType<typeof prepare>): Promise<void> => {
-      const { rendered, tooBig, tokens } = prepared;
-      const n = chunk.to - chunk.from;
+      const { rendered, tooBig, tokens, answer } = prepared;
+      const cards = cardsOf(chunk);
+      const n = cards.length;
       const canSplit = splittable(chunk);
-      // A chunk that can be halved is not retried whole after a timeout: the halves answer sooner.
+      // A chunk that can be halved is not retried whole on the same model
+      // after a timeout (another configured model still is): the halves answer
+      // sooner. The client refuses a call whose answer the cap cannot pay for.
       const result = tooBig
         ? { failure: { category: 'input_too_large' as LlmErrorCategory, message: 'chunk does not fit the input budget' } }
-        : await this.callAndParse(call, rendered.text, tokens, { retryOnTimeout: !canSplit });
+        : await this.callAndParse(call, rendered.text, tokens, { retryOnTimeout: !canSplit, minOutputTokens: answer });
       if ('records' in result) {
         sentBlocks += rendered.includedIds.length;
         answered.push({ from: chunk.from, records: result.records });
@@ -1266,33 +1321,33 @@ class ExtractionRun {
         // An empty answer may be right (the group is not what the schema asks
         // for); it is a gap only when other chunks found records (below).
         if (returned === 0 || returned >= n - allowance) {
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned });
+          ledger.push(entry(chunk, { status: 'done', returned }));
           return;
         }
-        // Fewer records than cards: ask again for the cards the answer left out (once).
-        const runs = chunk.reask ? null : this.uncoveredRuns(result.records, ids, chunk, call.fields);
-        if (runs && runs.length > 0) {
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'done', returned });
-          queue.unshift(...runs.map((r) => ({ ...r, depth: chunk.depth, reask: true })));
+        // Fewer records than cards: ask again for the cards no record cites (once).
+        const missing = chunk.reask ? null : this.uncoveredCards(result.records, cards, call.fields);
+        if (missing && missing.length > 0) {
+          ledger.push(entry(chunk, { status: 'done', returned }));
+          queue.unshift({ ...piece(missing, chunk.depth, true), reask: true });
           this.warnings.add('partition_chunk_reasked');
           return;
         }
-        ledger.push({ from: chunk.from, to: chunk.to, status: 'short', returned, reason: `returned ${returned} of ${n}` });
+        ledger.push(entry(chunk, { status: 'short', returned, reason: `returned ${returned} of ${n}` }));
         return;
       }
       const category = result.failure.category;
       if (category === 'budget_exhausted') {
         if (call.budget.remainingMs() <= 0) {
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: 'deadline' });
+          ledger.push(entry(chunk, { status: 'skipped', reason: 'deadline' }));
         } else if (running.size > 1) {
           // Siblings hold reservations far above what they will spend: wait for one to settle.
           queue.unshift({ ...chunk, notBefore: settled + 2 });
         } else if (canSplit && call.budget.canSpend()) {
-          // What is left cannot cover this chunk's input: half as many cards may fit.
+          // What is left cannot cover this chunk: half as many cards may fit.
           halve(chunk, 'cost_cap');
         } else {
           capReached = true;
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: 'cost_cap' });
+          ledger.push(entry(chunk, { status: 'skipped', reason: 'cost_cap' }));
         }
         return;
       }
@@ -1301,7 +1356,7 @@ class ExtractionRun {
         halve(chunk, category);
         return;
       }
-      ledger.push({ from: chunk.from, to: chunk.to, status: 'failed', reason: category });
+      ledger.push(entry(chunk, { status: 'failed', reason: category }));
     };
 
     while (queue.length > 0 || running.size > 0) {
@@ -1309,7 +1364,7 @@ class ExtractionRun {
         const chunk = queue[0];
         if (call.budget.remainingMs() <= 0 || !call.budget.canSpend() || capReached) {
           queue.shift();
-          ledger.push({ from: chunk.from, to: chunk.to, status: 'skipped', reason: call.budget.remainingMs() <= 0 ? 'deadline' : 'cost_cap' });
+          ledger.push(entry(chunk, { status: 'skipped', reason: call.budget.remainingMs() <= 0 ? 'deadline' : 'cost_cap' }));
           continue;
         }
         if (running.size > 0 && chunk.notBefore !== undefined && settled < chunk.notBefore) break;
@@ -1317,11 +1372,17 @@ class ExtractionRun {
         if (!prepared.tooBig) {
           // Under a cost cap, a chunk the cap cannot cover next to the calls in flight waits for them.
           if (running.size > 0 && call.budget.remainingUsd() < prepared.worstUsd) break;
-          // Alone, and what is left cannot pay for its planned answer: a cut-off (billed) answer would
-          // follow. Half as many cards may fit.
-          if (running.size === 0 && splittable(chunk) && call.budget.remainingUsd() < prepared.plannedUsd) {
+          // Alone, and what is left cannot pay for its planned answer: a cut-off
+          // (billed) answer would follow. Half as many cards may fit; a chunk
+          // that cannot be made smaller is skipped, with the rest.
+          if (running.size === 0 && call.budget.remainingUsd() < prepared.plannedUsd) {
             queue.shift();
-            halve(chunk, 'cost_cap');
+            if (splittable(chunk)) {
+              halve(chunk, 'cost_cap');
+            } else {
+              capReached = true;
+              ledger.push(entry(chunk, { status: 'skipped', reason: 'cost_cap' }));
+            }
             continue;
           }
         }
@@ -1339,7 +1400,7 @@ class ExtractionRun {
     // Other chunks found records: a chunk that answered none left its cards out.
     if (answered.some((a) => a.records.length > 0)) {
       for (const e of ledger) {
-        const n = e.to - e.from;
+        const n = e.size ?? e.to - e.from;
         if (e.status === 'done' && e.returned === 0 && n > Math.max(1, Math.floor(n * LIST_COVERAGE_TOLERANCE))) {
           e.status = 'short';
           e.reason = `returned 0 of ${n}`;
@@ -1353,7 +1414,7 @@ class ExtractionRun {
     // Neighbouring pieces skipped for the same reason are one gap.
     for (let i = ledger.length - 1; i > 0; i--) {
       const [prev, cur] = [ledger[i - 1], ledger[i]];
-      if (prev.status === 'skipped' && cur.status === 'skipped' && prev.reason === cur.reason && prev.to === cur.from) {
+      if (prev.status === 'skipped' && cur.status === 'skipped' && prev.reason === cur.reason && prev.to === cur.from && prev.size === undefined && cur.size === undefined) {
         prev.to = cur.to;
         ledger.splice(i, 1);
       }
@@ -1389,8 +1450,11 @@ class ExtractionRun {
     this.warnings.add(`partitioned:${ledger.length}_chunks_of_${plan.perChunk}`);
     const gaps = ledger.filter((e) => e.status !== 'done');
     if (gaps.length > 0) {
-      const missingRecords = gaps.reduce((n, e) => n + (e.to - e.from) - (e.status === 'short' ? (e.returned ?? 0) : 0), 0);
-      const ranges = gaps.slice(0, MAX_REPORTED_GAPS).map((e) => `${e.from + 1}–${e.to} (${e.reason})`).join(', ');
+      const missingRecords = gaps.reduce((n, e) => n + (e.size ?? e.to - e.from) - (e.status === 'short' ? (e.returned ?? 0) : 0), 0);
+      const ranges = gaps
+        .slice(0, MAX_REPORTED_GAPS)
+        .map((e) => `${e.from + 1}–${e.to}${e.size !== undefined ? ` (${e.size} cards)` : ''} (${e.reason})`)
+        .join(', ');
       const more = gaps.length > MAX_REPORTED_GAPS ? `, and ${gaps.length - MAX_REPORTED_GAPS} more` : '';
       this.coverageGap = true;
       // A provider failure only when every gap is one; the request's own deadline or cost cap is not.
@@ -1399,6 +1463,11 @@ class ExtractionRun {
         reason: allProviderFailures ? 'provider_failure' : 'not_processed',
         detail: `${missingRecords} of ${ids.length} records were not processed: records ${ranges}${more}`,
       };
+    }
+    if (plan.recordsOnly && records.length === 0 && !this.listGap) {
+      // Only the listing's records were sent: an empty answer says nothing about the rest of the page.
+      this.coverageGap = true;
+      this.listGap = { reason: 'not_processed', detail: `only the page's ${ids.length} repeated records were sent (the page does not fit one call); none matched` };
     }
     if (answeredChunks.length === 0) {
       const reason = gaps[0]?.reason ?? 'unknown';
@@ -1410,30 +1479,33 @@ class ExtractionRun {
   }
 
   /**
-   * Record ranges [from, to) of a chunk that its answer did not cover, judged
-   * by the cards its records cite; null when too few records cite a card to
-   * tell. Several runs become one span (the dedupe drops what is answered twice).
+   * The cards of a chunk that no record of its answer cites (any of a
+   * record's cells), or null when some record cites no card of the chunk:
+   * then the answer cannot be placed, and nothing is asked again.
    */
-  private uncoveredRuns(records: ParsedRecord[], ids: readonly string[], chunk: Chunk, fields: FieldSpec[]): Array<{ from: number; to: number }> | null {
+  private uncoveredCards(records: ParsedRecord[], cards: readonly string[], fields: FieldSpec[]): string[] | null {
+    const inChunk = new Set(cards);
     const covered = new Set<string>();
-    let homed = 0;
     for (const r of records) {
-      const home = this.homeRecord(r, fields);
-      if (home) {
-        covered.add(home.block.id);
-        homed++;
-      }
+      const cited = [...this.citedCards(r, fields)].filter((id) => inChunk.has(id));
+      if (cited.length === 0) return null;
+      for (const id of cited) covered.add(id);
     }
-    if (homed < records.length * 0.8) return null;
-    const runs: Array<{ from: number; to: number }> = [];
-    for (let i = chunk.from; i < chunk.to; i++) {
-      if (covered.has(ids[i])) continue;
-      const last = runs[runs.length - 1];
-      if (last && last.to === i) last.to = i + 1;
-      else runs.push({ from: i, to: i + 1 });
+    return cards.filter((id) => !covered.has(id));
+  }
+
+  /** Listing records (cards) the cells of a parsed record cite. */
+  private citedCards(record: ParsedRecord, fields: FieldSpec[]): Set<string> {
+    const out = new Set<string>();
+    for (const field of fields) {
+      if (!hasOwn(record, field.name)) continue;
+      const cell = record[field.name];
+      if (!cell.b || isEmptyRaw(cell.v)) continue;
+      const ctx = blockContext(this.doc, cell.b);
+      const id = ctx?.record?.id ?? (ctx?.block.kind === 'record' ? ctx.block.id : undefined);
+      if (id) out.add(id);
     }
-    if (runs.length > MAX_REASK_RUNS) return [{ from: runs[0].from, to: runs[runs.length - 1].to }];
-    return runs;
+    return out;
   }
 
   private partitionConcurrency(): number {
@@ -1448,9 +1520,15 @@ class ExtractionRun {
    * keeps its record. Undefined (never a repeat) without a cited card.
    */
   private recordIdentity(record: ParsedRecord, slots: Map<string, LlmSlot>, fields: FieldSpec[]): string | undefined {
-    const home = this.homeRecord(record, fields);
-    if (!home) return undefined;
-    return `${home.block.id}|${JSON.stringify(fields.map((f) => slots.get(f.name)?.value ?? null))}`;
+    // The home record, or the one card every cited cell points to (a card
+    // with a single value, "Price on request" leaving one field).
+    let card = this.homeRecord(record, fields)?.block.id;
+    if (card === undefined) {
+      const cited = this.citedCards(record, fields);
+      if (cited.size === 1) [card] = cited;
+    }
+    if (card === undefined) return undefined;
+    return `${card}|${JSON.stringify(fields.map((f) => slots.get(f.name)?.value ?? null))}`;
   }
 
   /**
@@ -1515,14 +1593,22 @@ class ExtractionRun {
     if (!group) return null;
     const records = group.recordIds.length;
     if (records * fields.length * OUTPUT_TOKENS_PER_CELL <= outputTokens) return null;
+    const count = Math.max(1, Math.floor(outputTokens / this.answerTokensPerRecord(group, fields)));
+    return count < records ? { group, count } : null;
+  }
+
+  /**
+   * Estimated answer tokens for one record of `group`: each field's JSON
+   * framing plus the record's own text (values are read from it), bounded by
+   * the usual per-cell reservation.
+   */
+  private answerTokensPerRecord(group: RecordGroup, fields: FieldSpec[]): number {
     const blocks = new Map(this.doc.blocks.map((b) => [b.id, b]));
     const sample = group.recordIds.slice(0, OUTPUT_SIZE_SAMPLE);
     const textTokens = sample.reduce((sum, id) => sum + estimateTokens(blocks.get(id)?.text ?? ''), 0) / Math.max(1, sample.length);
     const framing = fields.reduce((sum, f) => sum + estimateTokens(`${JSON.stringify(f.name)}:{"v":"","b":"b00000"},`), 0);
     const valueTokens = Math.min(textTokens, fields.length * OUTPUT_TOKENS_PER_CELL);
-    const perRecord = (framing + valueTokens) * OUTPUT_FORMAT_FACTOR;
-    const count = Math.max(1, Math.floor(outputTokens / perRecord));
-    return count < records ? { group, count } : null;
+    return (framing + valueTokens) * OUTPUT_FORMAT_FACTOR;
   }
 
   /** Records of the largest group among the rendered blocks. */
@@ -1539,7 +1625,7 @@ class ExtractionRun {
     request: { system: string; user: string; maxOutputTokens: number; responseSchema?: Record<string, unknown>; temperature: number },
     purpose: 'extract' | 'repair',
     estimatedInputTokens: number,
-    opts: { retryOnTimeout?: boolean } = {},
+    opts: { retryOnTimeout?: boolean; minOutputTokens?: number } = {},
   ): Promise<{ ok: true; text: string } | { ok: false; failure: { category: LlmErrorCategory; message: string } }> {
     try {
       const res = await client.complete(request, { purpose, budget, estimatedInputTokens, ...opts });

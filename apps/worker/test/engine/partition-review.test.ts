@@ -163,3 +163,83 @@ describe('selection on a page in another script', () => {
     expect(out.data).toMatchObject({ price: 12800 });
   });
 });
+
+// After the second review round.
+describe('records alone, re-asks, fallbacks and the cost gate', () => {
+  it('a small side group on an over-budget page does not replace the top of the page', async () => {
+    const releases = Array.from({ length: 12 }, (_, i) => `<tr><td>1.${i}.0</td><td>Fixes and improvements</td></tr>`).join('');
+    const prose = Array.from({ length: 200 }, (_, i) => `<p>Note ${i}: ${'We keep a careful changelog of everything that ships each week. '.repeat(4)}</p>`).join('');
+    const related = ['One', 'Two', 'Three'].map((t) => `<article class="story"><h3>Related story ${t}</h3><p>Read more about our team</p></article>`).join('');
+    const html = page(`<main><h1>Changelog</h1><table><thead><tr><th>Version</th><th>Notes</th></tr></thead><tbody>${releases}</tbody></table>${prose}<aside>${related}</aside></main>`);
+    let sawTable = false;
+    const { client } = fakeClient((_caps, req) => {
+      sawTable ||= req.user.includes('1.0.0');
+      return { text: '{"records":[]}', finishReason: 'stop', inputTokens: 1, outputTokens: 1, costUsd: 0, latencyMs: 1 };
+    }, { maxOutputTokens: 2_048, contextTokens: 8_000 });
+    const out = await extractStructured(request(html, { releases: [{ version: 'string' }] }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(sawTable).toBe(true);
+    expect(out.scope.strategy).not.toBe('partitioned');
+    expect(out.missing.find((m) => m.path === '/releases')?.reason).not.toBe('not_found');
+  });
+
+  it('a re-ask sends only the cards no record cites, and a card with one value is never returned twice', async () => {
+    const list = items(400).map((it, i) => (i % 12 === 5 ? { ...it, price: 'Price on request' } : it));
+    let firstCalls = 0;
+    const sizes: number[] = [];
+    const lazy: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Sync;
+      const cards = cardsIn(req.user);
+      sizes.push(cards);
+      if (cards < 100) return r;
+      firstCalls++;
+      const parsed = JSON.parse(r.text) as { records: unknown[] };
+      return { ...r, text: JSON.stringify({ records: parsed.records.slice(0, Math.floor(parsed.records.length * 0.7)) }) };
+    };
+    const { client } = fakeClient(lazy, { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(list), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    const titles = (out.data as { items: Array<{ title: string }> }).items.map((r) => r.title);
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(titles).toHaveLength(400);
+    expect(out.status).toBe('complete');
+    // The re-asks hold the ~30% left out, not the whole chunk again.
+    expect(sizes.filter((n) => n < 100).every((n) => n <= 70)).toBe(true);
+    expect(firstCalls).toBeGreaterThan(0);
+  });
+
+  it('a hung primary model: a chunk goes to the fallback at its first timeout instead of being halved on the hung model', async () => {
+    const calls = { primary: 0, fallback: 0 };
+    const hung = new FakeProvider(async (_caps, req) => {
+      calls.primary++;
+      await delay(10_000, req.signal);
+      throw new Error('unreachable');
+    });
+    const healthy = new FakeProvider((caps, req, i) => {
+      calls.fallback++;
+      return listingModel(caps, req, i);
+    }, 'openrouter');
+    const client = new ModelClient({
+      models: [fakeCaps({ maxOutputTokens: 8_192, contextTokens: 128_000 }), fakeCaps({ provider: 'openrouter', model: 'backup', maxOutputTokens: 8_192, contextTokens: 128_000 })],
+      providers: { fake: hung, openrouter: healthy },
+      breaker: new CircuitBreaker(),
+      sleep: async () => undefined,
+      perCallTimeoutMs: 300,
+    });
+    const out = await extractStructured(request(listing(items(400)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.status).toBe('complete');
+    expect(calls.primary).toBe(out.scope.partitions!.chunks);
+    expect(out.warnings.some((w) => w.startsWith('partition_chunk_split:timeout'))).toBe(false);
+  }, 30_000);
+
+  it('more budget never returns fewer records, and no answer is cut off by the cap and billed', async () => {
+    const got: number[] = [];
+    for (const cap of [10, 14, 15, 16, 17, 30]) {
+      const { client, provider } = fakeClient(billed(listingModel), { maxOutputTokens: 8_192, contextTokens: 128_000, inputCostPerMTok: 1_000, outputCostPerMTok: 1_000 });
+      const out = await extractStructured(request(listing(items(800)), LISTING_SCHEMA, { url: LISTING_URL, maxCostUsd: cap }), { modelClient: client, recipeStore: null, learning: 'off' });
+      got.push(len(out.data, 'items'));
+      expect(out.llm.costUsd).toBeLessThanOrEqual(cap);
+      expect(out.llm.attempts.filter((a) => a.errorCategory === 'output_truncated')).toEqual([]);
+      expect(provider.calls.length).toBeGreaterThan(0);
+    }
+    expect(got).toEqual([...got].sort((a, b) => a - b));
+  });
+});
