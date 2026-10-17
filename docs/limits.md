@@ -11,7 +11,7 @@ so it can be checked. Settings marked "env" can be changed per deployment
 | limit | value | source | when exceeded |
 |---|---|---|---|
 | Request body | 1 MiB | `apps/api/src/server.ts` `bodyLimit` | 413 |
-| `headers` | 50; names must be HTTP tokens, values without control characters (tab allowed) | `routes/credentials.ts` | 400 |
+| `headers` | 50; names must be HTTP tokens, values Latin-1 without control characters (tab allowed) | `routes/credentials.ts` | 400 |
 | `cookies` | 100; names must be HTTP tokens, values without `;` or control characters | same | 400 |
 | `timeout` | 1,000–120,000 ms, default 60,000 | `routes/scrape.ts`, `routes/extract.ts` | 400 |
 | `cacheTtl` | 0–2,592,000 s (30 days), default 3,600 | same | 400 |
@@ -29,7 +29,7 @@ so it can be checked. Settings marked "env" can be changed per deployment
 | Browser tiers (T4, T5) | `timeout` per navigation | `engine/router.ts` |
 | Browser contexts per worker | 5 (env `MAX_BROWSER_CONTEXTS`) | `worker.ts` |
 | Jobs in flight per worker | env `WORKER_CONCURRENCY`, else `MAX_BROWSER_CONTEXTS` | `worker.ts` |
-| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit). While other tenants wait, one tenant gets at most its share (6 ÷ tenants waiting). A slot is held until the router is done, at most the job deadline + 15 s | `throughput/limits.ts` |
+| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit). Shared max-min between the tenants waiting for the site. A slot is held, renewed every 5 s, until the router is done with the site | `throughput/limits.ts` |
 | Wait for a rate-limited (429) or failing (5xx) site | one retry after at most 3 s (and at most `timeout` / 4); a longer `Retry-After` fails at once, retryably | `engine/router.ts` `MAX_TRANSIENT_WAIT_MS` |
 | Redirects, private addresses | every hop checked; private, loopback and link-local addresses are refused | `packages/shared/src/net.ts` |
 

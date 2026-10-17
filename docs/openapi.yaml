@@ -378,7 +378,7 @@ components:
           type: object
           description: |
             Extra HTTP headers to send with the request (at most 50). Names
-            must be HTTP tokens and values must not contain control
+            must be HTTP tokens and values Latin-1 without control
             characters other than tab; otherwise the request is refused with
             400. The HTTP tiers send them to the target and drop
             `Authorization` and `Cookie` once a redirect leaves its origin.
