@@ -83,6 +83,20 @@ const MONEY_WORDS = new Set([
 const CURRENCY_POUND = new Set(['pound', 'pounds']);
 // "cookTimeMin", "durationMin": minutes. "priceMin", "ageMin": a minimum.
 const TIME_WORD = /^(?:time|duration|runtime|prep|cook|cooking|total|wait|waiting|delivery|travel|commute|drive|driving|walk|walking|read|reading|play|playing|video|ride|flight|charge|charging)$/i;
+// "videoLengthMin", "batteryLifeMin": minutes too ("lengthMin" alone is a minimum length).
+const MEDIA_WORD = /^(?:video|song|track|film|movie|episode|call|audio|clip|podcast|show|lesson|class|course|meeting)$/i;
+// A field about a weight keeps "pounds" as a mass even when it mentions a price.
+const WEIGHT_WORDS = new Set(['weight', 'weights', 'weighs', 'mass', 'heavy', 'heaviness', 'load']);
+
+function isTimeName(words: readonly string[], at: number): boolean {
+  const w = words[at];
+  if (w === undefined) return false;
+  if (TIME_WORD.test(w)) return true;
+  const before = words[at - 1];
+  if (/^length$/i.test(w)) return before !== undefined && MEDIA_WORD.test(before);
+  if (/^life$/i.test(w)) return before !== undefined && /^battery$/i.test(before);
+  return false;
+}
 
 function nameWords(text: string): string[] {
   return text
@@ -92,8 +106,18 @@ function nameWords(text: string): string[] {
     .map((w) => w.toLowerCase());
 }
 
-function isMoneyField(name: string, description: string): boolean {
-  return description.includes('£') || [...nameWords(name), ...nameWords(description)].some((w) => MONEY_WORDS.has(w));
+/**
+ * Whether "pound(s)"/"lb" is money here: the name is about money, or the
+ * description is and nothing says the field is a weight ("Shipping weight,
+ * used for the shipping cost" stays a mass).
+ */
+function moneyContext(name: string, description: string): { name: boolean; description: boolean } {
+  const nameW = nameWords(name);
+  const descW = nameWords(description);
+  const nameMoney = nameW.some((w) => MONEY_WORDS.has(w));
+  const weight = [...nameW, ...descW].some((w) => WEIGHT_WORDS.has(w));
+  const descMoney = !weight && (description.includes('£') || descW.some((w) => MONEY_WORDS.has(w)));
+  return { name: nameMoney, description: nameMoney || descMoney };
 }
 
 const MAX_FIELD_TEXT = 300;
@@ -106,11 +130,11 @@ const MAX_FIELD_TEXT = 300;
 export function fieldUnit(field: { name: string; description?: string }): Unit | undefined {
   const found = new Set<UnitDef>();
   const description = (field.description ?? '').slice(0, MAX_FIELD_TEXT);
-  const money = isMoneyField(field.name.slice(0, MAX_FIELD_TEXT), description);
+  const money = moneyContext(field.name.slice(0, MAX_FIELD_TEXT), description);
   // "in GB", "(kg)", "[mAh]"; not "per kg" (a price per kilogram is not a mass).
   for (const m of description.matchAll(/(?:\bin\s+|\(\s*|\[\s*)([a-zA-Z]+)\b/g)) {
     const word = m[1].toLowerCase();
-    if (DESCRIPTION_SKIP.has(word) || (money && CURRENCY_POUND.has(word))) continue;
+    if (DESCRIPTION_SKIP.has(word) || (money.description && CURRENCY_POUND.has(word))) continue;
     const def = BY_WORD.get(word) ?? SYMBOLS.find(([symbol]) => symbol === m[1])?.[1];
     if (def) found.add(def);
   }
@@ -122,8 +146,8 @@ export function fieldUnit(field: { name: string; description?: string }): Unit |
   // "weightKg" asks for kilograms; "pricePerKg" is a price.
   if (words.length > 1 && words[words.length - 2].toLowerCase() !== 'per') {
     const last = words[words.length - 1].toLowerCase();
-    const def = last === 'min' && TIME_WORD.test(words[words.length - 2]) ? BY_WORD.get('min') : BY_NAME_WORD.get(last);
-    if (def && !(money && def.id === 'lb')) found.add(def);
+    const def = last === 'min' && isTimeName(words, words.length - 2) ? BY_WORD.get('min') : BY_NAME_WORD.get(last);
+    if (def && !(money.name && def.id === 'lb')) found.add(def);
   }
   if (found.size !== 1) return undefined;
   const [def] = found;
@@ -172,8 +196,9 @@ function significantDigits(printed: string): number {
 }
 
 // 6'2", 5′10″, 6 ft 2 in, 6’ 2”: one length in feet and inches.
+// The feet number starts at a number's start: "105 ft 3 in" is never "05 ft 3 in".
 const FEET_INCHES =
-  /(\d{1,2}(?:\.\d+)?)\s*(?:'|′|’|ft\.?|feet|foot)\s*(\d{1,2}(?:\.\d+)?)\s*(?:"|″|”|′′|''|’’|in\.?|inch(?:es)?)?(?![\p{L}\d])/giu;
+  /(?<![\d.,'’′])(\d{1,3}(?:\.\d+)?)\s*(?:'|′|’|ft\.?|feet|foot)\s*(\d{1,2}(?:\.\d+)?)\s*(?:"|″|”|′′|''|’’|in\.?|inch(?:es)?)?(?![\p{L}\d])/giu;
 
 /**
  * A height printed in feet and inches, as inches (6'2" → 74), with the

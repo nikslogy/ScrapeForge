@@ -320,8 +320,10 @@ interface TableIndex {
   rows: ReadonlyArray<readonly string[]>;
   /** looseText(cell) → indexes of the rows holding it. */
   rowsByCell: Map<string, number[]>;
-  /** Field name → column index (memo of fieldColumn). */
+  /** Field name → column index (memo of columnFor over the header). */
   columns: Map<string, number>;
+  /** Field name → row whose first cell names the field (memo, "Spec | Value" tables). */
+  labels: Map<string, number>;
   /** Every row has at most two cells: a "Spec | Value" table. */
   keyValue: boolean;
 }
@@ -334,8 +336,11 @@ function tableIndex(block: SourceBlock): TableIndex | null {
   let header: readonly string[];
   let rows: ReadonlyArray<readonly string[]>;
   if (block.table) {
-    header = block.table.headers;
     rows = block.table.rows.slice(0, MAX_TABLE_ROWS);
+    // A header row of plain <td> cells is parsed as the first body row: its
+    // cells name the columns all the same. It stays a row for the lookups by
+    // value (an answer's own values never equal a column name).
+    header = block.table.headers.length > 0 ? block.table.headers : (rows[0] ?? []);
   } else {
     // A table block without its parsed grid: the rendered "a | b | c" lines, first one the header.
     const lines = block.text
@@ -358,7 +363,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
     }
   });
   const keyValue = header.length <= 2 && rows.every((cells) => cells.length <= 2);
-  const index: TableIndex = { header, rows, rowsByCell, columns: new Map(), keyValue };
+  const index: TableIndex = { header, rows, rowsByCell, columns: new Map(), labels: new Map(), keyValue };
   tableIndexes.set(block, index);
   return index;
 }
@@ -367,7 +372,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
  * The cells of a cited table that can hold this answer's value, or null when
  * the table does not say which:
  * - a "Spec | Value" table: the value cell of the row whose first cell names
- *   the field ("Weight" for weightLb);
+ *   the field ("Weight" for weightLb), when one does;
  * - otherwise the row the answer names (the row holding the most of its own
  *   values that appear in that row only), narrowed to the field's column
  *   when a header names it ("5G" for has5g, "Battery (mAh)" for batteryMah).
@@ -381,8 +386,13 @@ function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpe
     t.columns.set(field.name, col);
   }
   if (col < 0 && t.keyValue) {
-    const named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
-    return named >= 0 ? [t.rows[named][1] ?? ''] : null;
+    let named = t.labels.get(field.name);
+    if (named === undefined) {
+      named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
+      t.labels.set(field.name, named);
+    }
+    if (named >= 0) return [t.rows[named][1] ?? ''];
+    // No label names the field: a two-column listing ("Part | Availability"), read by its rows.
   }
   // Values printed in several rows ("Acme" for a brand) say nothing about which row.
   const votes = new Map<number, number>();
@@ -1762,10 +1772,9 @@ class ExtractionRun {
    * the cited block (its sentences and lines, when it is long) and its
    * record's attributes are normalized with the field's own rules; the
    * value is accepted only when one of them converts to exactly the same
-   * value, and, for a yes/no field, none of the block's texts (nor an
-   * attribute named for the field) to the opposite. A bare "0", "1" or
-   * "true" in an attribute (data-index, data-quantity) counts only when the
-   * attribute is named for the field. Strings never take this path: their
+   * value, and, for a yes/no field, none of them to the opposite. A bare
+   * "0", "1" or "true" in an attribute (data-index, data-quantity) counts,
+   * either way, only when the attribute is named for the field. Strings never take this path: their
    * meaning is too loose to compare. Returns a note for the evidence, or null.
    */
   private matchByMeaning(field: FieldSpec, raw: unknown, ctx: BlockContext, keys: readonly string[] = []): string | null {
@@ -1774,25 +1783,26 @@ class ExtractionRun {
     if (!target.ok || isEmptyRaw(target.value)) return null;
     // A whole table cited: only the cells that can hold this answer's value, when the table says which.
     const cells = ctx.block.kind === 'table' ? tableCells(ctx.block, keys, field) : null;
-    // `veto`: a candidate that may contradict a yes/no answer (the block's own words, or an attribute named for the field).
-    const candidates: Array<{ text: string; veto: boolean }> = (cells ?? textPieces(ctx.block.text)).map((text) => ({ text, veto: true }));
+    const candidates: string[] = [...(cells ?? textPieces(ctx.block.text))];
     const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
     for (const attrs of attrSets) {
       for (const [name, value] of Object.entries(attrs)) {
         // Links and image paths hold digits that mean nothing ("/3f/c6/…").
         if (MEANING_SKIP_ATTRS.has(name) || /[/\\=?&#]|:\/\//.test(value)) continue;
+        // A bare "0"/"1"/"true" says something only in an attribute named for
+        // the field; a word ("outofstock", "sold-out") says it anywhere.
         const named = attrNamesField(name, attrs, field);
-        if (named || !BARE_ATTR_VALUE.test(value.trim())) candidates.push({ text: value, veto: named });
+        if (named || !BARE_ATTR_VALUE.test(value.trim())) candidates.push(value);
         // Class lists carry one token per fact ("star-rating Three").
         if (/\s/.test(value)) {
           for (const token of value.split(/\s+/).slice(0, MEANING_MAX_TOKENS)) {
-            if (named || !BARE_ATTR_VALUE.test(token)) candidates.push({ text: token, veto: named });
+            if (named || !BARE_ATTR_VALUE.test(token)) candidates.push(token);
           }
         }
       }
     }
     let match: string | null = null;
-    for (const { text: candidate, veto } of candidates) {
+    for (const candidate of candidates) {
       const text = candidate.trim();
       if (text === '' || text.length > MEANING_MAX_CHARS) continue;
       const n = normalizeValue(text, field, this.nctx);
@@ -1800,7 +1810,7 @@ class ExtractionRun {
       if (n.value === target.value) {
         match ??= `matched by meaning: "${text.slice(0, 60)}" in ${ctx.block.id}`;
         if (field.type !== 'boolean') return match;
-      } else if (field.type === 'boolean' && veto) {
+      } else if (field.type === 'boolean') {
         return null; // the block says both: not a confirmation
       }
     }

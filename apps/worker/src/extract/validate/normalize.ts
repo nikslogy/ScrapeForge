@@ -222,6 +222,8 @@ function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], u
       if (value !== null) return finishNumber(value, ['extract-number', 'feet-inches', ...(unit.id === 'in' ? [] : [`convert:in-${unit.id}`])], integer);
     }
   }
+  const compound = compoundValue(text, tokens, readings, unit);
+  if (compound !== null) return finishNumber(compound, ['extract-number', 'compound-units'], integer);
   readings = spreadUnits(text, tokens, readings, unit);
   const same = readings.filter((r) => r.unit?.id === unit.id);
   const sameValues = [...new Set(same.map((r) => r.value))];
@@ -244,9 +246,20 @@ function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], u
   return finishNumber(values[0], ['extract-number', ...others[0].reading.steps, `convert:${from.id}-${unit.id}`], integer);
 }
 
-// Between numbers that one trailing unit covers: "31.2 x 22.1 x 1.5 cm", "128/256/512 GB", "2–3 kg", "5 to 7 kg".
-const UNIT_SEQUENCE_JOINER = /^\s*(?:[x×*/\-‐‑‒–—]|to|and|or|&)\s*$/iu;
+// Between numbers that one trailing unit covers:
+// - a size: "31.2 x 22.1 x 1.5 cm";
+// - a range or variants, ascending: "2-3 kg", "2 – 3 kg", "128/256/512 GB";
+// - a range in words: "5 to 7 kg", "-5 to -10 °C", "8 or 16 GB".
+// A spaced hyphen or slash is a separator ("iPhone 15 - 128 GB", "EU 42 / 27 cm").
 const TIMES_JOINER = /^\s*[x×*]\s*$/iu;
+const ASCENDING_JOINER = /^(?:[-‐‑/]|\s*[‒–—]\s*)$/u;
+const WORD_JOINER = /^\s+(?:to|and|or|bis)\s+[-−]?$/iu;
+
+function joinsUnitSequence(between: string, left: NumericToken, right: NumericToken, a: number, b: number): boolean {
+  if (TIMES_JOINER.test(between)) return true;
+  if (WORD_JOINER.test(between)) return !/[-−]$/.test(between) || right.negative;
+  return ASCENDING_JOINER.test(between) && !right.negative && a <= b;
+}
 /** "6 x 330 ml": a pack of six, whose unit size is the value. Not for lengths ("60 x 90 cm" is a size). */
 const MAX_PACK_COUNT = 24;
 
@@ -260,12 +273,12 @@ function spreadUnits(text: string, tokens: NumericToken[], readings: Reading[], 
     const next = out[i + 1].unit;
     if (out[i].unit || !next || out[i].steps.includes('scale-suffix')) continue;
     const between = text.slice(tokens[i].end, tokens[i + 1].start);
-    if (!UNIT_SEQUENCE_JOINER.test(between)) continue;
+    if (!joinsUnitSequence(between, tokens[i], tokens[i + 1], out[i].value, out[i + 1].value)) continue;
     const pack =
       TIMES_JOINER.test(between) &&
       field.dim !== 'length' &&
       field.dim !== 'pixels' &&
-      (i === 0 || !UNIT_SEQUENCE_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start))) &&
+      (i === 0 || !TIMES_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start))) &&
       Number.isInteger(out[i].value) &&
       out[i].value > 0 &&
       out[i].value <= MAX_PACK_COUNT &&
@@ -274,6 +287,31 @@ function spreadUnits(text: string, tokens: NumericToken[], readings: Reading[], 
     out[i] = { ...out[i], unit: next };
   }
   return out;
+}
+
+// Between the parts of one quantity: "10 h 30 min", "2 kg 500 g", "1 hr, 5 min".
+const COMPOUND_JOINER = /^\s*(?:,|and)?\s*$/iu;
+
+/**
+ * "10 h 30 min" for a field in minutes is 630, not 30: every number carries
+ * a unit of the field's quantity, the units get smaller from left to right
+ * and nothing but spaces, a comma or "and" sits between them. Null otherwise.
+ */
+function compoundValue(text: string, tokens: NumericToken[], readings: Reading[], unit: Unit): number | null {
+  if (readings.length < 2 || unit.toBase === undefined) return null;
+  let base = 0;
+  for (let i = 0; i < readings.length; i++) {
+    const u = readings[i].unit;
+    if (!u || u.dim !== unit.dim || u.toBase === undefined || readings[i].value < 0) return null;
+    if (i > 0) {
+      const prev = readings[i - 1].unit as Unit;
+      if ((prev.toBase as number) <= u.toBase) return null;
+      if (!COMPOUND_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start).replace(/^\s*\p{L}+\.?/u, ''))) return null;
+    }
+    base += readings[i].value * u.toBase;
+  }
+  const printed = tokens.map((t) => t.text).join('');
+  return convertUnit(base, printed, { id: 'base', dim: unit.dim, toBase: 1 }, unit);
 }
 
 function readToken(text: string, token: NumericToken, integer: boolean, ctx: NormalizeContext): Reading | null | 'ambiguous' {
@@ -300,6 +338,8 @@ function readToken(text: string, token: NumericToken, integer: boolean, ctx: Nor
 
 /** "4.5 out of 5", "4/5", "3 of 5 stars": the first number is the value. */
 function isRatingScale(text: string, [value, scale]: NumericToken[]): boolean {
+  // "128/256GB" is two capacities, not 128 out of 256.
+  if (unitAfter(text.slice(scale.end, scale.end + 12))) return false;
   const between = text.slice(value.end, scale.start).trim().toLowerCase();
   if (between !== 'out of' && between !== 'of' && between !== '/') return false;
   const a = parseLocaleNumber(value.text);

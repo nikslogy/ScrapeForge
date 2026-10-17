@@ -211,3 +211,46 @@ describe('no-value markers and star glyphs, more forms', () => {
     expect(normalized('⭐️⭐️⭐️☆☆', spec('rating', 'number'))).toMatchObject({ ok: true, value: 3 });
   });
 });
+
+// After the second review round.
+describe('separators that are not ranges, and compound quantities', () => {
+  it.each([
+    ['Apple iPhone 15 - 128 GB - Black', spec('storageGb', 'integer'), 128],
+    ['SanDisk Ultra USB 3.0 - 64GB', spec('storageGb', 'integer'), 64],
+    ['Apple Watch Series 9 - 45mm - Midnight', spec('caseSizeMm', 'number'), 45],
+    ['PlayStation 5 - 825 GB', spec('storageGb', 'integer'), 825],
+    ['EU 42 / 27 cm', spec('lengthCm', 'number'), 27],
+  ])('%s: a spaced hyphen or slash separates, the value is the one with the unit', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it.each([
+    ['128/256GB', spec('storageGb', 'integer')],
+    ['64/128 GB', spec('storageGb', 'integer')],
+    ['-5 to -10 kg', spec('weightKg', 'number')],
+    ['2 – 3 kg', spec('weightKg', 'number')],
+  ])('%s is several values (not "a out of b", not the last one)', (raw, field) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+
+  it('a rating scale without a unit is still a rating', () => {
+    expect(normalized('4.5/5', spec('rating', 'number'))).toMatchObject({ ok: true, value: 4.5 });
+  });
+
+  it.each([
+    ['10 h 30 min', spec('batteryLifeMin', 'integer'), 630],
+    ['1 hr, 5 min', spec('durationMin', 'integer'), 65],
+    ['2 kg 500 g', spec('weightKg', 'number'), 2.5],
+    ['105 ft 3 in', spec('length', 'number', 'Length in meters'), 32.08],
+    [`LOA: 112' 6"`, spec('lengthFt', 'number'), 112.5],
+  ])('%s is one quantity', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it('a weight field keeps pounds even when its description mentions a cost; a money name never takes lb', () => {
+    expect(fieldUnit(spec('shippingWeightLb', 'number', 'Shipping weight, used for the shipping cost'))?.id).toBe('lb');
+    expect(fieldUnit(spec('netAmount', 'number', 'Net amount in pounds'))).toBeUndefined();
+    expect(fieldUnit(spec('videoLengthMin', 'integer'))?.id).toBe('min');
+    expect(fieldUnit(spec('lengthMin', 'number'))).toBeUndefined();
+  });
+});
