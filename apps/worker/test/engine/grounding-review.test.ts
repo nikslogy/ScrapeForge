@@ -229,3 +229,64 @@ describe('after the second review round', () => {
     expect(reasonAt(out, '/items/0/inStock')).toBe('rejected_ungrounded');
   });
 });
+
+describe('after the third review round', () => {
+  const listSchema = (props: Record<string, string>) => ({
+    type: 'object',
+    properties: { items: { type: 'array', items: { type: 'object', properties: Object.fromEntries(Object.entries(props).map(([k, t]) => [k, { type: t }])) } } },
+  });
+  const tableId = (html: string) => buildSourceDocument(html, 'https://shop.example/').blocks.find((b) => b.kind === 'table')!.id;
+
+  it("a card's stock class neither confirms nor contradicts another yes/no field (has5g, freeShipping)", async () => {
+    const cards: Array<[string, boolean, boolean, boolean]> = [
+      ['Alpha', true, false, true],
+      ['Beta', false, true, false],
+      ['Gamma', true, true, false],
+      ['Delta', false, false, true],
+    ];
+    const html =
+      '<html><body><main><h1>Phones</h1><ul class="products">' +
+      cards
+        .map(([n, stock, g5, ship], i) =>
+          `<li class="product type-product post-${i} status-publish ${stock ? 'instock' : 'outofstock'} purchasable"><h2>${n}</h2>` +
+          `<dl><dt>5G</dt><dd class="spec-5g">${g5 ? 'Yes' : 'No'}</dd><dt>Free shipping</dt><dd class="spec-ship">${ship ? 'Yes' : 'No'}</dd></dl></li>`,
+        )
+        .join('') +
+      '</ul></main></body></html>';
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    // The nth Yes/No cell of the card.
+    const cell = (name: string, nth: number) => {
+      const from = doc.blocks.findIndex((b) => b.text === name);
+      return doc.blocks.slice(from + 1).filter((b) => b.text === 'Yes' || b.text === 'No')[nth]!.id;
+    };
+    const out = await run(
+      html,
+      listSchema({ name: 'string', has5g: 'boolean', freeShipping: 'boolean' }),
+      cards.map(([n, , g5, ship]) => ({ name: { v: n, b: blockWith(doc, n) }, has5g: { v: g5, b: cell(n, 0) }, freeShipping: { v: ship, b: cell(n, 1) } })),
+    );
+    expect(out.data).toMatchObject({ items: cards.map(([n, , g5, ship]) => ({ name: n, has5g: g5, freeShipping: ship })) });
+    // The stock class still speaks to a stock field: Beta is out of stock.
+    const stock = await run(html, listSchema({ name: 'string', inStock: 'boolean' }), [{ name: { v: 'Beta', b: blockWith(doc, 'Beta') }, inStock: { v: true, b: blockWith(doc, 'Beta') } }]);
+    expect(reasonAt(stock, '/items/0/inStock')).toBe('rejected_ungrounded');
+  });
+
+  it.each([
+    ['<th>', (l: string, v: string) => `<tr><th>${l}</th><td>${v}</td></tr>`],
+    ['<td>', (l: string, v: string) => `<tr><td>${l}</td><td>${v}</td></tr>`],
+  ])('a header-less two-column spec table (%s labels): the first row is a spec, not the header', async (_kind, row) => {
+    const page = (rows: Array<[string, string]>) => `<html><body><main><h1>Nova X1</h1><table><tbody>${rows.map(([l, v]) => row(l, v)).join('')}</tbody></table></main></body></html>`;
+    const schema = { type: 'object', properties: { has5g: { type: 'boolean' }, nfc: { type: 'boolean' }, model: { type: 'string' }, rating: { type: 'number' } } };
+
+    const specs = page([['5G', 'Yes'], ['NFC', 'No'], ['Wireless charging', 'No']]);
+    const t = tableId(specs);
+    const a = await run(specs, schema, [{ has5g: { v: true, b: t }, nfc: { v: false, b: t } }]);
+    expect(a.data).toMatchObject({ has5g: true, nfc: false });
+    const wrong = await run(specs, schema, [{ has5g: { v: false, b: t } }]);
+    expect(reasonAt(wrong, '/has5g')).toBe('rejected_ungrounded');
+
+    const rated = page([['Rating', 'Four stars'], ['Model', 'Nova X1'], ['Battery', '5000 mAh']]);
+    const r = tableId(rated);
+    const b = await run(rated, schema, [{ model: { v: 'Nova X1', b: r }, rating: { v: 4, b: r } }]);
+    expect(b.data).toMatchObject({ model: 'Nova X1', rating: 4 });
+  });
+});

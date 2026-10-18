@@ -243,3 +243,76 @@ describe('records alone, re-asks, fallbacks and the cost gate', () => {
     expect(got).toEqual([...got].sort((a, b) => a - b));
   });
 });
+
+// After the third review round.
+describe('records alone against the size of the page, a stray record, a cheaper fallback', () => {
+  it('a grid whose cards never name the fields, below a long intro, is sent as the records alone', async () => {
+    const list = items(40);
+    const cards = list
+      .map((it, i) => `<div class="rounded-lg border p-4 shadow-sm"><h3 class="text-lg font-semibold"><a href="/p/${i}">${it.title}</a></h3><span class="text-gray-900 font-bold">${it.price}</span></div>`)
+      .join('');
+    const intro = Array.from({ length: 60 }, (_, i) => `<p>Story ${i}: ${'Our team has been building gadgets in a small workshop since 1998, and every one is tested by hand before it leaves. '.repeat(3)}</p>`).join('');
+    const html = page(`<main><h1>All gadgets</h1>${intro}<div class="grid grid-cols-4 gap-4">${cards}</div></main>`, '<title>All gadgets</title>');
+    const { client } = fakeClient(listingModel, { maxOutputTokens: 4_096, contextTokens: 8_000 });
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.status).toBe('complete');
+    expect(len(out.data, 'items')).toBe(40);
+  });
+
+  it('a grid below a mega-menu whose columns are headed "Sale" and "Shop by price" is sent as the records alone', async () => {
+    const menu = ['Sale', 'Shop by price', 'Sale picks', 'Price drops']
+      .map((h, c) => `<div class="menu-col"><h4>${h}</h4><ul>${Array.from({ length: 60 }, (_, i) => `<li><a href="/c/${c}-${i}">Category ${c}-${i} under $${10 + i}</a></li>`).join('')}</ul></div>`)
+      .join('');
+    const html = listing(items(40), { priceClass: 'price price-item' }).replace('<header>', `<header><nav class="mega-menu">${menu}</nav>`);
+    const { client } = fakeClient(listingModel, { maxOutputTokens: 4_096, contextTokens: 8_000 });
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(len(out.data, 'items')).toBe(40);
+    expect(out.status).toBe('complete');
+  });
+
+  it.each(['empty', 'bare'] as const)('one stray record (%s) in a short answer does not stop the re-ask of the cards it left out', async (variant) => {
+    const lazy: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Sync;
+      if (cardsIn(req.user) < 100) return r;
+      const parsed = JSON.parse(r.text) as { records: Array<Record<string, { v: unknown; b: unknown }>> };
+      const kept: unknown[] = parsed.records.slice(0, Math.floor(parsed.records.length * 0.7));
+      if (variant === 'empty') kept.push({ title: { v: null, b: null }, price: { v: null, b: null } });
+      else {
+        const last = parsed.records[kept.length - 1];
+        kept[kept.length - 1] = { title: last.title.v, price: last.price.v };
+      }
+      return { ...r, text: JSON.stringify({ records: kept }) };
+    };
+    const { client } = fakeClient(lazy, { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(items(400)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    const titles = (out.data as { items: Array<{ title: string | null }> }).items.map((r) => r.title).filter(Boolean);
+    expect(new Set(titles).size).toBe(400);
+    expect(out.status).toBe('complete');
+  });
+
+  it('a chunk the primary model cannot pay for, but a cheaper fallback can, is sent: the client picks the model', async () => {
+    const calls = { primary: 0, cheap: 0 };
+    const pricey = new FakeProvider((caps, req, i) => {
+      calls.primary++;
+      return billed(listingModel)(caps, req, i);
+    });
+    const cheap = new FakeProvider((caps, req, i) => {
+      calls.cheap++;
+      return billed(listingModel)(caps, req, i);
+    }, 'openrouter');
+    const client = new ModelClient({
+      models: [
+        fakeCaps({ maxOutputTokens: 8_192, contextTokens: 128_000, inputCostPerMTok: 1_000, outputCostPerMTok: 1_000 }),
+        fakeCaps({ provider: 'openrouter', model: 'cheap', maxOutputTokens: 8_192, contextTokens: 128_000, inputCostPerMTok: 10, outputCostPerMTok: 10 }),
+      ],
+      providers: { fake: pricey, openrouter: cheap },
+      breaker: new CircuitBreaker(),
+      sleep: async () => undefined,
+    });
+    const out = await extractStructured(request(listing(items(800)), LISTING_SCHEMA, { url: LISTING_URL, maxCostUsd: 2 }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.status).toBe('complete');
+    expect(len(out.data, 'items')).toBe(800);
+    expect(out.llm.costUsd).toBeLessThanOrEqual(2);
+    expect(calls.cheap).toBeGreaterThan(0);
+  });
+});

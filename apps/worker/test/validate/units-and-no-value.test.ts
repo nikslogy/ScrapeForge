@@ -254,3 +254,29 @@ describe('separators that are not ranges, and compound quantities', () => {
     expect(fieldUnit(spec('lengthMin', 'number'))).toBeUndefined();
   });
 });
+
+describe('after the third review round: spaced ranges and values printed twice', () => {
+  it.each([
+    ['8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['Battery life: 8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['Up to 8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['5 - 10 kg', spec('weightKg', 'number')],
+    ['Weight: 1.2 - 1.5 kg', spec('weightKg', 'number')],
+    ['64 / 128 GB', spec('storageGb', 'integer')],
+  ])('%s: a spaced hyphen or slash between bare quantities is a range, not the upper bound', (raw, field) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+
+  it.each([
+    ['1.4 kg, 3.09 lb', spec('weightKg', 'number'), 1.4],
+    ['1.4 kg 3.09 lb', spec('weightKg', 'number'), 1.4],
+    ['15.6 inches 39.6 cm', spec('screenCm', 'number'), 39.6],
+    ['15.6 inches, 39.6 cm', spec('screenCm', 'number'), 39.6],
+  ])('%s: one value in two unit systems is not summed', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it('a part as large as the unit before it is not a part ("2 h 90 min")', () => {
+    expect(normalized('2 h 90 min', spec('durationMin', 'integer'))).not.toMatchObject({ ok: true, value: 210 });
+  });
+});

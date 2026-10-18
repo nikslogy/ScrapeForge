@@ -248,17 +248,30 @@ function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], u
 
 // Between numbers that one trailing unit covers:
 // - a size: "31.2 x 22.1 x 1.5 cm";
-// - a range or variants, ascending: "2-3 kg", "2 – 3 kg", "128/256/512 GB";
+// - a range or variants, ascending: "2-3 kg", "8 - 10 hours", "2 – 3 kg",
+//   "128/256/512 GB", "64 / 128 GB";
 // - a range in words: "5 to 7 kg", "-5 to -10 °C", "8 or 16 GB".
-// A spaced hyphen or slash is a separator ("iPhone 15 - 128 GB", "EU 42 / 27 cm").
+// A spaced hyphen or slash right after a product's own number is a title
+// separator, not a range: "iPhone 15 - 128 GB", "USB 3.0 - 64GB", "EU 42 / 27 cm".
 const TIMES_JOINER = /^\s*[x×*]\s*$/iu;
 const ASCENDING_JOINER = /^(?:[-‐‑/]|\s*[‒–—]\s*)$/u;
+const SPACED_JOINER = /^\s+[-‐‑/]\s+$/u;
 const WORD_JOINER = /^\s+(?:to|and|or|bis)\s+[-−]?$/iu;
+// Words that introduce a quantity: "up to 8 - 10 hours" is a range.
+const QUANTITY_WORDS = new Set(['to', 'from', 'about', 'approx', 'approximately', 'around', 'ca', 'circa', 'between', 'of', 'is', 'are', 'was', 'up']);
 
-function joinsUnitSequence(between: string, left: NumericToken, right: NumericToken, a: number, b: number): boolean {
+/** Whether the number starting at `start` follows a word that names a product ("iPhone 15", "Series 9", "EU 42"). */
+function followsName(text: string, start: number): boolean {
+  const word = /([\p{L}][\p{L}\d.]*)\s+$/u.exec(text.slice(Math.max(0, start - 40), start));
+  return word !== null && !QUANTITY_WORDS.has(word[1].toLowerCase().replace(/\.$/, ''));
+}
+
+function joinsUnitSequence(text: string, between: string, left: NumericToken, right: NumericToken, a: number, b: number): boolean {
   if (TIMES_JOINER.test(between)) return true;
   if (WORD_JOINER.test(between)) return !/[-−]$/.test(between) || right.negative;
-  return ASCENDING_JOINER.test(between) && !right.negative && a <= b;
+  if (right.negative || a > b) return false;
+  if (ASCENDING_JOINER.test(between)) return true;
+  return SPACED_JOINER.test(between) && !followsName(text, left.start);
 }
 /** "6 x 330 ml": a pack of six, whose unit size is the value. Not for lengths ("60 x 90 cm" is a size). */
 const MAX_PACK_COUNT = 24;
@@ -273,7 +286,7 @@ function spreadUnits(text: string, tokens: NumericToken[], readings: Reading[], 
     const next = out[i + 1].unit;
     if (out[i].unit || !next || out[i].steps.includes('scale-suffix')) continue;
     const between = text.slice(tokens[i].end, tokens[i + 1].start);
-    if (!joinsUnitSequence(between, tokens[i], tokens[i + 1], out[i].value, out[i + 1].value)) continue;
+    if (!joinsUnitSequence(text, between, tokens[i], tokens[i + 1], out[i].value, out[i + 1].value)) continue;
     const pack =
       TIMES_JOINER.test(between) &&
       field.dim !== 'length' &&
@@ -291,11 +304,22 @@ function spreadUnits(text: string, tokens: NumericToken[], readings: Reading[], 
 
 // Between the parts of one quantity: "10 h 30 min", "2 kg 500 g", "1 hr, 5 min".
 const COMPOUND_JOINER = /^\s*(?:,|and)?\s*$/iu;
+// Units whose parts are written together. Mixed systems are a value printed
+// twice ("1.4 kg, 3.09 lb", "15.6 inches 39.6 cm"), not parts.
+const UNIT_SYSTEM: Readonly<Record<string, string>> = {
+  h: 'time', min: 'time', s: 'time',
+  mi: 'imperial-length', ft: 'imperial-length', in: 'imperial-length',
+  lb: 'imperial-mass', oz: 'imperial-mass',
+  kg: 'metric-mass', g: 'metric-mass', mg: 'metric-mass',
+  km: 'metric-length', m: 'metric-length', cm: 'metric-length', mm: 'metric-length',
+};
 
 /**
  * "10 h 30 min" for a field in minutes is 630, not 30: every number carries
- * a unit of the field's quantity, the units get smaller from left to right
- * and nothing but spaces, a comma or "and" sits between them. Null otherwise.
+ * a unit of the field's quantity and of one system, the units get smaller
+ * from left to right, each part is less than one of the unit before it
+ * (30 min < 1 h), and nothing but spaces, a comma or "and" sits between
+ * them. Null otherwise.
  */
 function compoundValue(text: string, tokens: NumericToken[], readings: Reading[], unit: Unit): number | null {
   if (readings.length < 2 || unit.toBase === undefined) return null;
@@ -306,6 +330,8 @@ function compoundValue(text: string, tokens: NumericToken[], readings: Reading[]
     if (i > 0) {
       const prev = readings[i - 1].unit as Unit;
       if ((prev.toBase as number) <= u.toBase) return null;
+      if (UNIT_SYSTEM[prev.id] === undefined || UNIT_SYSTEM[prev.id] !== UNIT_SYSTEM[u.id]) return null;
+      if (readings[i].value * u.toBase >= (prev.toBase as number)) return null;
       if (!COMPOUND_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start).replace(/^\s*\p{L}+\.?/u, ''))) return null;
     }
     base += readings[i].value * u.toBase;

@@ -136,6 +136,8 @@ const SPLIT_CATEGORIES: ReadonlySet<LlmErrorCategory> = new Set(['output_truncat
 const DEFAULT_PARTITION_CONCURRENCY = 4;
 /** Unprocessed record ranges named in the list-level missing detail. */
 const MAX_REPORTED_GAPS = 5;
+/** Share of a short answer's records that must cite a card of the chunk for its left-out cards to be asked again. */
+const REASK_MIN_PLACED = 0.8;
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -336,10 +338,12 @@ function tableIndex(block: SourceBlock): TableIndex | null {
   let rows: ReadonlyArray<readonly string[]>;
   if (block.table) {
     rows = block.table.rows.slice(0, MAX_TABLE_ROWS);
-    // A header row of plain <td> cells is parsed as the first body row: its
-    // cells name the columns all the same. It stays a row for the lookups by
-    // value (an answer's own values never equal a column name).
-    header = block.table.headers.length > 0 ? block.table.headers : (rows[0] ?? []);
+    // A header row of plain <td> cells is parsed as the first body row: in a
+    // table of three or more columns its cells name the columns all the
+    // same. (In a two-column table the first row is usually a "Spec | Value"
+    // pair, not a header.) It stays a row for the lookups by value.
+    const wide = rows.some((cells) => cells.length > 2);
+    header = block.table.headers.length > 0 ? block.table.headers : wide ? (rows[0] ?? []) : [];
   } else {
     // A table block without its parsed grid: the rendered "a | b | c" lines, first one the header.
     const lines = block.text
@@ -379,12 +383,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
 function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpec): string[] | null {
   const t = tableIndex(block);
   if (!t) return null;
-  let col = t.columns.get(field.name);
-  if (col === undefined) {
-    col = columnFor(t.header, field);
-    t.columns.set(field.name, col);
-  }
-  if (col < 0 && t.keyValue) {
+  if (t.keyValue) {
     let named = t.labels.get(field.name);
     if (named === undefined) {
       named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
@@ -392,6 +391,11 @@ function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpe
     }
     if (named >= 0) return [t.rows[named][1] ?? ''];
     // No label names the field: a two-column listing ("Part | Availability"), read by its rows.
+  }
+  let col = t.columns.get(field.name);
+  if (col === undefined) {
+    col = columnFor(t.header, field);
+    t.columns.set(field.name, col);
   }
   // Values printed in several rows ("Acme" for a brand) say nothing about which row.
   const votes = new Map<number, number>();
@@ -449,6 +453,9 @@ function isDistinctiveNumber(value: number): boolean {
 
 /** Attribute values that read as yes/no or as a small count whatever the attribute means (data-index="0", data-quantity="1"). */
 const BARE_ATTR_VALUE = /^(?:[+-]?\d+(?:[.,]\d+)?|true|false|yes|no|y|n|on|off)$/i;
+/** A yes/no field about availability: a card's stock class ("instock", "outofstock") speaks to it, and to no other field. */
+const AVAILABILITY_FIELD = /stock|avail|sold|backorder|pre-?order|purchasab|buyable/i;
+
 /** Attributes that carry the value of the attribute naming them (itemprop="ratingValue" content="4.5"). */
 const VALUE_ATTRS = new Set(['content', 'value', 'datetime']);
 /** Words that tell yes/no fields apart from the thing they are about ("hasWarranty" → "warranty"). */
@@ -1220,28 +1227,41 @@ class ExtractionRun {
   }
 
   /**
-   * Whether `group`'s records match the fields at least as well as the
-   * rest of what a top-of-page rendering would send (BM25 over the field
-   * names, descriptions and related words; see document/select.ts).
+   * Whether `group`'s records are what the fields are about: no table, and
+   * no record of another group, that a top-of-page rendering would send
+   * matches them better than the group's best record (BM25 over the field
+   * names, descriptions and related words; see document/select.ts). Sums
+   * over the whole top are not compared: a long menu outscores any grid by
+   * its size alone. When nothing on the page names the fields, the largest
+   * group is what the page lists.
    */
   private groupMatchesFields(group: RecordGroup, fields: FieldSpec[], topIds: readonly string[]): boolean {
     const scores = scoreBlocks(this.doc, queryTerms(fields));
-    const inGroup = new Set(group.recordIds);
     const index = new Map(this.doc.blocks.map((b, i) => [b.id, i]));
-    const belongs = (i: number): boolean => {
-      const b = this.doc.blocks[i];
-      return inGroup.has(b.id) || (b.parentId !== undefined && inGroup.has(b.parentId));
-    };
-    let groupScore = 0;
-    this.doc.blocks.forEach((_, i) => {
-      if (belongs(i)) groupScore += scores[i];
+    const groupOf = new Map<string, string>();
+    for (const b of this.doc.blocks) if (b.kind === 'record' && b.recordGroupId) groupOf.set(b.id, b.recordGroupId);
+    const recordOf = (b: SourceBlock): string | undefined => (groupOf.has(b.id) ? b.id : b.parentId !== undefined && groupOf.has(b.parentId) ? b.parentId : undefined);
+    // A record's score: its own block and the blocks inside it.
+    const recordScore = new Map<string, number>();
+    this.doc.blocks.forEach((b, i) => {
+      const r = recordOf(b);
+      if (r !== undefined) recordScore.set(r, (recordScore.get(r) ?? 0) + scores[i]);
     });
-    let topScore = 0;
+    let best = 0;
+    for (const id of group.recordIds) best = Math.max(best, recordScore.get(id) ?? 0);
+    let rival = 0;
     for (const id of topIds) {
       const i = index.get(id);
-      if (i !== undefined && !belongs(i)) topScore += scores[i];
+      if (i === undefined) continue;
+      const b = this.doc.blocks[i];
+      const r = recordOf(b);
+      if (r !== undefined) {
+        if (groupOf.get(r) !== group.id) rival = Math.max(rival, recordScore.get(r) ?? 0);
+      } else if (b.kind === 'table') {
+        rival = Math.max(rival, scores[i]);
+      }
     }
-    return groupScore > 0 && groupScore >= topScore;
+    return rival <= best;
   }
 
   private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
@@ -1273,7 +1293,14 @@ class ExtractionRun {
       // The answer as estimated from the cards themselves (max_tokens adds headroom on top).
       const answer = Math.min(tokens, Math.ceil(perRecordAnswer * cards.length));
       const worstUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, tokens));
-      const plannedUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, answer));
+      // Alone, a chunk is skipped only when no configured model could pay
+      // for its planned answer: the client moves on to a cheaper fallback
+      // when the primary is too dear.
+      let plannedUsd = worstCaseUsd(call.primary, inputTokens, requestedOutputTokens(call.primary, answer));
+      for (const m of call.client.models) {
+        const out = requestedOutputTokens(m, answer);
+        if (out >= answer && inputTokens + out <= m.contextTokens) plannedUsd = Math.min(plannedUsd, worstCaseUsd(m, inputTokens, out));
+      }
       return { rendered, tooBig, tokens, answer, worstUsd, plannedUsd };
     };
     const splittable = (chunk: Chunk): boolean => cardsOf(chunk).length > 1 && chunk.depth < MAX_CHUNK_SPLITS;
@@ -1372,9 +1399,9 @@ class ExtractionRun {
         if (!prepared.tooBig) {
           // Under a cost cap, a chunk the cap cannot cover next to the calls in flight waits for them.
           if (running.size > 0 && call.budget.remainingUsd() < prepared.worstUsd) break;
-          // Alone, and what is left cannot pay for its planned answer: a cut-off
-          // (billed) answer would follow. Half as many cards may fit; a chunk
-          // that cannot be made smaller is skipped, with the rest.
+          // Alone, and what is left cannot pay for its planned answer on any
+          // model: a cut-off (billed) answer would follow. Half as many cards
+          // may fit; a chunk that cannot be made smaller is skipped, with the rest.
           if (running.size === 0 && call.budget.remainingUsd() < prepared.plannedUsd) {
             queue.shift();
             if (splittable(chunk)) {
@@ -1480,17 +1507,20 @@ class ExtractionRun {
 
   /**
    * The cards of a chunk that no record of its answer cites (any of a
-   * record's cells), or null when some record cites no card of the chunk:
-   * then the answer cannot be placed, and nothing is asked again.
+   * record's cells), or null when too many records cite no card of the
+   * chunk to tell what the answer covered: nothing is asked again then.
    */
   private uncoveredCards(records: ParsedRecord[], cards: readonly string[], fields: FieldSpec[]): string[] | null {
     const inChunk = new Set(cards);
     const covered = new Set<string>();
+    let unplaced = 0;
     for (const r of records) {
       const cited = [...this.citedCards(r, fields)].filter((id) => inChunk.has(id));
-      if (cited.length === 0) return null;
+      // A stray record (an empty one for a promo tile, bare values) stands for one card at most.
+      if (cited.length === 0) unplaced++;
       for (const id of cited) covered.add(id);
     }
+    if (unplaced > records.length * (1 - REASK_MIN_PLACED)) return null;
     return cards.filter((id) => !covered.has(id));
   }
 
@@ -1860,7 +1890,9 @@ class ExtractionRun {
    * value is accepted only when one of them converts to exactly the same
    * value, and, for a yes/no field, none of them to the opposite. A bare
    * "0", "1" or "true" in an attribute (data-index, data-quantity) counts,
-   * either way, only when the attribute is named for the field. Strings never take this path: their
+   * either way, only when the attribute is named for the field. A yes/no
+   * field reads only attributes named for it, plus the card's stock words
+   * when the field is about availability. Strings never take this path: their
    * meaning is too loose to compare. Returns a note for the evidence, or null.
    */
   private matchByMeaning(field: FieldSpec, raw: unknown, ctx: BlockContext, keys: readonly string[] = []): string | null {
@@ -1870,14 +1902,19 @@ class ExtractionRun {
     // A whole table cited: only the cells that can hold this answer's value, when the table says which.
     const cells = ctx.block.kind === 'table' ? tableCells(ctx.block, keys, field) : null;
     const candidates: string[] = [...(cells ?? textPieces(ctx.block.text))];
+    // A yes/no field reads attributes named for it ("data-in-stock") and, if
+    // it is about availability, the card's stock words ("outofstock"). A stock
+    // class says nothing about has5g or freeShipping, either way.
+    const availability = field.type === 'boolean' && AVAILABILITY_FIELD.test(`${field.name} ${field.description ?? ''}`.slice(0, 500));
     const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
     for (const attrs of attrSets) {
       for (const [name, value] of Object.entries(attrs)) {
         // Links and image paths hold digits that mean nothing ("/3f/c6/…").
         if (MEANING_SKIP_ATTRS.has(name) || /[/\\=?&#]|:\/\//.test(value)) continue;
         // A bare "0"/"1"/"true" says something only in an attribute named for
-        // the field; a word ("outofstock", "sold-out") says it anywhere.
+        // the field; a word ("outofstock", "sold-out") also in any other.
         const named = attrNamesField(name, attrs, field);
+        if (field.type === 'boolean' && !named && !availability) continue;
         if (named || !BARE_ATTR_VALUE.test(value.trim())) candidates.push(value);
         // Class lists carry one token per fact ("star-rating Three").
         if (/\s/.test(value)) {
