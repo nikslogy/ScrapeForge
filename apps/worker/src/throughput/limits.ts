@@ -159,8 +159,11 @@ export interface AcquireOptions {
   signal?: AbortSignal;
   /** Who is asking: slots are shared fairly between tenants waiting for one site. */
   tenant?: string;
-  /** When the lease expires if never released (default: the wait deadline). */
-  leaseUntil?: number;
+  /**
+   * The lease expires this long after it is granted unless renewed,
+   * whatever the wait deadline (default: it expires at the wait deadline).
+   */
+  leaseTtlMs?: number;
 }
 
 export class DomainLimiter {
@@ -183,8 +186,8 @@ export class DomainLimiter {
 
   /**
    * Waits for a slot for `url`'s site until `deadlineMs`; the lease expires
-   * at `leaseUntil` (default the deadline) at the latest. Returns its
-   * release. With the limit off, an unparseable URL, or a store failure, it
+   * `leaseTtlMs` after the grant (default: at the deadline) unless renewed.
+   * Returns its release. With the limit off, an unparseable URL, or a store failure, it
    * returns at once: a limiter never fails a job. Rejects only if `signal`
    * aborts or the deadline passes while waiting.
    */
@@ -195,12 +198,13 @@ export class DomainLimiter {
     // "|" separates the tenant from the token in a lease.
     const tenant = (opts.tenant ?? '').replace(/\|/g, '_') || '-';
     const member = `${tenant}|${process.pid}:${++this.#seq}:${Math.random().toString(36).slice(2)}`;
-    const leaseUntil = Math.ceil(Math.max(deadlineMs, opts.leaseUntil ?? deadlineMs));
     for (;;) {
       if (signal?.aborted) throw signal.reason;
       const now = this.#now();
       if (now >= deadlineMs) throw new DomainBusyError(url);
       let granted: unknown;
+      // Counted from this try: a slot granted late in the wait still lives its full TTL.
+      const leaseUntil = Math.ceil(opts.leaseTtlMs !== undefined ? now + opts.leaseTtlMs : deadlineMs);
       try {
         granted = await this.#kv.eval(ACQUIRE, 2, key, `${key}:waiting`, now, this.#limit, leaseUntil, member, tenant, now + this.#waitTtlMs);
       } catch {

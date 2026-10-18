@@ -285,12 +285,37 @@ describe('per-site fetch limit', () => {
     await long();
   });
 
-  it('a lease may outlive the wait deadline (leaseUntil) for fetches still running after it', async () => {
+  it('a lease with a TTL outlives the wait deadline for fetches still running after it', async () => {
     const limiter = new DomainLimiter(kv(), { limit: 1, pollMs: 10 });
     const host = `tail-${Math.random().toString(36).slice(2)}.example`;
-    await limiter.acquire(`https://${host}/`, Date.now() + 50, { leaseUntil: Date.now() + 5_000 });
+    await limiter.acquire(`https://${host}/`, Date.now() + 50, { leaseTtlMs: 5_000 });
     await sleep(120);
     await expect(limiter.acquire(`https://${host}/`, Date.now() + 100)).rejects.toBeInstanceOf(DomainBusyError);
+  });
+
+  it('a lease with a TTL is counted from its grant: granted late in a long wait, it still lives its TTL', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 1, pollMs: 10 });
+    const host = `late-${Math.random().toString(36).slice(2)}.example`;
+    const hold = await limiter.acquire(`https://${host}/`, Date.now() + 5_000);
+    const deadline = Date.now() + 400;
+    const late = limiter.acquire(`https://${host}/`, deadline, { leaseTtlMs: 2_000 });
+    await sleep(300);
+    await hold();
+    await late; // granted ~100 ms before its wait deadline
+    await sleep(Math.max(0, deadline - Date.now()) + 200);
+    // Past the wait deadline, inside the TTL: the slot is still held.
+    await expect(limiter.acquire(`https://${host}/`, Date.now() + 100)).rejects.toBeInstanceOf(DomainBusyError);
+  });
+
+  it('a crashed holder\'s lease with a TTL expires that long after its grant, not at a far wait deadline', async () => {
+    const limiter = new DomainLimiter(kv(), { limit: 1, pollMs: 10 });
+    const host = `ttl-crash-${Math.random().toString(36).slice(2)}.example`;
+    await limiter.acquire(`https://${host}/`, Date.now() + 120_000, { leaseTtlMs: 150 }); // never released nor renewed
+    expect(await redis.pttl(domainKey(`https://${host}/`)!)).toBeLessThanOrEqual(150);
+    const t0 = Date.now();
+    const release = await limiter.acquire(`https://${host}/`, Date.now() + 2_000);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    await release();
   });
 
   it('shares a busy site between tenants: one holding its share waits while another tenant waits', async () => {

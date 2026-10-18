@@ -167,10 +167,13 @@ const PLAIN_ERROR_MIN_TEXT_CHARS = 1;
 /** Bot-defence vendors whose challenge comes as a 429 or 5xx (Kasada answers 429 with its ips.js loader). */
 const CHALLENGE_SIGNATURE = /\bKPSDK\b|\/ips\.js\b|_Incapsula_Resource|cdn-cgi\/challenge-platform|captcha-delivery\.com|\bpx-captcha\b|\/_sec\/cp_challenge/i;
 
-/** Visible text of a small HTML body (scripts, styles and tags removed). */
+/**
+ * Text a small HTML body prints: the <head> (and its <title>), <noscript>,
+ * scripts, styles and tags removed. A loader titled "Loading" prints nothing.
+ */
 function visibleTextLength(html: string): number {
   return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<(head|title|noscript|script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim().length;
@@ -943,7 +946,7 @@ export class SmartRouter {
       const a = await this.attempt(c, 3, fetch3);
       if (a.kind === 'response' && a.ok) return { ...a.r, tierUsed: 3, ...proxyMeta };
       // The site is failing for this browser too: the same rule as the HTTP tiers.
-      if (a.kind === 'response' && isTransientClass(a.cls)) {
+      if (a.kind === 'response' && isTransientClass(a.cls) && !toLearned(3, a.cls)) {
         const t = await this.retryTransient(c, 3, a.r, a.cls, fetch3);
         if (t.ok) return { ...t.r, tierUsed: 3, ...proxyMeta };
       }
@@ -968,8 +971,9 @@ export class SmartRouter {
       if (a.kind === 'response') {
         if (a.ok) return { ...a.r, tierUsed: 4, ...proxyMeta };
         // The site is failing or rate-limiting the browser too: the stealth
-        // tier would not fix it, and its error page is no result.
-        if (isTransientClass(a.cls)) {
+        // tier would not fix it, and its error page is no result. (On a
+        // re-probe below a learned T5, on to T5.)
+        if (isTransientClass(a.cls) && !toLearned(4, a.cls)) {
           const t = await this.retryTransient(c, 4, a.r, a.cls, fetch4);
           if (t.ok) return { ...t.r, tierUsed: 4, ...proxyMeta };
           t4Result = t.r;
@@ -1022,16 +1026,17 @@ export class SmartRouter {
       };
     }
 
-    // The site is failing for the stealth browser too: retryable, whatever
-    // an earlier tier was refused.
-    if (a5.kind === 'response' && isTransientClass(a5.cls)) throw this.exhausted(c, true);
-
     // Last-resort: return T4's body with a low quality flag baked in via
     // the quality scorer downstream, instead of throwing. This is what the
     // user wants 99% of the time (they already paid for the browser fetch,
     // returning empty markdown is strictly better than 500-ing the API).
-    // An error status is never a result.
+    // So it is returned even when T5 met a 5xx or 429. An error status is
+    // never a result.
     if (t4Result && !isErrorStatus(t4Result.statusCode)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+
+    // The site is failing for the stealth browser too, and T4 left no page:
+    // retryable, whatever an earlier tier was refused.
+    if (a5.kind === 'response' && isTransientClass(a5.cls)) throw this.exhausted(c, true);
     if (a5.kind === 'error' && a5.acquire && isPoolUnavailable(a5.error)) throw a5.error;
     if (t4Result) throw this.exhausted(c, hasChallengeSignature(t4Result.html, t4Result.headers) ? undefined : true);
 

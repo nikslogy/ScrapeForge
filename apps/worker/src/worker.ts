@@ -98,10 +98,11 @@ await browserPool.initialize();
 // Leaves room for structured extraction, which may finish a recipe run up to
 // ~1 s past its own deadline.
 const JOB_DEADLINE_MARGIN_MS = 2_000;
-// A site's fetch slot is renewed this often, for this long, while the router
-// is still at the site (an HTTP or Lightpanda fetch in flight cannot be
-// aborted at the job deadline). A crashed worker's slot expires at most this
-// long after its last renewal.
+// A site's fetch slot lives LEASE_RENEW_TTL_MS from its grant and is renewed
+// this often, for that long, while the router is still at the site (an HTTP
+// or Lightpanda fetch in flight cannot be aborted at the job deadline). A
+// crashed worker's slot expires at most that long after its grant or last
+// renewal, whatever the job's timeout.
 const LEASE_RENEW_MS = 5_000;
 const LEASE_RENEW_TTL_MS = 15_000;
 // A job that ends up doing the work itself after waiting for an identical
@@ -420,7 +421,7 @@ async function fetchPage(
       snapshotKey,
     };
   }
-  const lease = await domainLimiter.acquire(url, deadlineMs, { signal, tenant: userId });
+  const lease = await domainLimiter.acquire(url, deadlineMs, { signal, tenant: userId, leaseTtlMs: LEASE_RENEW_TTL_MS });
   // The slot is held until the router is done with the site, which may be
   // after the job deadline (an HTTP fetch in flight cannot be aborted): it is
   // renewed while the router runs.

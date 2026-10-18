@@ -1086,3 +1086,88 @@ describe('sections are bounded', () => {
     expect(redis.store.has(`domain:${DOMAIN}`)).toBe(true);
   });
 });
+
+describe('a failing site after the third review round', () => {
+  const quick = (redis = new FakeRedis(), random = () => 0.99) => {
+    const router = new SmartRouter(redis as unknown as Redis, vi.fn(async () => ({}) as BrowserContext), vi.fn(), {
+      now: () => T0, random, logger: { warn: vi.fn() }, sleep: async () => undefined,
+    });
+    return { router, redis };
+  };
+  const stats = (lastOk: boolean) => ({ ok: lastOk ? 5 : 0, total: 5, lastAt: T0, lastOkAt: lastOk ? T0 : undefined, lastOk });
+  async function failure(p: Promise<unknown>) {
+    const e = await p.then(() => { throw new Error('expected a failure'); }, (err: unknown) => err);
+    expect(e).toBeInstanceOf(TiersExhaustedError);
+    return e as InstanceType<typeof TiersExhaustedError>;
+  }
+  const NGINX503 = '<html>\r\n<head><title>503 Service Temporarily Unavailable</title></head>\r\n<body>\r\n<center><h1>503 Service Temporarily Unavailable</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n';
+  const NGINX429 = NGINX503.replace(/503 Service Temporarily Unavailable/g, '429 Too Many Requests');
+  // A valid page below the bar (a link-heavy results page).
+  const THIN =
+    `<!doctype html><html><head><title>Search results</title>${'<script src="/s.js"></script>'.repeat(10)}<style>${'.a{color:red}'.repeat(600)}</style></head>` +
+    `<body><header><nav>${Array.from({ length: 40 }, (_, i) => `<a href="/c/${i}">Category ${i}</a>`).join(' ')}</nav></header><div id="app"><main><h1>Results for widgets</h1>` +
+    `${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${i}">Widget model ${i}</a><span>$${10 + i}.99</span></div>`).join('')}</main></div>` +
+    `<footer>${Array.from({ length: 30 }, (_, i) => `<a href="/f/${i}">Footer link ${i}</a>`).join(' ')}</footer></body></html>`;
+
+  it.each([
+    ['503', NGINX503, 503],
+    ['429', NGINX429, 429],
+  ])("a %s at the stealth tier keeps T4's sub-bar page as the result", async (_label, body, code) => {
+    const { router } = quick();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(() => Promise.resolve(page(THIN)));
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(body, code)));
+    const r = await router.route(URL_, {});
+    expect(r).toMatchObject({ tierUsed: 4, statusCode: 200 });
+  });
+
+  it('Lightpanda on a re-probe below a learned T4 that meets a 503 goes on to T4', async () => {
+    const { router, redis } = quick(new FakeRedis(), () => 0);
+    m.isLightpandaConfigured.mockReturnValue(true);
+    redis.store.set(strategyKey(DOMAIN), JSON.stringify({ v: 2, requests: 5, tiers: { 1: stats(false), 2: stats(false), 4: stats(true) } }));
+    m.tier3Fetch.mockImplementation(() => Promise.resolve(page('<h1>503 Service Unavailable</h1><p>Back soon.</p>', 503)));
+    m.tier4Fetch.mockImplementation(ok);
+    const r = await router.route(URL_, {});
+    expect(r.tierUsed).toBe(4);
+    expect(m.tier3Fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('T4 on a re-probe below a learned T5 that meets a 503 goes on to T5', async () => {
+    const { router, redis } = quick(new FakeRedis(), () => 0);
+    redis.store.set(strategyKey(DOMAIN), JSON.stringify({ v: 2, requests: 5, tiers: { 1: stats(false), 2: stats(false), 4: { ...stats(false), lastAt: T0 - 48 * HOUR }, 5: stats(true) } }));
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(() => Promise.resolve(page('<h1>503 Service Unavailable</h1><p>Back soon.</p>', 503)));
+    m.tier4StealthFetch.mockImplementation(ok);
+    const r = await router.route(URL_, {});
+    expect(r.tierUsed).toBe(5);
+    expect(m.tier4Fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a silent scripted loader with a <title> or a <noscript> message is a challenge, not a server error: it reaches a browser', async () => {
+    for (const loader of [
+      '<html><head><title>Loading</title><script src="/challenge.js"></script></head><body><div id="c"></div></body></html>',
+      '<html><head><script src="/challenge.js"></script></head><body><noscript>Please enable JavaScript to continue.</noscript><div id="c"></div></body></html>',
+    ]) {
+      vi.resetAllMocks();
+      m.proxySelect.mockResolvedValue(null);
+      m.proxyEscalate.mockResolvedValue(null);
+      const { router } = quick();
+      m.tier1Fetch.mockImplementation(() => Promise.resolve(page(loader, 503)));
+      m.tier2Fetch.mockImplementation(() => Promise.resolve(page(loader, 503)));
+      m.tier4Fetch.mockImplementation(ok);
+      const r = await router.route(URL_, {});
+      expect(r.tierUsed).toBe(4);
+      expect(m.tier1Fetch).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("nginx's stock 503 page (it prints its message in the body) is still a server error: no browser", async () => {
+    const { router } = quick();
+    m.tier1Fetch.mockImplementation(() => Promise.resolve(page(NGINX503.replace('</body>', '<script src="/beacon.js"></script></body>'), 503)));
+    const e = await failure(router.route(URL_, {}));
+    expect(e.transient).toBe(true);
+    expect(m.tier4Fetch).not.toHaveBeenCalled();
+  });
+});
