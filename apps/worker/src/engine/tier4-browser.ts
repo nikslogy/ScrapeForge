@@ -663,16 +663,17 @@ export async function tier4Fetch(
     // never the SSRF check.
     const credentials = browserCredentials(target, options.headers, options.cookies);
     await addBrowserCookies(context, credentials.cookies);
-    // Where a navigation ended after same-origin redirects the guard followed with the secret headers.
+    // Where the target's own navigation ended after same-origin redirects
+    // the guard followed with the secret headers.
     let landedOn: string | null = null;
     await installOutboundGuard(page, {
       blockResources: options.blockResources !== false,
       ...(credentials.headers ? { extraHeaders: credentials.headers } : {}),
       ...(credentials.secretHeaders ? { secretHeaders: credentials.secretHeaders } : {}),
       origin: target.origin,
-      timeoutMs: deadline.remaining(),
-      onRedirected: (finalUrl) => {
-        landedOn = finalUrl;
+      remainingMs: () => deadline.remaining(),
+      onRedirected: (requested, finalUrl) => {
+        if (withoutFragment(requested) === withoutFragment(target.href)) landedOn = finalUrl;
       },
     });
 
@@ -699,7 +700,8 @@ export async function tier4Fetch(
     // the first URL. Loading the URL it ended on (once) gives it its own
     // address, for its relative links.
     const landed = landedOn as string | null;
-    if (landed !== null && withoutFragment(landed) !== withoutFragment(page.url())) {
+    const stillAtTarget = withoutFragment(page.url()) === withoutFragment(target.href);
+    if (landed !== null && stillAtTarget && withoutFragment(landed) !== withoutFragment(page.url())) {
       response = await navigate(`${landed}${target.hash}`);
       await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
     }

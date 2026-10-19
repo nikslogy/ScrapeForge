@@ -178,6 +178,45 @@ beforeAll(async () => {
         res.writeHead(authed(req) ? 200 : 401, { 'content-type': 'application/json' });
         res.end(authed(req) ? '["o1"]' : '{"error":"unauthorized"}');
       },
+      // An image behind Basic auth: without the header, a 401 challenge (images go without the credential).
+      '/gallery': html(`<!doctype html><html><head><title>Gallery</title></head><body><main><h1>Private gallery</h1><p>${'Photos from the account owner, sorted by date and album. '.repeat(8)}</p><img src="/photos/1.png"><img src="/photos/2.png"></main></body></html>`),
+      '/photos/1.png': (req, res) => gated(req, res, 'image/png', 'png'),
+      '/photos/2.png': (req, res) => gated(req, res, 'image/png', 'png'),
+      // A same-origin call still running when the tier returns, which then sets a session cookie.
+      '/slow-cookie': html(`<!doctype html><html><head><title>Account</title></head><body><main><h1>Account home</h1><p>${'Settings, orders and saved addresses for this account. '.repeat(8)}</p><script>fetch('/api/session');</script></main></body></html>`),
+      '/api/session': (_req, res) => {
+        setTimeout(() => {
+          res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'leaked=tenant-a; Path=/' });
+          res.end('{}');
+        }, 4_000);
+      },
+      // Post/Redirect/Get, and a POST answered with a 307, from forms the page submits itself.
+      '/prg': html(`<!doctype html><html><head><title>Search</title></head><body><form id="f" method="post" action="/submit"><input name="q" value="lamps"></form><script>document.getElementById('f').submit();</script></body></html>`),
+      '/submit': (req, res, body) => redirect(303, '/results')(req, res, body),
+      '/results': (req, res) => sendPage(res, 'Results', req.headers['content-type'] || req.headers['content-length'] ? 'Results with a body' : 'Results'),
+      '/post307': html(`<!doctype html><html><head><title>Post</title></head><body><form id="f" method="post" action="/acs"><input name="a" value="1"></form><script>document.getElementById('f').submit();</script></body></html>`),
+      '/acs': (req, res, body) => redirect(307, '/acs/')(req, res, body),
+      '/acs/': (req, res, body) => sendPage(res, 'Signed in', req.method === 'POST' ? `Posted ${body}` : `Got ${req.method}`),
+      // A redirect to a non-ASCII path, its Location in UTF-8 bytes.
+      '/umlaut': (_req, res) => {
+        res.writeHead(302, { location: Buffer.from('/straße').toString('latin1') });
+        res.end();
+      },
+      '/stra%C3%9Fe': (req, res) => (authed(req) ? sendPage(res, 'Strasse', 'Strasse page') : sendPage(res, 'Unauthorized', 'Unauthorized', 401)),
+      // A same-origin hop, then another origin.
+      '/out': (req, res, body) => redirect(302, '/track')(req, res, body),
+      '/track': (req, res, body) => redirect(302, `${thirdPartyOrigin}/landing`)(req, res, body),
+      // A module script redirected into another directory, with a relative import (public assets).
+      '/modules': html(`<!doctype html><html><head><title>Modules</title><script type="module" src="/js/app.js"></script></head><body><main><h1 id="state">Loading</h1><p>${'The app renders its catalog from a module graph on load. '.repeat(8)}</p></main></body></html>`),
+      '/js/app.js': (req, res, body) => redirect(302, '/js/v2/app.js')(req, res, body),
+      '/js/v2/app.js': (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        res.end(`import { label } from './dep.js'; document.getElementById('state').textContent = label;`);
+      },
+      '/js/v2/dep.js': (_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        res.end(`export const label = 'Module ran';`);
+      },
       '/events': (_req, res) => {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         res.write('data: hello\n\n');
@@ -289,8 +328,8 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
     } finally {
       pool.release(ctx2);
     }
-    // The target's own image gets them; the third-party host it redirects to does not.
-    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBe('Bearer secret-token');
+    // Images go without the credential (a fetch with it would hold every image in the worker).
+    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBeUndefined();
     const cdn = thirdParty.requests.find((x) => x.url === '/pixel.gif');
     expect(cdn).toBeDefined();
     expect(cdn!.headers.authorization).toBeUndefined();
@@ -351,6 +390,97 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
     }
     for (const path of ['/static/app.js', '/static/app.css', '/api/orders', '/api/orders/']) {
       expect(site.requests.find((x) => x.url === path)?.headers.authorization, path).toBe('Bearer secret-token');
+    }
+  }, 60_000);
+
+  it('an image behind Basic auth goes without the credential and does not stall the page', async () => {
+    const ctx = await pool.acquire();
+    const started = Date.now();
+    try {
+      const r = await tier4Fetch(`${site.origin}/gallery`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Private gallery');
+    } finally {
+      pool.release(ctx);
+    }
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(site.requests.find((x) => x.url === '/gallery')?.headers.authorization).toBe('Bearer secret-token');
+  }, 60_000);
+
+  it('a credentialed call still running when the tier returns never leaves its cookie for the next fetch on the pool', async () => {
+    const first = await pool.acquire();
+    try {
+      await tier4Fetch(`${site.origin}/slow-cookie`, first, { headers: { Authorization: 'Bearer secret-token' }, timeout: 15_000 });
+    } finally {
+      pool.release(first);
+    }
+    // The call answers (with Set-Cookie) after the tier has returned and the context was released.
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    site.requests.length = 0;
+    const second = await pool.acquire();
+    try {
+      expect(await second.cookies()).toEqual([]);
+      await tier4Fetch(`${site.origin}/classic`, second, { timeout: 15_000 });
+    } finally {
+      pool.release(second);
+    }
+    expect(site.requests.find((x) => x.url === '/classic')?.headers.cookie).toBeUndefined();
+  }, 60_000);
+
+  it('Post/Redirect/Get under a credential: the GET after the 303 carries no body', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/prg`, ctx, { ...OPTIONS, timeout: 15_000, waitFor: 'h1' });
+      expect(r.html).toContain('<h1>Results</h1>');
+    } finally {
+      pool.release(ctx);
+    }
+    const get = site.requests.find((x) => x.url === '/results')!;
+    expect(get.method).toBe('GET');
+    expect(get.body).toBe('');
+    expect(get.headers['content-type']).toBeUndefined();
+  }, 60_000);
+
+  it('a form POST answered with a 307 keeps its result: the endpoint is not loaded again as a GET', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/post307`, ctx, { ...OPTIONS, timeout: 15_000, waitFor: 'h1' });
+      expect(r.html).toContain('Posted a=1');
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.filter((x) => x.url === '/acs/').map((x) => x.method)).toEqual(['POST']);
+  }, 60_000);
+
+  it('a redirect to a non-ASCII path is followed once, with the credential (its UTF-8 Location not encoded twice)', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/umlaut`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Strasse page');
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.filter((x) => x.url.startsWith('/stra')).map((x) => x.url)).toContain('/stra%C3%9Fe');
+  }, 60_000);
+
+  it('a same-origin hop that leads to another origin is loaded once', async () => {
+    const ctx = await pool.acquire();
+    try {
+      await tier4Fetch(`${site.origin}/out`, ctx, { ...OPTIONS, timeout: 15_000 });
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.filter((x) => x.url === '/out')).toHaveLength(1);
+    expect(site.requests.filter((x) => x.url === '/track')).toHaveLength(1);
+    expect(thirdParty.requests.filter((x) => x.url === '/landing')).toHaveLength(1);
+  }, 60_000);
+
+  it('a module script redirected into another directory keeps its own address: its relative imports load', async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/modules`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Module ran');
+    } finally {
+      pool.release(ctx);
     }
   }, 60_000);
 

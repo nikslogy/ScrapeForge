@@ -246,14 +246,17 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   (T1, T2) and the browser tiers (T4, T5), but not by Lightpanda (T3). A
   request that carries either skips T3. See "Request cookies and headers".
 * In a browser tier, a request to the target's origin that carries a
-  custom header other than the ones browsers send anyway is sent by
-  Playwright (fetch and fulfill), not by Chromium's own network stack, so
-  its TLS fingerprint is not the browser's and the response is buffered.
-  Cookies and headers such as Accept-Language do not need this. Streams
-  (media, EventSource, WebSocket) are left to Chromium and go without the
-  credential. A `fetch()` or XHR body the page reads as a stream arrives
-  only when it ends; with the credential, an endless stream never arrives
-  (its fetch ends at the tier's budget).
+  custom header other than the ones browsers send anyway (a document,
+  script, style, XHR or fetch) is sent by Playwright (fetch and fulfill),
+  not by Chromium's own network stack, so its TLS fingerprint is not the
+  browser's and the response is buffered. Cookies and headers such as
+  Accept-Language do not need this. Images, fonts, media and streams
+  (EventSource, WebSocket) are left to Chromium and go without the
+  credential: an image behind header auth is not loaded. A `fetch()` or
+  XHR body the page reads as a stream arrives only when it ends; with the
+  credential, an endless stream never arrives (its fetch ends at the
+  tier's budget). A script or style redirected into another directory is
+  followed by Chromium, without the credential.
 
 ### Request cookies and headers
 
@@ -291,24 +294,36 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   * Any other header may be a credential. Chromium keeps a continued
     request's header overrides on every redirect hop, and the hops never
     reach the route handler: a target redirecting to an identity provider
-    would carry the credential there. So every request to the target's
-    origin that does not stream (documents, scripts, styles, images, XHR,
-    fetch, ...) is fetched by the route handler with the credential,
-    without letting Playwright follow redirects (`route.fetch`,
-    `maxRedirects: 0`, bounded by the tier's budget), then fulfilled; each
+    would carry the credential there. So the requests that make the page
+    (documents, scripts, styles, XHR and fetch) to the target's origin are
+    fetched by the route handler with the credential, without letting
+    Playwright follow redirects (`route.fetch`, `maxRedirects: 0`, each
+    bounded by what is left of the tier's budget), then fulfilled; each
     body is released once served. Pages behind Basic auth, an auth proxy
     or an API-key gateway load their own scripts and styles.
+    * At most 6 such fetches run at once per page (Chromium's own limit
+      per host) and 64 per worker: each opens its own connection through
+      the egress guard.
+    * Images, fonts, media and streams are continued by Chromium without
+      the credential: a fetch here would hold every image in the worker's
+      memory, and they hold no text.
     * A redirect within the origin is followed by the handler, with the
-      credential, at most 10 hops, each checked by the SSRF guard. A 303,
-      or a 301/302 answering a POST, becomes a GET without a body, as in
-      browsers.
+      credential, at most 10 hops, each checked by the SSRF guard and sent
+      by the context's request API (so a GET after a 303 carries no body).
+      A 303, or a 301/302 answering a POST, becomes a GET without a body,
+      as in browsers. A UTF-8 `Location` is read as UTF-8, as Chromium does.
     * A redirect to another origin goes back to the browser, which
-      follows it without the credential.
-    * A navigation whose redirects the handler followed is loaded once
-      more at the URL it ended on (fragment kept), so the page has its own
-      address for its relative links.
-    * Streams (media, EventSource, WebSocket) are continued by Chromium
-      without the credential.
+      follows it without the credential. So does a script, style or frame
+      redirected into another directory: its relative URLs (module
+      imports, `url()`) resolve against its own address, which a fulfilled
+      body cannot carry.
+    * The target's own GET navigation, when its redirects ended on another
+      page of the origin, is loaded once more at that URL (fragment kept),
+      so the page has its own address for its relative links. Not a form
+      POST, and not when the chain ended on another origin.
+    * Such a fetch is not cancelled when its page closes, and it stores its
+      response's cookies in the context: a pooled context with one still in
+      flight is retired, not cleaned and handed to the next fetch.
 
     Pooled contexts use the egress guard as their proxy, so these fetches
     pass through it like Chromium's own.
@@ -323,8 +338,16 @@ and a real browser:
   custom header there;
 * every hop of a redirect within the origin keeps the credential: a
   fragment URL, a chain that would end on a login page or an identity
-  provider without it, an API call redirected to a trailing slash;
-* the page's own scripts and styles behind Basic auth get it;
+  provider without it, an API call redirected to a trailing slash, a
+  non-ASCII path;
+* the page's own scripts and styles behind Basic auth get it; an image
+  behind Basic auth does not, and does not stall the page;
+* a credentialed call still running when the tier returns leaves no
+  cookie for the next fetch on the pool;
+* the GET after a 303 carries no body; a form POST answered with a 307
+  keeps its result; a same-origin hop that leads to another origin is
+  loaded once; a module script redirected into another directory still
+  loads its relative imports;
 * headers browsers send anyway keep Chromium's `Sec-Fetch-*` headers, and
   a stream on the target's origin still streams;
 * the next fetch on the reused context carries nothing over.
@@ -569,9 +592,11 @@ retries the job with backoff.
 * Lightpanda and the browser tiers follow the same rule. A 5xx or 429 at
   T3 or T4 is retried once and then stops retryably, without the stealth
   tier. A 5xx or 429 at T5 stops retryably whatever an earlier tier was
-  refused, unless T4 got a page (status 200, below the bar): that page is
-  the last-resort result. An error status (5xx, 429, 408) is never
-  returned as a result.
+  refused, unless T4 got a page that only fell below the bar (2xx, thin
+  or needing JavaScript): that page is the last-resort result, on the
+  browser-only path too (and there also when T5 fails outright). A block
+  or challenge page from T4 is no result then: the retry may get past it.
+  An error status (5xx, 429, 408) is never returned as a result.
 * A re-probe or confirm below the learned tier that meets a server error,
   at any tier (Lightpanda, or T4 under a learned T5, included), goes on to
   the learned tier instead of failing the request. A rate limit is not

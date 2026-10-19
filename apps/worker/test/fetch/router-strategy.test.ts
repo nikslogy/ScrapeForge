@@ -1171,3 +1171,56 @@ describe('a failing site after the third review round', () => {
     expect(m.tier4Fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('the last-resort T4 page after the fourth review round', () => {
+  const quick = () =>
+    new SmartRouter(new FakeRedis() as unknown as Redis, vi.fn(async () => ({}) as BrowserContext), vi.fn(), {
+      now: () => T0, random: () => 0.99, logger: { warn: vi.fn() }, sleep: async () => undefined,
+    });
+  async function failure(p: Promise<unknown>) {
+    const e = await p.then(() => { throw new Error('expected a failure'); }, (err: unknown) => err);
+    expect(e).toBeInstanceOf(TiersExhaustedError);
+    return e as InstanceType<typeof TiersExhaustedError>;
+  }
+  const NGINX503 = '<html><head><title>503 Service Temporarily Unavailable</title></head><body><center><h1>503 Service Temporarily Unavailable</h1></center><hr><center>nginx</center></body></html>';
+  const THIN =
+    `<!doctype html><html><head><title>Search results</title>${'<script src="/s.js"></script>'.repeat(10)}<style>${'.a{color:red}'.repeat(600)}</style></head>` +
+    `<body><header><nav>${Array.from({ length: 40 }, (_, i) => `<a href="/c/${i}">Category ${i}</a>`).join(' ')}</nav></header><div id="app"><main><h1>Results for widgets</h1>` +
+    `${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${i}">Widget model ${i}</a><span>$${10 + i}.99</span></div>`).join('')}</main></div>` +
+    `<footer>${Array.from({ length: 30 }, (_, i) => `<a href="/f/${i}">Footer link ${i}</a>`).join(' ')}</footer></body></html>`;
+
+  it.each([
+    ['a 403 block page', () => Promise.resolve(page('<html><body><h1>Access Denied</h1><p>Reference #18.abc</p></body></html>', 403))],
+    ['a 200 challenge page', shell],
+  ])('T4 got %s and T5 a 503: retryable, not the block page as a result', async (_label, t4) => {
+    const router = quick();
+    m.tier1Fetch.mockImplementation(shell);
+    m.tier2Fetch.mockImplementation(shell);
+    m.tier4Fetch.mockImplementation(t4);
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(NGINX503, 503)));
+    expect((await failure(router.route(URL_, {}))).transient).toBe(true);
+  });
+
+  it.each([
+    ['waitFor', { waitFor: '#results' }],
+    ['screenshot', { screenshot: true }],
+    ['mobile', { mobile: true }],
+  ])('the browser-only path (%s) keeps T4\'s sub-bar page when T5 meets a 503 or fails', async (_label, options) => {
+    for (const t5 of [() => Promise.resolve(page(NGINX503, 503)), async () => { throw new Error('page.goto: Timeout 30000ms exceeded'); }]) {
+      vi.resetAllMocks();
+      m.proxySelect.mockResolvedValue(null);
+      m.proxyEscalate.mockResolvedValue(null);
+      const router = quick();
+      m.tier4Fetch.mockImplementation(() => Promise.resolve(page(THIN)));
+      m.tier4StealthFetch.mockImplementation(t5);
+      expect(await router.route(URL_, options)).toMatchObject({ tierUsed: 4, statusCode: 200 });
+    }
+  });
+
+  it('the browser-only path with a challenge at T4 and a 503 at T5 is still retryable', async () => {
+    const router = quick();
+    m.tier4Fetch.mockImplementation(shell);
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(NGINX503, 503)));
+    expect((await failure(router.route(URL_, { screenshot: true }))).transient).toBe(true);
+  });
+});

@@ -25,6 +25,7 @@
 
 import type { BrowserContext, Page, Request, Response, Route, WebSocket } from 'patchright';
 import { assertPublicUrl, isOutboundBlockedError, OutboundBlockedError } from '@scrapeforge/shared';
+import { Semaphore } from '../throughput/limits.js';
 import { shouldBlockResource } from './resource-blocker.js';
 
 // Content that never leaves the browser process.
@@ -90,16 +91,20 @@ export function createOutboundRouteHandler(options: {
   extraHeaders?: Readonly<Record<string, string>>;
   /**
    * Any other custom header (Authorization, an API key): it may be a
-   * credential. Sent to `origin` only, on every request that does not
-   * stream, by a fetch that follows redirects only within `origin` (below).
+   * credential. Sent to `origin` only, on the requests that make the page
+   * (SECRET_TYPES), by a fetch that follows redirects only within `origin`
+   * (below).
    */
   secretHeaders?: Readonly<Record<string, string>>;
   origin?: string;
-  /** Bound on each fetch that carries the secret headers (the tier's budget). */
-  timeoutMs?: number;
-  /** A main-frame navigation whose same-origin redirects were followed here, with the URL it ended on. */
-  onRedirected?: (finalUrl: string) => void;
+  /** The page's context: its request API follows redirect hops, and its fetches in flight are counted (see hasPendingSecretFetches). */
+  context?: BrowserContext;
+  /** Time left in the tier's budget: the bound on each fetch that carries the secret headers. */
+  remainingMs?: () => number;
+  /** A main-frame GET navigation whose same-origin redirects were followed here: the URL asked for, and the one it ended on. */
+  onRedirected?: (requested: string, finalUrl: string) => void;
 }): (route: Route) => Promise<void> {
+  const pageSlots = new Semaphore(SECRET_FETCHES_PER_PAGE);
   return async (route) => {
     const request = route.request();
     const url = request.url();
@@ -110,8 +115,8 @@ export function createOutboundRouteHandler(options: {
       const target = options.origin !== undefined && originOf(url) === options.origin;
       if (!allowed) {
         await route.abort();
-      } else if (target && options.secretHeaders && !STREAM_TYPES.has(request.resourceType())) {
-        await fetchWithSecrets(route, request, { ...options, origin: options.origin as string, secretHeaders: options.secretHeaders });
+      } else if (target && options.secretHeaders && SECRET_TYPES.has(request.resourceType())) {
+        await fetchWithSecrets(route, request, { ...options, origin: options.origin as string, secretHeaders: options.secretHeaders }, pageSlots);
       } else if (target && options.extraHeaders) {
         await route.continue({ headers: { ...request.headers(), ...options.extraHeaders } });
       } else {
@@ -127,15 +132,70 @@ export function createOutboundRouteHandler(options: {
 }
 
 /**
- * Requests continued by Chromium without the secret headers: streams, which
- * a fetch here would buffer until they end. (A fetch() or XHR whose body
- * the page reads as a stream is buffered all the same: with secret headers
- * it arrives when it ends, within the tier's budget.)
+ * Requests fetched here with the secret headers: what makes the page and
+ * its data. Images, fonts, media and the rest are continued by Chromium
+ * without them: a fetch here holds each body in the worker's memory and
+ * opens a connection of its own, while what they hold is not text. So are
+ * streams (EventSource, WebSocket), which a fetch here would buffer until
+ * they end. (A fetch() or XHR whose body the page reads as a stream is
+ * buffered all the same: with secret headers it arrives when it ends,
+ * within the tier's budget.)
  */
-const STREAM_TYPES: ReadonlySet<string> = new Set(['media', 'eventsource', 'websocket']);
+const SECRET_TYPES: ReadonlySet<string> = new Set(['document', 'xhr', 'fetch', 'script', 'stylesheet']);
+/** Credentialed fetches in flight per page: Chromium's own limit per host. */
+const SECRET_FETCHES_PER_PAGE = 6;
+/** ...and per worker, well under the egress guard's connection cap (each fetch opens its own connection). */
+const SECRET_FETCHES_PER_WORKER = 64;
+const workerSecretSlots = new Semaphore(SECRET_FETCHES_PER_WORKER);
 /** Same-origin redirect hops followed with the secret headers, at most. */
 const MAX_SECRET_HOPS = 10;
 const BODY_HEADER = /^(?:content-type|content-length|content-encoding|transfer-encoding)$/i;
+
+/**
+ * Credentialed fetches not yet settled, per context. A fetch here is not
+ * cancelled when its page closes, and it stores its response's cookies in
+ * the context: a context with one still in flight must not be cleaned and
+ * handed to another fetch (BrowserPool.release retires it instead).
+ */
+const pendingSecretFetches = new WeakMap<BrowserContext, number>();
+
+export function hasPendingSecretFetches(context: BrowserContext): boolean {
+  return (pendingSecretFetches.get(context) ?? 0) > 0;
+}
+
+interface SecretOptions {
+  extraHeaders?: Readonly<Record<string, string>>;
+  secretHeaders: Readonly<Record<string, string>>;
+  origin: string;
+  context?: BrowserContext;
+  remainingMs?: () => number;
+  onRedirected?: (requested: string, finalUrl: string) => void;
+}
+
+/** fetchWithSecrets within the page's and the worker's limits, counted against the context while it runs. */
+async function fetchWithSecrets(route: Route, request: Request, options: SecretOptions, pageSlots: Semaphore): Promise<void> {
+  const { context } = options;
+  if (context) pendingSecretFetches.set(context, (pendingSecretFetches.get(context) ?? 0) + 1);
+  try {
+    const releasePage = await pageSlots.acquire();
+    try {
+      const releaseWorker = await workerSecretSlots.acquire();
+      try {
+        await followWithSecrets(route, request, options);
+      } finally {
+        releaseWorker();
+      }
+    } finally {
+      releasePage();
+    }
+  } finally {
+    if (context) {
+      const left = (pendingSecretFetches.get(context) ?? 1) - 1;
+      if (left > 0) pendingSecretFetches.set(context, left);
+      else pendingSecretFetches.delete(context);
+    }
+  }
+}
 
 /**
  * The request fetched here with the secret headers. Chromium keeps a
@@ -143,35 +203,42 @@ const BODY_HEADER = /^(?:content-type|content-length|content-encoding|transfer-e
  * never reach a route handler: a target redirecting to an identity provider
  * would carry the credential there. So redirects are not left to Chromium:
  * one within the origin is followed here, with the headers (each hop
- * checked); one to another origin goes back to the browser, which follows
- * it without them. A main-frame navigation that ended on another URL is
+ * checked, and sent by the context's request API, so a GET after a 303
+ * carries no body); one to another origin goes back to the browser, which
+ * follows it without them. A script, style or frame redirected into
+ * another directory goes back too: its relative URLs (module imports,
+ * url()) resolve against its own address, which a fulfilled body cannot
+ * carry. A main-frame GET that ended on another URL of the origin is
  * reported (onRedirected): the tier loads that URL, so the page has its own
  * address. Each body is released once served.
  */
-async function fetchWithSecrets(
-  route: Route,
-  request: Request,
-  options: { extraHeaders?: Readonly<Record<string, string>>; secretHeaders: Readonly<Record<string, string>>; origin: string; timeoutMs?: number; onRedirected?: (finalUrl: string) => void },
-): Promise<void> {
-  let url = request.url();
+async function followWithSecrets(route: Route, request: Request, options: SecretOptions): Promise<void> {
+  const requested = request.url();
+  const mainFrame = isMainFrameNavigation(request);
+  const followsInPlace = mainFrame || request.resourceType() === 'xhr' || request.resourceType() === 'fetch';
+  let url = requested;
   let method = request.method();
-  let postData = request.postDataBuffer();
+  let body = request.postDataBuffer();
   let headers: Record<string, string> = { ...request.headers(), ...options.extraHeaders, ...options.secretHeaders };
   for (let hop = 0; ; hop++) {
-    const response = await route.fetch({
-      url,
-      method,
-      headers,
-      ...(postData ? { postData } : {}),
-      maxRedirects: 0,
-      ...(options.timeoutMs !== undefined ? { timeout: Math.max(1, options.timeoutMs) } : {}),
-    });
+    const left = options.remainingMs ? options.remainingMs() : undefined;
+    if (left !== undefined && left <= 0) throw new Error('the tier\'s budget is spent');
+    const timeout = left !== undefined ? { timeout: Math.max(1, Math.floor(left)) } : {};
+    const response =
+      hop === 0
+        ? await route.fetch({ url, method, headers, ...(body ? { postData: body } : {}), maxRedirects: 0, ...timeout })
+        : await (options.context as BrowserContext).request.fetch(url, { method, headers, ...(body ? { data: body } : {}), maxRedirects: 0, ...timeout });
     const status = response.status();
-    const next = hop < MAX_SECRET_HOPS ? await sameOriginRedirect(status, response.headers().location, url, options.origin) : null;
+    const rawLocation = response.headers().location;
+    const location = utf8Header(rawLocation);
+    let next = hop < MAX_SECRET_HOPS && options.context ? await sameOriginRedirect(status, location, url, options.origin) : null;
+    if (next !== null && !followsInPlace && directoryOf(next) !== directoryOf(url)) next = null;
     if (next === null) {
       try {
-        if (url !== request.url() && isMainFrameNavigation(request)) options.onRedirected?.(url);
-        await route.fulfill({ response });
+        if (mainFrame && url !== requested && request.method() === 'GET' && method === 'GET' && !isRedirectStatus(status)) {
+          options.onRedirected?.(requested, url);
+        }
+        await route.fulfill(location !== rawLocation ? { response, headers: { ...response.headers(), location: location as string } } : { response });
       } finally {
         await response.dispose().catch(() => undefined);
       }
@@ -181,11 +248,33 @@ async function fetchWithSecrets(
     // As browsers do: a 303, or a 301/302 answering a POST, is followed with a GET.
     if (status === 303 ? method !== 'HEAD' : (status === 301 || status === 302) && method === 'POST') {
       method = 'GET';
-      postData = null;
+      body = null;
       headers = Object.fromEntries(Object.entries(headers).filter(([name]) => !BODY_HEADER.test(name)));
     }
+    // The context's cookies for the next URL (and any the hop just set) come from its own jar.
+    headers = Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'cookie'));
     url = next;
   }
+}
+
+/**
+ * A header value as Chromium reads it: its bytes as UTF-8 ("/straße"), not
+ * as the Latin-1 the fetch decoded them with ("/straÃ\u009fe", which would
+ * be percent-encoded twice). Unchanged when the bytes are not UTF-8.
+ */
+function utf8Header(value: string | undefined): string | undefined {
+  if (value === undefined || !/[\u0080-\u00ff]/.test(value) || /[^\u0000-\u00ff]/.test(value)) return value;
+  const decoded = Buffer.from(value, 'latin1').toString('utf8');
+  return decoded.includes('\ufffd') ? value : decoded;
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status <= 399 && status !== 304;
+}
+
+function directoryOf(url: string): string {
+  const path = new URL(url).pathname;
+  return path.slice(0, path.lastIndexOf('/') + 1);
 }
 
 /** Where a 3xx within `origin` leads, when the browser may load it; null for anything else. */
@@ -227,8 +316,8 @@ export async function installOutboundGuard(
     extraHeaders?: Readonly<Record<string, string>>;
     secretHeaders?: Readonly<Record<string, string>>;
     origin?: string;
-    timeoutMs?: number;
-    onRedirected?: (finalUrl: string) => void;
+    remainingMs?: () => number;
+    onRedirected?: (requested: string, finalUrl: string) => void;
   } = {},
 ): Promise<void> {
   const scoped = options.origin !== undefined;
@@ -237,9 +326,9 @@ export async function installOutboundGuard(
     createOutboundRouteHandler({
       blockResources: options.blockResources ?? false,
       ...(scoped && options.extraHeaders ? { extraHeaders: options.extraHeaders } : {}),
-      ...(scoped && options.secretHeaders ? { secretHeaders: options.secretHeaders } : {}),
+      ...(scoped && options.secretHeaders ? { secretHeaders: options.secretHeaders, context: page.context() } : {}),
       ...(scoped ? { origin: options.origin } : {}),
-      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.remainingMs ? { remainingMs: options.remainingMs } : {}),
       ...(options.onRedirected ? { onRedirected: options.onRedirected } : {}),
     }),
   );

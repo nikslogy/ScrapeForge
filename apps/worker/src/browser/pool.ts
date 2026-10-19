@@ -1,6 +1,7 @@
 import { chromium, Browser, BrowserContext, type LaunchOptions, type Request } from 'patchright';
 import { egressProxyUrl } from '../net/egress.js';
 import { generateFingerprint, toContextOptions } from './fingerprint.js';
+import { hasPendingSecretFetches } from './outbound-guard.js';
 
 interface PooledContext {
   context: BrowserContext;
@@ -224,9 +225,11 @@ export class BrowserPool {
     pooled.inUse = false;
 
     if (this.closed) return;
-    if (this.isExpired(pooled) || hasServiceWorkers(context)) {
+    if (this.isExpired(pooled) || hasServiceWorkers(context) || hasPendingSecretFetches(context)) {
       // A service worker would keep answering the next fetch of its site
-      // (possibly another customer's) from its own cache.
+      // (possibly another customer's) from its own cache. A credentialed
+      // fetch still in flight would store its response's cookies after the
+      // cleaning (closing the context cancels it).
       this.retire(pooled);
       return;
     }

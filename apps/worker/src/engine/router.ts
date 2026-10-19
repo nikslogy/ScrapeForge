@@ -192,6 +192,15 @@ function isPlainErrorPage(html: string, statusCode: number, headers: Readonly<Re
   return html.length <= PLAIN_ERROR_BODY_BYTES && visibleTextLength(html) >= PLAIN_ERROR_MIN_TEXT_CHARS;
 }
 
+/**
+ * A page that only fell below the quality bar (little content, or more
+ * JavaScript needed), with a 2xx status: not a block or challenge page, nor
+ * an error. The last-resort result when the stealth tier meets a failing site.
+ */
+function isSubBarPage(r: TierResponse | null, cls: RejectionClass | undefined): r is TierResponse {
+  return r !== null && r.statusCode >= 200 && r.statusCode < 300 && (cls === 'thin' || cls === 'js_required');
+}
+
 /** A bot-defence vendor's challenge marker in the body or the headers. */
 function hasChallengeSignature(html: string, headers: Readonly<Record<string, string>> = {}): boolean {
   if (Object.keys(headers).some((h) => /^x-kpsdk-/i.test(h))) return true;
@@ -954,6 +963,7 @@ export class SmartRouter {
 
     // ─── Tier 4: full Patchright headless browser ───
     let t4Result: TierResponse | null = null;
+    let t4Cls: RejectionClass | undefined;
     if (from <= 4) {
       const fetch4 = () =>
         this.withContext(c, (ctx) =>
@@ -977,8 +987,10 @@ export class SmartRouter {
           const t = await this.retryTransient(c, 4, a.r, a.cls, fetch4);
           if (t.ok) return { ...t.r, tierUsed: 4, ...proxyMeta };
           t4Result = t.r;
+          t4Cls = t.cls;
         } else {
           t4Result = a.r;
+          t4Cls = a.cls;
         }
       } else if (a.acquire) {
         // The stealth tier needs a context from the same pool; waiting for it
@@ -1026,17 +1038,21 @@ export class SmartRouter {
       };
     }
 
+    // The site is failing for the stealth browser too: retryable, whatever
+    // an earlier tier was refused, unless T4 got a page that only fell below
+    // the bar. A block or challenge page is no result here: the retry may
+    // well get past it, since T5 itself was not blocked.
+    if (a5.kind === 'response' && isTransientClass(a5.cls)) {
+      if (isSubBarPage(t4Result, t4Cls)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+      throw this.exhausted(c, true);
+    }
+
     // Last-resort: return T4's body with a low quality flag baked in via
     // the quality scorer downstream, instead of throwing. This is what the
     // user wants 99% of the time (they already paid for the browser fetch,
     // returning empty markdown is strictly better than 500-ing the API).
-    // So it is returned even when T5 met a 5xx or 429. An error status is
-    // never a result.
+    // An error status is never a result.
     if (t4Result && !isErrorStatus(t4Result.statusCode)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
-
-    // The site is failing for the stealth browser too, and T4 left no page:
-    // retryable, whatever an earlier tier was refused.
-    if (a5.kind === 'response' && isTransientClass(a5.cls)) throw this.exhausted(c, true);
     if (a5.kind === 'error' && a5.acquire && isPoolUnavailable(a5.error)) throw a5.error;
     if (t4Result) throw this.exhausted(c, hasChallengeSignature(t4Result.html, t4Result.headers) ? undefined : true);
 
@@ -1054,9 +1070,14 @@ export class SmartRouter {
     const a4 = await this.attempt(c, 4, fetch4);
     if (a4.kind === 'response' && a4.ok) return { ...a4.r, tierUsed: 4, ...proxyMeta };
     if (a4.kind === 'error' && a4.acquire) throw a4.error;
+    // A page that only fell below the bar: the result should T5 meet a failing site, or fail.
+    let t4Page: TierResponse | null = a4.kind === 'response' ? a4.r : null;
+    let t4Cls = a4.kind === 'response' ? a4.cls : undefined;
     if (a4.kind === 'response' && isTransientClass(a4.cls)) {
       const t = await this.retryTransient(c, 4, a4.r, a4.cls, fetch4);
       if (t.ok) return { ...t.r, tierUsed: 4, ...proxyMeta };
+      t4Page = t.r;
+      t4Cls = t.cls;
     }
 
     // ── T5: stealth (terminal — accept whatever we get) ──
@@ -1076,9 +1097,16 @@ export class SmartRouter {
         ),
       true,
     );
-    if (a5.kind === 'error') throw a5.error;
-    // A 5xx or 429 from the stealth tier too is the site failing: a retryable error, not a result.
-    if (!a5.ok && isTransientClass(a5.cls)) throw this.exhausted(c, true);
+    if (a5.kind === 'error') {
+      if (!a5.acquire && isSubBarPage(t4Page, t4Cls)) return { ...t4Page, tierUsed: 4, ...proxyMeta };
+      throw a5.error;
+    }
+    // A 5xx or 429 from the stealth tier too is the site failing: a retryable
+    // error, not a result (T4's sub-bar page is, as in escalate()).
+    if (!a5.ok && isTransientClass(a5.cls)) {
+      if (isSubBarPage(t4Page, t4Cls)) return { ...t4Page, tierUsed: 4, ...proxyMeta };
+      throw this.exhausted(c, true);
+    }
     if (!a5.ok && isErrorStatus(a5.r.statusCode)) throw this.exhausted(c, hasChallengeSignature(a5.r.html, a5.r.headers) ? undefined : true);
     return { ...a5.r, tierUsed: 5, ...proxyMeta };
   }

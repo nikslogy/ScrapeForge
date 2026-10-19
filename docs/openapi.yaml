@@ -383,13 +383,13 @@ components:
             400. The HTTP tiers send them to the target and drop
             `Authorization` and `Cookie` once a redirect leaves its origin.
             In a browser tier they are added only to requests for the
-            target's own origin (its pages, scripts, styles, images and API
-            calls, and every redirect hop within that origin), never to
-            third-party scripts or images, and never to a redirect hop to
-            another origin. Streams (media, EventSource, WebSocket) go
-            without them; a `fetch()` body the page reads as a stream
-            arrives only once it ends. Part of the cache key (as a hash; see
-            `cacheTtl`).
+            target's own origin (its pages, scripts, styles and API calls,
+            and every redirect hop within that origin), never to third-party
+            scripts or images, and never to a redirect hop to another
+            origin. Images, fonts, media and streams (EventSource,
+            WebSocket) go without them; a `fetch()` body the page reads as a
+            stream arrives only once it ends. Part of the cache key (as a
+            hash; see `cacheTtl`).
           additionalProperties:
             type: string
         cookies:
