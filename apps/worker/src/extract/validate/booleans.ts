@@ -3,7 +3,9 @@
 // Two lexicons, chosen by what the field is about:
 //   availability  (any boolean field): "In stock", "Auf Lager", "En rupture
 //                 de stock", "Agotado", "Op voorraad", schema.org
-//                 availability URLs, yes/no words.
+//                 availability URLs, yes/no words. A field named for the
+//                 item being unavailable ("soldOut", "isOutOfStock") reads
+//                 the same phrases with the opposite polarity.
 //   workplace     (a field about remote work, e.g. "remote", "isRemote",
 //                 "True only when the role can be done fully remotely"):
 //                 "Remote" → true; "On-site", "In office", "not eligible for
@@ -101,6 +103,27 @@ export function readAvailability(text: string): BooleanReading {
   const availability = schemaOrg ? SCHEMA_ORG_AVAILABILITY.get(schemaOrg[1]) : undefined;
   if (availability !== undefined) return availability;
   return weigh(bare, UNAVAILABLE_PATTERNS, AVAILABLE_PATTERNS);
+}
+
+/** A field named for the item being unavailable ("soldOut", "isOutOfStock", "unavailable", "discontinued"). */
+const UNAVAILABILITY_NAME = /(?<![\p{L}\p{N}])(?:sold ?out|out ?of ?stock|unavailable|not available|discontinued)(?![\p{L}\p{N}])/u;
+
+/**
+ * Whether a yes/no field is true when the item is NOT available: its
+ * availability phrases read the other way ("Sold out" → true for
+ * isSoldOut), while plain yes/no words keep their meaning.
+ */
+export function negatesAvailability(field: Pick<FieldSpec, 'name'>): boolean {
+  return UNAVAILABILITY_NAME.test(splitName(typeof field.name === 'string' ? field.name : ''));
+}
+
+/** readAvailability for a field true when the item is unavailable: "Out of stock" → true, "In stock" → false, "Yes" → true. */
+export function readUnavailability(text: string): BooleanReading {
+  const bare = text.replace(/[.!]+$/, '').trim();
+  if (YES.has(bare)) return true;
+  if (NO.has(bare)) return false;
+  const reading = readAvailability(text);
+  return typeof reading === 'boolean' ? !reading : reading;
 }
 
 /** Strips every negative phrase, then looks for a positive one in what is left. */

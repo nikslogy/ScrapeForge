@@ -280,3 +280,47 @@ describe('after the third review round: spaced ranges and values printed twice',
     expect(normalized('2 h 90 min', spec('durationMin', 'integer'))).not.toMatchObject({ ok: true, value: 210 });
   });
 });
+
+describe('after the fourth review round: a range unless the number is a product\'s own', () => {
+  it.each([
+    ['Battery life 8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['Battery Life 8 - 10 Hours', spec('batteryLifeHours', 'number')],
+    ['Lasts 8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['Typically 8 - 10 hours', spec('batteryLifeHours', 'number')],
+    ['Approx. 8 - 10 h', spec('batteryLifeHours', 'number')],
+    ['Weighs 1.2 - 1.5 kg', spec('weightKg', 'number')],
+    ['Weight 5 - 30 kg', spec('weightKg', 'number')],
+    ['Gewicht 1,2 - 1,5 kg', spec('weightKg', 'number')],
+    ['Capacity 64 - 128 GB', spec('storageGb', 'integer')],
+    ['Ages 3 - 12 years', spec('ageYears', 'integer')],
+    ['TV 55 - 65 inch', spec('screenInches', 'number')],
+  ])('%s is a range', (raw, field) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+
+  it.each([
+    ['Google Pixel 8 - 128 GB', spec('storageGb', 'integer'), 128],
+    ['Samsung Galaxy S24 - 256 GB', spec('storageGb', 'integer'), 256],
+    ['Fever-Tree Tonic, Pack of 8 - 200 ml', spec('bottleVolumeMl', 'number'), 200],
+  ])("%s: the number before the hyphen is the product's own", (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it.each([
+    ['1 l 500 ml', spec('volumeMl', 'number'), 1500],
+    ['1 L 500 ml', spec('capacityLiters', 'number'), 1.5],
+    ['1.5 l 1500 ml', spec('volumeMl', 'number'), 1500],
+  ])('%s: litres and millilitres make one quantity (a value printed twice is not summed)', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it('a field true when the item is unavailable reads availability phrases the other way, and yes/no as written', () => {
+    const soldOut = spec('isSoldOut', 'boolean');
+    expect(normalized('Sold out', soldOut)).toMatchObject({ ok: true, value: true });
+    expect(normalized('In stock', soldOut)).toMatchObject({ ok: true, value: false });
+    expect(normalized('Yes', soldOut)).toMatchObject({ ok: true, value: true });
+    expect(normalized('No', soldOut)).toMatchObject({ ok: true, value: false });
+    expect(normalized('Out of stock', spec('outOfStock', 'boolean'))).toMatchObject({ ok: true, value: true });
+    expect(normalized('Out of stock', spec('inStock', 'boolean'))).toMatchObject({ ok: true, value: false });
+  });
+});

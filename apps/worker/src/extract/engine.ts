@@ -66,7 +66,7 @@ import {
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
-import { checkGrounding, isUrlField, normalizeValue, numberKey, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
+import { checkGrounding, isUrlField, negatesAvailability, normalizeValue, numberKey, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
 
 export type LearningMode = 'background' | 'await' | 'off';
 
@@ -136,8 +136,10 @@ const SPLIT_CATEGORIES: ReadonlySet<LlmErrorCategory> = new Set(['output_truncat
 const DEFAULT_PARTITION_CONCURRENCY = 4;
 /** Unprocessed record ranges named in the list-level missing detail. */
 const MAX_REPORTED_GAPS = 5;
-/** Share of a short answer's records that must cite a card of the chunk for its left-out cards to be asked again. */
-const REASK_MIN_PLACED = 0.8;
+/** A short answer's left-out cards are asked again unless more than one record in this many cites no card of the chunk (20%). */
+const REASK_MAX_UNPLACED_ONE_IN = 5;
+/** Shortest value text that places an uncited record on the one card printing it. */
+const MIN_PLACING_TEXT = 4;
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -331,6 +333,11 @@ interface TableIndex {
 
 const tableIndexes = new WeakMap<SourceBlock, TableIndex>();
 
+/** Whether most rows are a label and a value ("5G | Yes"; "Battery | 5000 mAh | Removable" may sit among them). */
+function mostlyPairs(rows: ReadonlyArray<readonly string[]>): boolean {
+  return rows.filter((cells) => cells.length <= 2).length * 2 > rows.length;
+}
+
 function tableIndex(block: SourceBlock): TableIndex | null {
   const cached = tableIndexes.get(block);
   if (cached) return cached;
@@ -340,10 +347,10 @@ function tableIndex(block: SourceBlock): TableIndex | null {
     rows = block.table.rows.slice(0, MAX_TABLE_ROWS);
     // A header row of plain <td> cells is parsed as the first body row: in a
     // table of three or more columns its cells name the columns all the
-    // same. (In a two-column table the first row is usually a "Spec | Value"
-    // pair, not a header.) It stays a row for the lookups by value.
-    const wide = rows.some((cells) => cells.length > 2);
-    header = block.table.headers.length > 0 ? block.table.headers : wide ? (rows[0] ?? []) : [];
+    // same. (In a table of mostly two-cell rows the first row is a "Spec |
+    // Value" pair, not a header, even when a row has an extra info cell.) It
+    // stays a row for the lookups by value.
+    header = block.table.headers.length > 0 ? block.table.headers : mostlyPairs(rows) ? [] : (rows[0] ?? []);
   } else {
     // A table block without its parsed grid: the rendered "a | b | c" lines, first one the header.
     const lines = block.text
@@ -365,7 +372,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
       else if (at[at.length - 1] !== r) at.push(r);
     }
   });
-  const keyValue = header.length <= 2 && rows.every((cells) => cells.length <= 2);
+  const keyValue = header.length <= 2 && mostlyPairs(rows);
   const index: TableIndex = { header, rows, rowsByCell, columns: new Map(), labels: new Map(), keyValue };
   tableIndexes.set(block, index);
   return index;
@@ -383,7 +390,14 @@ function tableIndex(block: SourceBlock): TableIndex | null {
 function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpec): string[] | null {
   const t = tableIndex(block);
   if (!t) return null;
-  if (t.keyValue) {
+  let col = t.columns.get(field.name);
+  if (col === undefined) {
+    col = columnFor(t.header, field);
+    t.columns.set(field.name, col);
+  }
+  // A header naming the field wins: in "Dish | Vegan", the row "Vegan chili
+  // bowl" is a record, not the label of the field.
+  if (col < 0 && t.keyValue) {
     let named = t.labels.get(field.name);
     if (named === undefined) {
       named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
@@ -391,11 +405,6 @@ function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpe
     }
     if (named >= 0) return [t.rows[named][1] ?? ''];
     // No label names the field: a two-column listing ("Part | Availability"), read by its rows.
-  }
-  let col = t.columns.get(field.name);
-  if (col === undefined) {
-    col = columnFor(t.header, field);
-    t.columns.set(field.name, col);
   }
   // Values printed in several rows ("Acme" for a brand) say nothing about which row.
   const votes = new Map<number, number>();
@@ -453,8 +462,36 @@ function isDistinctiveNumber(value: number): boolean {
 
 /** Attribute values that read as yes/no or as a small count whatever the attribute means (data-index="0", data-quantity="1"). */
 const BARE_ATTR_VALUE = /^(?:[+-]?\d+(?:[.,]\d+)?|true|false|yes|no|y|n|on|off)$/i;
-/** A yes/no field about availability: a card's stock class ("instock", "outofstock") speaks to it, and to no other field. */
-const AVAILABILITY_FIELD = /stock|avail|sold|backorder|pre-?order|purchasab|buyable/i;
+/**
+ * Words a yes/no field about availability is named with ("inStock",
+ * "isAvailable", "canBuy", "isOrderable", "lieferbar"): a card's stock class
+ * ("instock", "outofstock") speaks to it, and to no other field. So does
+ * a field named for the item being unavailable ("soldOut"), read the other
+ * way; not preorder or backorder, which the stock class does not answer.
+ */
+const AVAILABILITY_WORDS = new Set([
+  'available', 'availability', 'avail', 'stock', 'instock', 'stocked', 'orderable', 'order', 'buy', 'buyable', 'purchase', 'purchasable',
+  'inventory', 'lieferbar', 'verfugbar', 'verfuegbar', 'vorratig', 'vorraetig', 'disponible', 'disponibile', 'disponibilidad', 'disponibilite',
+  'beschikbaar', 'leverbaar', 'voorraad', 'estoque', 'existencia', 'existencias',
+]);
+/** Words that may sit next to them in such a name ("isInStockOnline", "productAvailable"). */
+const AVAILABILITY_NAME_FILLER = new Set(['is', 'has', 'can', 'in', 'on', 'be', 'now', 'currently', 'item', 'product', 'online', 'status', 'to', 'for', 'still', 'level']);
+/** A description about stock, in its positive sense ("Whether the item is in stock"); not a bare "available" ("Whether 5G is available"). */
+const AVAILABILITY_PHRASE = /in[- ]stock|stock (?:status|level)|availability|inventory|available (?:to|for) (?:buy|order|purchase|sale)|can be (?:bought|ordered|purchased)|(?:purchasable|orderable|buyable)/i;
+
+function isAvailabilityField(field: FieldSpec): boolean {
+  if (field.type !== 'boolean') return false;
+  if (negatesAvailability(field)) return true;
+  const words = field.name
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+  if (words.some((w) => AVAILABILITY_WORDS.has(w)) && words.every((w) => AVAILABILITY_WORDS.has(w) || AVAILABILITY_NAME_FILLER.has(w))) return true;
+  return AVAILABILITY_PHRASE.test((field.description ?? '').slice(0, 500));
+}
 
 /** Attributes that carry the value of the attribute naming them (itemprop="ratingValue" content="4.5"). */
 const VALUE_ATTRS = new Set(['content', 'value', 'datetime']);
@@ -1227,13 +1264,19 @@ class ExtractionRun {
   }
 
   /**
-   * Whether `group`'s records are what the fields are about: no table, and
-   * no record of another group, that a top-of-page rendering would send
-   * matches them better than the group's best record (BM25 over the field
-   * names, descriptions and related words; see document/select.ts). Sums
-   * over the whole top are not compared: a long menu outscores any grid by
-   * its size alone. When nothing on the page names the fields, the largest
-   * group is what the page lists.
+   * Whether `group`'s records are what the fields are about, rather than
+   * something else a top-of-page rendering would send: a table, another
+   * group's records, or a run of sections (headings). Scores are BM25 over
+   * the field names, descriptions and related words (document/select.ts).
+   * The largest structure is the listing (as for the expected record
+   * count), so a rival
+   * - much larger than the group (twice its size or more) wins, unless it
+   *   does not name the fields and the group does;
+   * - of comparable size (half or more) wins when it names them better;
+   * - much smaller never wins: a strip of four deals above a grid of 40 is
+   *   not the listing, however well its tiles score.
+   * Sums over the whole top are not compared: a long menu outscores any
+   * grid by its size alone.
    */
   private groupMatchesFields(group: RecordGroup, fields: FieldSpec[], topIds: readonly string[]): boolean {
     const scores = scoreBlocks(this.doc, queryTerms(fields));
@@ -1247,21 +1290,36 @@ class ExtractionRun {
       const r = recordOf(b);
       if (r !== undefined) recordScore.set(r, (recordScore.get(r) ?? 0) + scores[i]);
     });
+    const size = group.recordIds.length;
     let best = 0;
     for (const id of group.recordIds) best = Math.max(best, recordScore.get(id) ?? 0);
-    let rival = 0;
+    const beats = (rivalSize: number, rivalScore: number): boolean => {
+      if (rivalSize >= size * 2) return rivalScore > 0 || best === 0;
+      if (rivalSize * 2 >= size) return rivalScore > best;
+      return false;
+    };
+    const sizes = new Map<string, number>();
+    for (const g of this.doc.recordGroups) sizes.set(g.id, g.recordIds.length);
+    const otherGroups = new Map<string, number>();
+    let headings = 0;
+    let headingScore = 0;
     for (const id of topIds) {
       const i = index.get(id);
       if (i === undefined) continue;
       const b = this.doc.blocks[i];
       const r = recordOf(b);
       if (r !== undefined) {
-        if (groupOf.get(r) !== group.id) rival = Math.max(rival, recordScore.get(r) ?? 0);
+        const g = groupOf.get(r) as string;
+        if (g !== group.id) otherGroups.set(g, Math.max(otherGroups.get(g) ?? 0, recordScore.get(r) ?? 0));
       } else if (b.kind === 'table') {
-        rival = Math.max(rival, scores[i]);
+        if (beats(b.table?.rows.length ?? 0, scores[i])) return false;
+      } else if (b.kind === 'heading') {
+        headings++;
+        headingScore = Math.max(headingScore, scores[i]);
       }
     }
-    return rival <= best;
+    for (const [g, score] of otherGroups) if (beats(sizes.get(g) ?? 0, score)) return false;
+    return !beats(headings, headingScore);
   }
 
   private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
@@ -1508,20 +1566,63 @@ class ExtractionRun {
   /**
    * The cards of a chunk that no record of its answer cites (any of a
    * record's cells), or null when too many records cite no card of the
-   * chunk to tell what the answer covered: nothing is asked again then.
+   * chunk to tell what the answer covered: nothing is asked again then. A
+   * record that cites none (bare values, an unknown block) but whose text
+   * is printed on exactly one card of the chunk covers that card: asked
+   * again, it would come back twice.
    */
   private uncoveredCards(records: ParsedRecord[], cards: readonly string[], fields: FieldSpec[]): string[] | null {
     const inChunk = new Set(cards);
     const covered = new Set<string>();
     let unplaced = 0;
+    let cardTexts: Map<string, string> | undefined;
     for (const r of records) {
       const cited = [...this.citedCards(r, fields)].filter((id) => inChunk.has(id));
-      // A stray record (an empty one for a promo tile, bare values) stands for one card at most.
-      if (cited.length === 0) unplaced++;
+      if (cited.length === 0) {
+        cardTexts ??= this.cardTexts(cards);
+        const card = this.cardPrinting(r, fields, cardTexts);
+        if (card !== undefined) covered.add(card);
+        // A stray record (an empty one for a promo tile) stands for one card at most.
+        else unplaced++;
+      }
       for (const id of cited) covered.add(id);
     }
-    if (unplaced > records.length * (1 - REASK_MIN_PLACED)) return null;
+    if (unplaced * REASK_MAX_UNPLACED_ONE_IN > records.length) return null;
     return cards.filter((id) => !covered.has(id));
+  }
+
+  /** Each card's text (its own block and the blocks inside it), compared loosely. */
+  private cardTexts(cards: readonly string[]): Map<string, string> {
+    const inChunk = new Set(cards);
+    const parts = new Map<string, string[]>();
+    for (const b of this.doc.blocks) {
+      const card = inChunk.has(b.id) ? b.id : b.parentId !== undefined && inChunk.has(b.parentId) ? b.parentId : undefined;
+      if (card === undefined || !b.text) continue;
+      const list = parts.get(card);
+      if (list) list.push(b.text);
+      else parts.set(card, [b.text]);
+    }
+    return new Map([...parts].map(([card, texts]) => [card, looseText(texts.join(' '))]));
+  }
+
+  /** The one card whose text prints every string value of `record` (at least one, MIN_PLACING_TEXT long), if any. */
+  private cardPrinting(record: ParsedRecord, fields: FieldSpec[], cardTexts: ReadonlyMap<string, string>): string | undefined {
+    const values: string[] = [];
+    for (const field of fields) {
+      if (!hasOwn(record, field.name)) continue;
+      const v = record[field.name].v;
+      if (typeof v !== 'string') continue;
+      const text = looseText(v);
+      if (text.length >= MIN_PLACING_TEXT) values.push(text);
+    }
+    if (values.length === 0) return undefined;
+    let found: string | undefined;
+    for (const [card, text] of cardTexts) {
+      if (!values.every((v) => text.includes(v))) continue;
+      if (found !== undefined) return undefined;
+      found = card;
+    }
+    return found;
   }
 
   /** Listing records (cards) the cells of a parsed record cite. */
@@ -1891,8 +1992,9 @@ class ExtractionRun {
    * value, and, for a yes/no field, none of them to the opposite. A bare
    * "0", "1" or "true" in an attribute (data-index, data-quantity) counts,
    * either way, only when the attribute is named for the field. A yes/no
-   * field reads only attributes named for it, plus the card's stock words
-   * when the field is about availability. Strings never take this path: their
+   * field reads the cited element's own attributes, and of the card's only
+   * those named for it, plus its stock words when the field is about
+   * availability. Strings never take this path: their
    * meaning is too loose to compare. Returns a note for the evidence, or null.
    */
   private matchByMeaning(field: FieldSpec, raw: unknown, ctx: BlockContext, keys: readonly string[] = []): string | null {
@@ -1902,19 +2004,24 @@ class ExtractionRun {
     // A whole table cited: only the cells that can hold this answer's value, when the table says which.
     const cells = ctx.block.kind === 'table' ? tableCells(ctx.block, keys, field) : null;
     const candidates: string[] = [...(cells ?? textPieces(ctx.block.text))];
-    // A yes/no field reads attributes named for it ("data-in-stock") and, if
-    // it is about availability, the card's stock words ("outofstock"). A stock
-    // class says nothing about has5g or freeShipping, either way.
-    const availability = field.type === 'boolean' && AVAILABILITY_FIELD.test(`${field.name} ${field.description ?? ''}`.slice(0, 500));
+    // The cited element's own attributes speak to any field ("feature
+    // feature--unavailable" on the "Touchscreen" item). The card's (a record
+    // cited whole, or the records around the block) speak to a yes/no field
+    // only when named for it ("data-in-stock") or when the field is about
+    // availability ("outofstock"): a stock class says nothing about has5g
+    // or freeShipping, either way.
+    const availability = isAvailabilityField(field);
+    const ownIsCard = ctx.block.kind === 'record';
     const attrSets = [ctx.block.attrs ?? {}, ...(ctx.recordAttrs ?? [])].slice(0, MEANING_MAX_ATTR_SETS);
-    for (const attrs of attrSets) {
+    for (const [setIndex, attrs] of attrSets.entries()) {
+      const cardLevel = setIndex > 0 || ownIsCard;
       for (const [name, value] of Object.entries(attrs)) {
         // Links and image paths hold digits that mean nothing ("/3f/c6/…").
         if (MEANING_SKIP_ATTRS.has(name) || /[/\\=?&#]|:\/\//.test(value)) continue;
         // A bare "0"/"1"/"true" says something only in an attribute named for
         // the field; a word ("outofstock", "sold-out") also in any other.
         const named = attrNamesField(name, attrs, field);
-        if (field.type === 'boolean' && !named && !availability) continue;
+        if (field.type === 'boolean' && cardLevel && !named && !availability) continue;
         if (named || !BARE_ATTR_VALUE.test(value.trim())) candidates.push(value);
         // Class lists carry one token per fact ("star-rating Three").
         if (/\s/.test(value)) {

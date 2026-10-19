@@ -290,3 +290,90 @@ describe('after the third review round', () => {
     expect(b.data).toMatchObject({ model: 'Nova X1', rating: 4 });
   });
 });
+
+describe('after the fourth review round', () => {
+  const listSchema = (props: Record<string, string | { type: string; description: string }>) => ({
+    type: 'object',
+    properties: { items: { type: 'array', items: { type: 'object', properties: Object.fromEntries(Object.entries(props).map(([k, t]) => [k, typeof t === 'string' ? { type: t } : t])) } } },
+  });
+  const tableId = (html: string) => buildSourceDocument(html, 'https://shop.example/').blocks.find((b) => b.kind === 'table')!.id;
+  const wooCards = (cards: Array<[string, boolean, boolean, boolean]>) =>
+    '<html><body><main><h1>Phones</h1><ul class="products">' +
+    cards
+      .map(([n, stock, a, b], i) =>
+        `<li class="product type-product post-${i} status-publish ${stock ? 'instock' : 'outofstock'} purchasable"><h2>${n}</h2>` +
+        `<dl><dt>A</dt><dd class="spec-a">${a ? 'Yes' : 'No'}</dd><dt>B</dt><dd class="spec-b">${b ? 'Yes' : 'No'}</dd></dl></li>`,
+      )
+      .join('') +
+    '</ul></main></body></html>';
+  const CARDS: Array<[string, boolean, boolean, boolean]> = [['Alpha', true, false, true], ['Beta', false, true, false], ['Gamma', true, true, false], ['Delta', false, false, true]];
+  const cell = (doc: SourceDocument, name: string, nth: number) => {
+    const from = doc.blocks.findIndex((b) => b.text === name);
+    return doc.blocks.slice(from + 1).filter((b) => b.text === 'Yes' || b.text === 'No')[nth]!.id;
+  };
+
+  it.each([
+    ['has5g', 'Whether 5G is available on the phone', 'freeShipping', 'Whether free shipping is available'],
+    ['isPreorder', 'Whether the phone is a pre-order', 'onBackorder', 'Whether the phone is on backorder'],
+    ['giftWrapAvailable', 'Gift wrap', 'financingAvailable', 'Financing'],
+  ])('%s / %s: a description or name saying "available" does not make a field about stock', async (f1, d1, f2, d2) => {
+    const html = wooCards(CARDS);
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    const out = await run(
+      html,
+      listSchema({ name: 'string', [f1]: { type: 'boolean', description: d1 }, [f2]: { type: 'boolean', description: d2 } }),
+      CARDS.map(([n, , a, b]) => ({ name: { v: n, b: blockWith(doc, n) }, [f1]: { v: a, b: cell(doc, n, 0) }, [f2]: { v: b, b: cell(doc, n, 1) } })),
+    );
+    expect(out.data).toMatchObject({ items: CARDS.map(([n, , a, b]) => ({ name: n, [f1]: a, [f2]: b })) });
+  });
+
+  it.each(['isOrderable', 'canBuy', 'canPurchase', 'lieferbar', 'isInStockOnline'])('%s is about stock: the card\'s stock class grounds it, either way', async (field) => {
+    const html = wooCards(CARDS);
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    const out = await run(html, listSchema({ name: 'string', [field]: 'boolean' }), CARDS.map(([n, stock]) => ({ name: { v: n, b: blockWith(doc, n) }, [field]: { v: stock, b: blockWith(doc, n) } })));
+    expect(out.data).toMatchObject({ items: CARDS.map(([n, stock]) => ({ name: n, [field]: stock })) });
+    const wrong = await run(html, listSchema({ name: 'string', [field]: 'boolean' }), [{ name: { v: 'Beta', b: blockWith(doc, 'Beta') }, [field]: { v: true, b: blockWith(doc, 'Beta') } }]);
+    expect(reasonAt(wrong, `/items/0/${field}`)).toBe('rejected_ungrounded');
+  });
+
+  it('a field true when sold out reads the stock class, and "Sold out", the other way', async () => {
+    const html = wooCards(CARDS);
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    const out = await run(html, listSchema({ name: 'string', isSoldOut: 'boolean' }), CARDS.map(([n, stock]) => ({ name: { v: n, b: blockWith(doc, n) }, isSoldOut: { v: !stock, b: blockWith(doc, n) } })));
+    expect(out.data).toMatchObject({ items: CARDS.map(([n, stock]) => ({ name: n, isSoldOut: !stock })) });
+  });
+
+  it("the cited element's own class speaks to any yes/no field (a feature list marked available/unavailable)", async () => {
+    const features: Array<[string, string, boolean]> = [['Backlit keyboard', 'hasBacklitKeyboard', true], ['Touchscreen', 'hasTouchscreen', false], ['Fingerprint reader', 'hasFingerprintReader', true]];
+    const html = `<html><body><main><h1>Laptop L5</h1><ul class="features">${features.map(([t, , on]) => `<li class="feature feature--${on ? 'available' : 'unavailable'}">${t}</li>`).join('')}</ul></main></body></html>`;
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    const schema = { type: 'object', properties: Object.fromEntries(features.map(([, f]) => [f, { type: 'boolean', description: `Whether the laptop has a ${f}` }])) };
+    for (const form of [(on: boolean) => on, (on: boolean) => (on ? 'Yes' : 'No')]) {
+      const out = await run(html, schema, [Object.fromEntries(features.map(([t, f, on]) => [f, { v: form(on), b: blockWith(doc, t) }]))]);
+      expect(out.data).toEqual(Object.fromEntries(features.map(([, f, on]) => [f, on])));
+    }
+  });
+
+  it('in a two-column table with a header naming the field, a record named like the field does not hijack the column', async () => {
+    const html =
+      '<html><body><main><h1>Hotels</h1><table><tr><th>Hotel</th><th>Pool</th></tr>' +
+      '<tr><td>Grand Central</td><td>No</td></tr><tr><td>Poolside Inn</td><td>Yes</td></tr><tr><td>Lakeview Lodge</td><td>No</td></tr><tr><td>Harbor Suites</td><td>Yes</td></tr>' +
+      '</table></main></body></html>';
+    const t = tableId(html);
+    const schema = listSchema({ hotel: 'string', pool: 'boolean' });
+    const hotels: Array<[string, boolean]> = [['Grand Central', false], ['Poolside Inn', true], ['Lakeview Lodge', false], ['Harbor Suites', true]];
+    const right = await run(html, schema, hotels.map(([h, p]) => ({ hotel: { v: h, b: t }, pool: { v: p, b: t } })));
+    expect(right.data).toMatchObject({ items: hotels.map(([hotel, pool]) => ({ hotel, pool })) });
+    const wrong = await run(html, schema, hotels.map(([h, p]) => ({ hotel: { v: h, b: t }, pool: { v: !p, b: t } })));
+    for (const i of [0, 1, 2, 3]) expect(reasonAt(wrong, `/items/${i}/pool`)).toBe('rejected_ungrounded');
+  });
+
+  it('a header-less spec table with one extra info cell: the first row is still a spec', async () => {
+    const html =
+      '<html><body><main><h1>Nova X1</h1><table><tbody><tr><td>5G</td><td>Yes</td></tr><tr><td>NFC</td><td>No</td></tr><tr><td>Wireless charging</td><td>No</td></tr>' +
+      '<tr><td>Battery</td><td>5000 mAh</td><td>Removable</td></tr></tbody></table></main></body></html>';
+    const t = tableId(html);
+    const out = await run(html, { type: 'object', properties: { has5g: { type: 'boolean' }, nfc: { type: 'boolean' } } }, [{ has5g: { v: true, b: t }, nfc: { v: false, b: t } }]);
+    expect(out.data).toMatchObject({ has5g: true, nfc: false });
+  });
+});

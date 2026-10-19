@@ -10,7 +10,7 @@
 // with the step 'no-value', so a correct answer to such a page is complete.
 
 import type { FieldSpec, FieldType, JsonSchema } from '../types.js';
-import { readAvailability, readWorkplace, workplaceTopic } from './booleans.js';
+import { negatesAvailability, readAvailability, readUnavailability, readWorkplace, workplaceTopic } from './booleans.js';
 import {
   findNumericTokens,
   hasCurrencyMarker,
@@ -249,21 +249,40 @@ function readByUnit(text: string, tokens: NumericToken[], readings: Reading[], u
 // Between numbers that one trailing unit covers:
 // - a size: "31.2 x 22.1 x 1.5 cm";
 // - a range or variants, ascending: "2-3 kg", "8 - 10 hours", "2 – 3 kg",
-//   "128/256/512 GB", "64 / 128 GB";
+//   "128/256/512 GB", "64 / 128 GB", "Battery life 8 - 10 hours";
 // - a range in words: "5 to 7 kg", "-5 to -10 °C", "8 or 16 GB".
 // A spaced hyphen or slash right after a product's own number is a title
-// separator, not a range: "iPhone 15 - 128 GB", "USB 3.0 - 64GB", "EU 42 / 27 cm".
+// separator, not a range: "iPhone 15 - 128 GB", "USB 3.0 - 64GB", "Series 9
+// - 45mm", "Pack of 8 - 200 ml", "EU 42 / 27 cm" (descending). In doubt it
+// is a range: a range read as its upper end is a confident wrong value.
 const TIMES_JOINER = /^\s*[x×*]\s*$/iu;
 const ASCENDING_JOINER = /^(?:[-‐‑/]|\s*[‒–—]\s*)$/u;
 const SPACED_JOINER = /^\s+[-‐‑/]\s+$/u;
 const WORD_JOINER = /^\s+(?:to|and|or|bis)\s+[-−]?$/iu;
-// Words that introduce a quantity: "up to 8 - 10 hours" is a range.
-const QUANTITY_WORDS = new Set(['to', 'from', 'about', 'approx', 'approximately', 'around', 'ca', 'circa', 'between', 'of', 'is', 'are', 'was', 'up']);
+// "Pack of 8 - 200 ml": eight of 200 ml.
+const COUNT_OF = /(?<![\p{L}\p{N}])(?:pack|set|box|case|kit|bundle|lot|carton|tray|multipack|pk)\s+of\s+$/iu;
+// Capitalized words that name a quantity, not a product ("Weight 5 - 30 kg", "Max. 5 - 30 kg").
+const LABEL_WORDS = new Set([
+  'weight', 'weighs', 'capacity', 'size', 'sizes', 'age', 'ages', 'max', 'min', 'approx', 'typ', 'ca', 'range', 'battery', 'life', 'runtime',
+  'time', 'power', 'load', 'length', 'width', 'height', 'depth', 'volume', 'speed', 'temp', 'temperature', 'voltage', 'input', 'output',
+  'duration', 'storage', 'memory', 'ram', 'from', 'up', 'between',
+]);
+/** A product's number is far below the spec after it ("Series 9 - 45mm"); a range's ends are closer ("Ages 3 - 12 years"). */
+const NAME_NUMBER_RATIO = 5;
 
-/** Whether the number starting at `start` follows a word that names a product ("iPhone 15", "Series 9", "EU 42"). */
-function followsName(text: string, start: number): boolean {
-  const word = /([\p{L}][\p{L}\d.]*)\s+$/u.exec(text.slice(Math.max(0, start - 40), start));
-  return word !== null && !QUANTITY_WORDS.has(word[1].toLowerCase().replace(/\.$/, ''));
+/**
+ * Whether the number starting at `start` (a, followed by b) belongs to a
+ * product's name: glued to its letters ("S24"), after a count ("Pack of
+ * 8"), after a camel-case name ("iPhone 15", "PlayStation 5"), or after a
+ * capitalized name when the next number is far larger ("Pixel 8 - 128 GB").
+ */
+function followsName(text: string, start: number, a: number, b: number): boolean {
+  const before = text.slice(Math.max(0, start - 40), start);
+  if (/\p{L}$/u.test(before) || COUNT_OF.test(before)) return true;
+  const word = /(\p{L}[\p{L}\d.]*)\s+$/u.exec(before)?.[1];
+  if (word === undefined || LABEL_WORDS.has(word.toLowerCase().replace(/\.$/, ''))) return false;
+  if (/\p{Ll}\p{Lu}/u.test(word)) return true;
+  return /^\p{Lu}/u.test(word) && a > 0 && b / a >= NAME_NUMBER_RATIO;
 }
 
 function joinsUnitSequence(text: string, between: string, left: NumericToken, right: NumericToken, a: number, b: number): boolean {
@@ -271,7 +290,7 @@ function joinsUnitSequence(text: string, between: string, left: NumericToken, ri
   if (WORD_JOINER.test(between)) return !/[-−]$/.test(between) || right.negative;
   if (right.negative || a > b) return false;
   if (ASCENDING_JOINER.test(between)) return true;
-  return SPACED_JOINER.test(between) && !followsName(text, left.start);
+  return SPACED_JOINER.test(between) && !followsName(text, left.start, a, b);
 }
 /** "6 x 330 ml": a pack of six, whose unit size is the value. Not for lengths ("60 x 90 cm" is a size). */
 const MAX_PACK_COUNT = 24;
@@ -312,6 +331,8 @@ const UNIT_SYSTEM: Readonly<Record<string, string>> = {
   lb: 'imperial-mass', oz: 'imperial-mass',
   kg: 'metric-mass', g: 'metric-mass', mg: 'metric-mass',
   km: 'metric-length', m: 'metric-length', cm: 'metric-length', mm: 'metric-length',
+  l: 'metric-volume', ml: 'metric-volume',
+  ghz: 'frequency', mhz: 'frequency', khz: 'frequency', hz: 'frequency',
 };
 
 /**
@@ -432,7 +453,7 @@ function normalizeBoolean(raw: unknown, field: FieldSpec): NormalizeResult {
   const text = raw.length > MAX_BOOLEAN_TEXT * 4 ? raw : cleanText(raw).toLowerCase();
   if (text.length > MAX_BOOLEAN_TEXT) return fail('unparseable', 'text is too long for a yes/no value');
   const workplace = workplaceTopic(field);
-  const parsed = workplace ? readWorkplace(text, workplace) : readAvailability(text);
+  const parsed = workplace ? readWorkplace(text, workplace) : negatesAvailability(field) ? readUnavailability(text) : readAvailability(text);
   if (parsed === 'ambiguous') {
     return fail('ambiguous', workplace ? `no clear remote/on-site answer in ${quote(text)}` : `both available and unavailable in ${quote(text)}`);
   }

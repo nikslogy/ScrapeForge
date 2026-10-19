@@ -316,3 +316,87 @@ describe('records alone against the size of the page, a stray record, a cheaper 
     expect(calls.cheap).toBeGreaterThan(0);
   });
 });
+
+// After the fourth review round.
+describe('records alone against the size of what competes, and stray records placed by their text', () => {
+  const sentTo = (onUser: (user: string) => void) =>
+    fakeClient((_caps, req) => {
+      onUser(req.user);
+      return { text: '{"records":[]}', finishReason: 'stop', inputTokens: 1, outputTokens: 1, costUsd: 0, latencyMs: 1 };
+    }, { maxOutputTokens: 4_096, contextTokens: 8_000 }).client;
+
+  it('a strip of four deals above a 40-card grid does not take the grid\'s place, however well its tiles score', async () => {
+    const deals = Array.from({ length: 4 }, (_, i) => `<div class="deal-tile"><h3><a href="/d/${i}">Deal Gadget ${i}</a></h3><p class="deal-price">Sale price now $${9 + i}.99, was $${19 + i}.99</p></div>`).join('');
+    const grid = items(40)
+      .map((it, i) => `<li class="col-span-1"><div class="rounded border p-3"><h3 class="text-base"><a href="/p/${i}">${it.title}</a></h3><p class="mt-1 font-bold">${it.price}</p></div></li>`)
+      .join('');
+    const intro = Array.from({ length: 80 }, (_, i) => `<p>Guide ${i}: ${'Choosing a gadget comes down to battery life, build quality and how you plan to use it every day. '.repeat(3)}</p>`).join('');
+    const html = page(`<main><h1>All gadgets</h1><section class="deals"><h2>Deals of the week</h2><div class="deal-row">${deals}</div></section>${intro}<ul class="grid">${grid}</ul></main>`);
+    let gridCards = 0;
+    const client = sentTo((user) => (gridCards = Math.max(gridCards, items(40).filter((it) => user.includes(it.title)).length)));
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.scope.strategy).toBe('partitioned');
+    expect(gridCards).toBe(40);
+  });
+
+  it('a changelog printed as headings is sent from the top, not replaced by the four blog cards beside it', async () => {
+    const releases = Array.from({ length: 900 }, (_, i) =>
+      `<h2>Version 3.${900 - i}.0</h2><p>Released 2026-${String((i % 12) + 1).padStart(2, '0')}-${String((i % 27) + 1).padStart(2, '0')}</p><p>Fixed a crash when opening large projects from the recent list.</p>`,
+    ).join('');
+    const related = Array.from({ length: 4 }, (_, i) => `<div class="post-card"><h4><a href="/blog/${i}">How we ship release ${i}</a></h4><p>A look behind the scenes at our process number ${i}.</p></div>`).join('');
+    const html = page(`<main><h1>Changelog</h1>${releases}<aside><h3>From the blog</h3>${related}</aside></main>`);
+    let sawTop = false;
+    const client = sentTo((user) => (sawTop ||= user.includes('Version 3.900.0')));
+    const out = await extractStructured(request(html, { releases: [{ version: 'string — release version number', date: 'string — release date' }] }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(sawTop).toBe(true);
+    expect(out.scope.strategy).not.toBe('partitioned');
+  });
+
+  it('a release table whose headers do not spell the fields is sent from the top, not replaced by three related stories', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => `<tr><td>Release ${i + 1}.0</td><td>2026-${String(i + 1).padStart(2, '0')}-10</td></tr>`).join('');
+    const prose = Array.from({ length: 200 }, (_, i) => `<p>Note ${i}: ${'We keep a careful log of everything that ships each week. '.repeat(4)}</p>`).join('');
+    const related = ['One', 'Two', 'Three'].map((t) => `<article class="story"><h3>Related story ${t}</h3><p>Read more about our team</p></article>`).join('');
+    const html = page(`<main><h1>History</h1><table><thead><tr><th>Release</th><th>Shipped</th></tr></thead><tbody>${rows}</tbody></table>${prose}<aside>${related}</aside></main>`);
+    let sawTable = false;
+    const client = sentTo((user) => (sawTable ||= user.includes('Release 1.0')));
+    const out = await extractStructured(request(html, { releases: [{ version: 'string', date: 'string' }] }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(sawTable).toBe(true);
+    expect(out.scope.strategy).not.toBe('partitioned');
+  });
+
+  it.each(['bare', 'unknown block'] as const)('a record given with %s for a card is placed on that card by its text: the card is not asked again, nor returned twice', async (variant) => {
+    const lazy: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Sync;
+      if (cardsIn(req.user) < 100) return r;
+      const parsed = JSON.parse(r.text) as { records: Array<Record<string, { v: unknown; b: unknown }>> };
+      const kept: unknown[] = parsed.records.slice(0, Math.floor(parsed.records.length * 0.7));
+      const last = parsed.records[kept.length - 1];
+      kept[kept.length - 1] =
+        variant === 'bare' ? { title: last.title.v, price: last.price.v } : { title: { v: last.title.v, b: 'b999999' }, price: { v: last.price.v, b: 'b999998' } };
+      return { ...r, text: JSON.stringify({ records: kept }) };
+    };
+    const { client } = fakeClient(lazy, { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(items(400)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    const titles = (out.data as { items: Array<{ title: string | null }> }).items.map((r) => r.title);
+    expect(titles).toHaveLength(400);
+    expect(new Set(titles).size).toBe(400);
+    expect(out.status).toBe('complete');
+  });
+
+  it('exactly one record in five citing no card still re-asks the cards left out', async () => {
+    let firstCards = -1;
+    const handler: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Sync;
+      const cards = cardsIn(req.user);
+      if (firstCards === -1) firstCards = cards;
+      if (cards < 100) return r;
+      const recs: unknown[] = (JSON.parse(r.text) as { records: unknown[] }).records.slice(0, 120);
+      for (let k = 0; k < 30; k++) recs.push({ title: { v: null, b: null }, price: { v: null, b: null } });
+      return { ...r, text: JSON.stringify({ records: recs }) };
+    };
+    const { client } = fakeClient(handler, { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(items(400)), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.warnings).toContain('partition_chunk_reasked');
+    expect(len(out.data, 'items')).toBe(400);
+  });
+});

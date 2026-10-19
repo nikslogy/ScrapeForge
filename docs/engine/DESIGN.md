@@ -340,12 +340,19 @@ record group's answer exceeds the output limit, or the page exceeds the
 input budget. A listing that fits one call on a page that does not (a long
 intro or menu above the grid) is sent as one chunk: the records alone, not
 the top of the page. That happens unless something the top of the page
-would send matches the fields better than the group's best record (BM25,
-as for selection): a table, or a record of another group. So a small
-"related stories" group never replaces a table at the top. Sums over the
-whole top are not compared (a long menu outscores any grid by its size
-alone), and when nothing names the fields, the largest group is what the
-page lists. An empty answer there is a `not_processed` gap. `partitionPlan` sizes chunks to
+would send is the listing instead: a table, another group's records, or a
+run of sections (headings). The largest structure is the listing, as for
+the expected record count, and scores are BM25 over the fields, as for
+selection. A rival
+* twice the group's size or more wins, unless it does not name the fields
+  and the group does: a changelog printed as 900 "Version x" headings, or
+  a 12-row release table, is not replaced by three blog cards beside it;
+* of comparable size (half or more) wins when it names the fields better;
+* much smaller never wins: a strip of four deals above a 40-card grid is
+  not the listing, however well its tiles score.
+
+Sums over the whole top are not compared: a long menu outscores any grid
+by its size alone. An empty answer there is a `not_processed` gap. `partitionPlan` sizes chunks to
 whichever limit is smaller:
 
 * the output limit: the same estimate as `outputRecordCap`;
@@ -370,7 +377,11 @@ ordinary extraction call.
     sent: the client moves on to a cheaper fallback;
   * the client refuses a call whose expected answer the cap cannot pay for
     (`minOutputTokens`) rather than lowering max_tokens to an answer that
-    would be cut off and billed: more budget never returns fewer records;
+    would be cut off and billed: on one model, more budget never returns
+    fewer records. With a cheaper fallback, the client still uses the
+    primary for a chunk whenever the primary can pay for it, so a cap just
+    above that point can return fewer records than a slightly smaller one
+    (every chunk on the fallback);
   * once even the smallest chunk is unaffordable, the rest is skipped.
 * Chunks stopped by the deadline or the cost cap are `skipped` with that
   reason, never reported as a provider failure. Neighbouring skipped
@@ -383,9 +394,12 @@ ordinary extraction call.
   not into halving.
 * A chunk answered with fewer records than cards, beyond the promo-slot
   tolerance (10%), is asked again for exactly the cards no record cites
-  (once). A stray record that cites no card of the chunk (an empty record
-  for a promo tile, bare values) stands for one card at most; the re-ask
-  is dropped only when more than 20% of the records cite none. A second
+  (once). A record that cites no card of the chunk (bare values, an
+  unknown block id) but whose text is printed on exactly one card covers
+  that card, so it is not asked for again (nor returned twice). Any other
+  stray record (an empty one for a promo tile) stands for one card at
+  most; the re-ask is dropped only when more than 20% of the records are
+  such strays. A second
   short answer, or an empty answer while other chunks found records, is a
   gap ("returned 54 of 108"). A record that cites one card (a card with a
   single value) is deduplicated by that card.
@@ -627,20 +641,30 @@ in `engine.ts` (`groundIn`, `matchByMeaning`):
   the same value. Examples: "3" for class "star-rating Three", `false` for
   "It is not eligible for fully remote work."
   * For a boolean, nothing the block or its record says may read as the
-    opposite: its words, or an attribute named for the field
-    (`data-in-stock`). A card's other attributes and class tokens
-    (`instock`, `outofstock`) speak only to a field about availability
-    (stock, sold out, backorder, ...): a stock class says nothing about
-    `has5g` or `freeShipping`. A bare `0`, `1`, `true` or `false` counts,
-    either way, only in an attribute named for the field; in `data-index`
-    or `data-quantity` it says nothing.
+    opposite: its words, its own attributes and class tokens (`feature
+    feature--unavailable` on the "Touchscreen" item), or a card attribute
+    named for the field (`data-in-stock`). The card's other attributes and
+    class tokens (`instock`, `outofstock`) speak only to a field about
+    availability: one named for it (`inStock`, `isAvailable`, `canBuy`,
+    `isOrderable`, `lieferbar`, ...) or described as being in stock. A
+    stock class says nothing about `has5g` or `freeShipping`, even when
+    their description says "available", nor about `isPreorder` or
+    `onBackorder`. A bare `0`, `1`, `true` or `false` counts, either way,
+    only in an attribute named for the field; in `data-index` or
+    `data-quantity` it says nothing.
+  * A yes/no field true when the item is unavailable (`isSoldOut`,
+    `outOfStock`) reads availability phrases the other way: "Sold out" and
+    the `outofstock` class are true for it, "Yes" and "No" as written.
   * For a cited table, only the cells that can hold the value count. A
     header row of plain `<td>` cells names the columns too, in a table of
-    three or more columns. In a header-less two-column table the first row
-    is a spec ("5G | Yes"), not a header.
+    three or more columns. In a header-less table of mostly two-cell rows
+    the first row is a spec ("5G | Yes"), not a header, even when a row
+    carries an extra info cell.
     * in a "Spec | Value" table, the value cell of the row whose label
-      names the field ("NFC" for `hasNfc`); a two-column table whose
-      labels do not name the field is read by its rows, as below;
+      names the field ("NFC" for `hasNfc`), unless a header names it ("Dish
+      | Vegan": the row "Vegan chili bowl" is a record, not the label); a
+      two-column table whose labels do not name the field is read by its
+      rows, as below;
     * otherwise, the row holding the most of the answer's own values that
       appear in that row only (a brand shared by several rows says
       nothing), in the column whose header names the field. An exact name
@@ -676,18 +700,23 @@ value is `ambiguous`; "1 TB" for GB could mean decimal or binary units.
 
 * One unit after several numbers covers all of them when they form a size
   ("31.2 x 22.1 x 1.5 cm"), an ascending range or variant list ("2-3 kg",
-  "8 - 10 hours", "2 – 3 kg", "128/256/512GB", "64 / 128 GB"), or a range
-  in words ("5 to 7 kg", "-5 to -10 kg"): `ambiguous`, not the last
-  number. A spaced hyphen or slash right after a product's own number
-  separates ("iPhone 15 - 128 GB" is 128), as does a descending pair ("EU
-  42 / 27 cm" is 27). A pack count is not a size: "6 x 330 ml" is
+  "8 - 10 hours", "Battery life 8 - 10 hours", "Weighs 1.2 - 1.5 kg", "2 –
+  3 kg", "128/256/512GB", "64 / 128 GB"), or a range in words ("5 to 7 kg",
+  "-5 to -10 kg"): `ambiguous`, not the last number. A spaced hyphen or
+  slash separates only after a product's own number: one glued to its
+  letters ("Galaxy S24 - 256 GB"), after a count ("Pack of 8 - 200 ml"),
+  after a camel-case name ("iPhone 15 - 128 GB"), or after a capitalized
+  name that is not a label ("Weight", "Max.") when the next number is at
+  least five times larger ("Pixel 8 - 128 GB", "Series 9 - 45mm"). A
+  descending pair separates too ("EU 42 / 27 cm" is 27). In doubt it is a
+  range: an upper end read as the value is a confident wrong value. A pack count is not a size: "6 x 330 ml" is
   330 ml (but "60 x 90 cm" is two lengths). "128/256GB" is two capacities,
   not 128 out of 256.
 * Parts of one quantity add up: 6'2" is 74 in (188 cm), "105 ft 3 in" is
-  32.08 m, "10 h 30 min" is 630 min, "2 kg 500 g" is 2.5 kg. The parts
-  share a unit system and each is less than one of the unit before it, so
-  a value printed twice ("1.4 kg, 3.09 lb", "15.6 inches 39.6 cm") is not
-  summed.
+  32.08 m, "10 h 30 min" is 630 min, "2 kg 500 g" is 2.5 kg, "1 l 500 ml"
+  is 1500 ml. The parts share a unit system and each is less than one of
+  the unit before it, so a value printed twice ("1.4 kg, 3.09 lb", "15.6
+  inches 39.6 cm") is not summed.
 * "pounds" is sterling, not a unit, when the field's name is about money,
   or its description is and nothing says weight. "Min" ending a field
   name (`priceMin`) is a minimum unless a time word precedes it
