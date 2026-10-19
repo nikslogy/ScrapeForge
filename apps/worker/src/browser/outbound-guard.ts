@@ -90,11 +90,15 @@ export function createOutboundRouteHandler(options: {
   extraHeaders?: Readonly<Record<string, string>>;
   /**
    * Any other custom header (Authorization, an API key): it may be a
-   * credential. Sent to `origin` only, by a request that does not follow
-   * redirects (below), on documents, XHR and fetch requests.
+   * credential. Sent to `origin` only, on every request that does not
+   * stream, by a fetch that follows redirects only within `origin` (below).
    */
   secretHeaders?: Readonly<Record<string, string>>;
   origin?: string;
+  /** Bound on each fetch that carries the secret headers (the tier's budget). */
+  timeoutMs?: number;
+  /** A main-frame navigation whose same-origin redirects were followed here, with the URL it ended on. */
+  onRedirected?: (finalUrl: string) => void;
 }): (route: Route) => Promise<void> {
   return async (route) => {
     const request = route.request();
@@ -106,23 +110,8 @@ export function createOutboundRouteHandler(options: {
       const target = options.origin !== undefined && originOf(url) === options.origin;
       if (!allowed) {
         await route.abort();
-      } else if (target && options.secretHeaders && SECRET_HEADER_TYPES.has(request.resourceType())) {
-        // Chromium keeps a continued request's header overrides on every
-        // redirect hop, and the hops never reach this handler: a target
-        // redirecting to an identity provider would carry the credential
-        // there. Fetched here without following redirects, a 3xx goes back
-        // to the browser, which follows it without the credential (and the
-        // tier navigates again to a same-origin redirect target: see
-        // needsCredentialedRenavigation). The body is released once served.
-        const response = await route.fetch({
-          headers: { ...request.headers(), ...options.extraHeaders, ...options.secretHeaders },
-          maxRedirects: 0,
-        });
-        try {
-          await route.fulfill({ response });
-        } finally {
-          await response.dispose().catch(() => undefined);
-        }
+      } else if (target && options.secretHeaders && !STREAM_TYPES.has(request.resourceType())) {
+        await fetchWithSecrets(route, request, { ...options, origin: options.origin as string, secretHeaders: options.secretHeaders });
       } else if (target && options.extraHeaders) {
         await route.continue({ headers: { ...request.headers(), ...options.extraHeaders } });
       } else {
@@ -138,24 +127,93 @@ export function createOutboundRouteHandler(options: {
 }
 
 /**
- * Requests that get the secret headers: what a page loads as itself or asks
- * of its API. Not images, scripts or styles (cookies cover those), nor
- * streams (EventSource), which a fetch here would buffer until they end.
+ * Requests continued by Chromium without the secret headers: streams, which
+ * a fetch here would buffer until they end. (A fetch() or XHR whose body
+ * the page reads as a stream is buffered all the same: with secret headers
+ * it arrives when it ends, within the tier's budget.)
  */
-const SECRET_HEADER_TYPES: ReadonlySet<string> = new Set(['document', 'xhr', 'fetch']);
+const STREAM_TYPES: ReadonlySet<string> = new Set(['media', 'eventsource', 'websocket']);
+/** Same-origin redirect hops followed with the secret headers, at most. */
+const MAX_SECRET_HOPS = 10;
+const BODY_HEADER = /^(?:content-type|content-length|content-encoding|transfer-encoding)$/i;
 
 /**
- * A navigation that carried secret headers and ended on another URL of the
- * target's origin: the redirect hop went without them (see the route
- * handler), so the tier navigates to that URL again, which gets them.
+ * The request fetched here with the secret headers. Chromium keeps a
+ * continued request's header overrides on every redirect hop, and the hops
+ * never reach a route handler: a target redirecting to an identity provider
+ * would carry the credential there. So redirects are not left to Chromium:
+ * one within the origin is followed here, with the headers (each hop
+ * checked); one to another origin goes back to the browser, which follows
+ * it without them. A main-frame navigation that ended on another URL is
+ * reported (onRedirected): the tier loads that URL, so the page has its own
+ * address. Each body is released once served.
  */
-export function needsCredentialedRenavigation(
-  response: { request(): { redirectedFrom(): unknown } } | null,
-  finalUrl: string,
-  origin: string,
-): boolean {
-  if (!response || response.request().redirectedFrom() === null) return false;
-  return originOf(finalUrl) === origin;
+async function fetchWithSecrets(
+  route: Route,
+  request: Request,
+  options: { extraHeaders?: Readonly<Record<string, string>>; secretHeaders: Readonly<Record<string, string>>; origin: string; timeoutMs?: number; onRedirected?: (finalUrl: string) => void },
+): Promise<void> {
+  let url = request.url();
+  let method = request.method();
+  let postData = request.postDataBuffer();
+  let headers: Record<string, string> = { ...request.headers(), ...options.extraHeaders, ...options.secretHeaders };
+  for (let hop = 0; ; hop++) {
+    const response = await route.fetch({
+      url,
+      method,
+      headers,
+      ...(postData ? { postData } : {}),
+      maxRedirects: 0,
+      ...(options.timeoutMs !== undefined ? { timeout: Math.max(1, options.timeoutMs) } : {}),
+    });
+    const status = response.status();
+    const next = hop < MAX_SECRET_HOPS ? await sameOriginRedirect(status, response.headers().location, url, options.origin) : null;
+    if (next === null) {
+      try {
+        if (url !== request.url() && isMainFrameNavigation(request)) options.onRedirected?.(url);
+        await route.fulfill({ response });
+      } finally {
+        await response.dispose().catch(() => undefined);
+      }
+      return;
+    }
+    await response.dispose().catch(() => undefined);
+    // As browsers do: a 303, or a 301/302 answering a POST, is followed with a GET.
+    if (status === 303 ? method !== 'HEAD' : (status === 301 || status === 302) && method === 'POST') {
+      method = 'GET';
+      postData = null;
+      headers = Object.fromEntries(Object.entries(headers).filter(([name]) => !BODY_HEADER.test(name)));
+    }
+    url = next;
+  }
+}
+
+/** Where a 3xx within `origin` leads, when the browser may load it; null for anything else. */
+async function sameOriginRedirect(status: number, location: string | undefined, from: string, origin: string): Promise<string | null> {
+  if (status < 300 || status > 399 || status === 304 || !location) return null;
+  let next: string;
+  try {
+    next = new URL(location, from).href;
+  } catch {
+    return null;
+  }
+  if (originOf(next) !== origin) return null;
+  return (await checkBrowserUrl(next)) === null ? next : null;
+}
+
+function isMainFrameNavigation(request: Request): boolean {
+  try {
+    return request.isNavigationRequest() && request.frame().parentFrame() === null;
+  } catch {
+    // Service worker requests have no frame.
+    return false;
+  }
+}
+
+/** `url` without its fragment. */
+export function withoutFragment(url: string): string {
+  const i = url.indexOf('#');
+  return i < 0 ? url : url.slice(0, i);
 }
 
 /**
@@ -169,6 +227,8 @@ export async function installOutboundGuard(
     extraHeaders?: Readonly<Record<string, string>>;
     secretHeaders?: Readonly<Record<string, string>>;
     origin?: string;
+    timeoutMs?: number;
+    onRedirected?: (finalUrl: string) => void;
   } = {},
 ): Promise<void> {
   const scoped = options.origin !== undefined;
@@ -179,6 +239,8 @@ export async function installOutboundGuard(
       ...(scoped && options.extraHeaders ? { extraHeaders: options.extraHeaders } : {}),
       ...(scoped && options.secretHeaders ? { secretHeaders: options.secretHeaders } : {}),
       ...(scoped ? { origin: options.origin } : {}),
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.onRedirected ? { onRedirected: options.onRedirected } : {}),
     }),
   );
 }

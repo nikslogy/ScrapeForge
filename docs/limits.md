@@ -29,7 +29,7 @@ so it can be checked. Settings marked "env" can be changed per deployment
 | Browser tiers (T4, T5) | `timeout` per navigation | `engine/router.ts` |
 | Browser contexts per worker | 5 (env `MAX_BROWSER_CONTEXTS`) | `worker.ts` |
 | Jobs in flight per worker | env `WORKER_CONCURRENCY`, else `MAX_BROWSER_CONTEXTS` | `worker.ts` |
-| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit). Shared max-min between the tenants waiting for the site. A slot is held, renewed every 5 s, until the router is done with the site | `throughput/limits.ts` |
+| Fetches in flight per site, across all workers | 6 (env `FETCH_DOMAIN_CONCURRENCY`; 0 = no limit). Shared max-min between the tenants waiting for the site. A slot is held, renewed every 5 s, until the router is done with the site; unrenewed (a crashed worker), it frees 15 s after its grant or last renewal | `throughput/limits.ts` |
 | Wait for a rate-limited (429) or failing (5xx) site | one retry after at most 3 s (and at most `timeout` / 4); a longer `Retry-After` fails at once, retryably | `engine/router.ts` `MAX_TRANSIENT_WAIT_MS` |
 | Redirects, private addresses | every hop checked; private, loopback and link-local addresses are refused | `packages/shared/src/net.ts` |
 

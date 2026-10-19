@@ -119,6 +119,25 @@ const ECHO_PAGE = (cdns: string[]) =>
   cdns.map((cdn) => `<img src="${cdn}/pixel.gif">`).join('') +
   `<p id="cookies"></p><script>document.getElementById('cookies').textContent = 'cookies: ' + document.cookie;</script></main></body></html>`;
 
+type Res = { writeHead(c: number, h: Record<string, string>): void; end(b: string): void };
+const authed = (req: { headers: Record<string, string | string[] | undefined> }) => req.headers.authorization === 'Bearer secret-token';
+const sendPage = (res: Res, title: string, h1: string, code = 200) => {
+  res.writeHead(code, { 'content-type': 'text/html' });
+  res.end(
+    `<!doctype html><html><head><title>${title}</title></head><body><main><h1>${h1}</h1><p>${'Revenue, costs and margins for every region and quarter of the year. '.repeat(8)}</p>` +
+      `<p id="at"></p><script>document.getElementById('at').textContent = 'at:' + location.pathname + location.hash;</script></main></body></html>`,
+  );
+};
+/** A subresource behind Basic auth: without the header, a 401 challenge. */
+const gated = (req: { headers: Record<string, string | string[] | undefined> }, res: Res, type: string, body: string) => {
+  if (!authed(req)) {
+    res.writeHead(401, { 'content-type': 'text/plain', 'www-authenticate': 'Basic realm="staging"' });
+    res.end('unauthorized');
+    return;
+  }
+  res.writeHead(200, { 'content-type': type });
+  res.end(body);
+};
 
 beforeAll(async () => {
   samePortless = await startServer(PUBLIC_IP, cdnHandler as never);
@@ -139,6 +158,26 @@ beforeAll(async () => {
         res.end(`<!doctype html><html><head><title>Reports</title></head><body><main><h1>${ok ? 'Quarterly reports' : 'Login required'}</h1><p>${'Revenue, costs and margins for every region and quarter of the year. '.repeat(8)}</p></main></body></html>`);
       },
       '/live': html(`<!doctype html><html><head><title>Live</title></head><body><main><h1>Live feed</h1><p>${'Updates from the account appear here as they happen. '.repeat(8)}</p><p id="feed">waiting</p><script>new EventSource('/events').onmessage = (e) => { document.getElementById('feed').textContent = 'got:' + e.data; };</script></main></body></html>`),
+      // Behind header auth, as on a Basic-auth staging host or an auth proxy.
+      '/guide': redirect(301, '/guide/'),
+      '/guide/': (req, res) => authed(req) ? sendPage(res, 'Guide', 'Guide OK') : sendPage(res, 'Unauthorized', 'Unauthorized', 401),
+      '/dash': redirect(301, '/dash/'),
+      '/dash/': (req, res, body) => (authed(req) ? sendPage(res, 'Dashboard', 'Dashboard') : redirect(302, '/login?next=/dash/')(req, res, body)),
+      '/login': (_req, res) => sendPage(res, 'Login', 'Login form'),
+      '/sso-app': redirect(301, '/sso-app/'),
+      '/sso-app/': (req, res, body) => (authed(req) ? sendPage(res, 'App', 'App home') : redirect(302, `${thirdPartyOrigin}/authorize`)(req, res, body)),
+      '/spa': html(
+        `<!doctype html><html><head><title>Orders</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>` +
+          `<body><main><h1 id="state">Loading</h1><p>${'Orders placed by this account, newest first, with their status. '.repeat(8)}</p><p id="orders">none</p></main></body></html>`,
+      ),
+      '/static/app.js': (req, res) =>
+        gated(req, res, 'application/javascript', "document.getElementById('state').textContent = 'Rendered'; fetch('/api/orders').then((r) => r.text()).then((t) => { document.getElementById('orders').textContent = 'orders:' + t; });"),
+      '/static/app.css': (req, res) => gated(req, res, 'text/css', 'main { display: block }'),
+      '/api/orders': redirect(301, '/api/orders/'),
+      '/api/orders/': (req, res) => {
+        res.writeHead(authed(req) ? 200 : 401, { 'content-type': 'application/json' });
+        res.end(authed(req) ? '["o1"]' : '{"error":"unauthorized"}');
+      },
       '/events': (_req, res) => {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         res.write('data: hello\n\n');
@@ -250,8 +289,8 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
     } finally {
       pool.release(ctx2);
     }
-    // Credential headers go to documents, XHR and fetch requests, not images (cookies cover those).
-    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBeUndefined();
+    // The target's own image gets them; the third-party host it redirects to does not.
+    expect(site.requests.find((x) => x.url === '/img')?.headers.authorization).toBe('Bearer secret-token');
     const cdn = thirdParty.requests.find((x) => x.url === '/pixel.gif');
     expect(cdn).toBeDefined();
     expect(cdn!.headers.authorization).toBeUndefined();
@@ -278,6 +317,40 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
       expect(r.html).toContain('Quarterly reports');
     } finally {
       pool.release(ctx);
+    }
+    // No hop went without it.
+    expect(site.requests.filter((x) => x.url.startsWith('/reports')).every((x) => x.headers.authorization === 'Bearer secret-token')).toBe(true);
+  }, 60_000);
+
+  it.each([
+    ['/guide#install', 'Guide OK', '/guide/#install'],
+    ['/dash', 'Dashboard', '/dash/'],
+    ['/sso-app', 'App home', '/sso-app/'],
+  ])('%s: every same-origin redirect hop keeps the credential (a fragment, a hop that would go to a login page or an IdP)', async (path, h1, final) => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}${path}`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain(h1);
+      // The page has its own address (for its relative links), fragment kept.
+      expect(r.html).toContain(`at:${final}`);
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.filter((x) => x.url.startsWith('/login'))).toEqual([]);
+    expect(thirdParty.requests.filter((x) => x.url.startsWith('/authorize'))).toEqual([]);
+  }, 60_000);
+
+  it("the page's own scripts, styles and API calls get the credential, an API redirect within the origin too", async () => {
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`${site.origin}/spa`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Rendered');
+      expect(r.html).toContain('orders:["o1"]');
+    } finally {
+      pool.release(ctx);
+    }
+    for (const path of ['/static/app.js', '/static/app.css', '/api/orders', '/api/orders/']) {
+      expect(site.requests.find((x) => x.url === path)?.headers.authorization, path).toBe('Bearer secret-token');
     }
   }, 60_000);
 

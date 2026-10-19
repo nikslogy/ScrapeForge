@@ -245,13 +245,15 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
 * Request `cookies` and custom `headers` are applied by the HTTP tiers
   (T1, T2) and the browser tiers (T4, T5), but not by Lightpanda (T3). A
   request that carries either skips T3. See "Request cookies and headers".
-* In a browser tier, a document, XHR or fetch request that carries a
+* In a browser tier, a request to the target's origin that carries a
   custom header other than the ones browsers send anyway is sent by
   Playwright (fetch and fulfill), not by Chromium's own network stack, so
   its TLS fingerprint is not the browser's and the response is buffered.
-  Cookies and headers such as Accept-Language do not need this. A
-  same-origin redirect of an XHR or fetch request goes without the
-  credential (a navigation is loaded again with it).
+  Cookies and headers such as Accept-Language do not need this. Streams
+  (media, EventSource, WebSocket) are left to Chromium and go without the
+  credential. A `fetch()` or XHR body the page reads as a stream arrives
+  only when it ends; with the credential, an endless stream never arrives
+  (its fetch ends at the tier's budget).
 
 ### Request cookies and headers
 
@@ -289,15 +291,27 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
   * Any other header may be a credential. Chromium keeps a continued
     request's header overrides on every redirect hop, and the hops never
     reach the route handler: a target redirecting to an identity provider
-    would carry the credential there. So documents, XHR and fetch requests
-    to the target's origin are fetched with the credential and without
-    following redirects (`route.fetch`, `maxRedirects: 0`), then fulfilled;
-    the body is released once served. A 3xx goes back to the browser,
-    which follows it without the credential. A navigation that ends on
-    another URL of the target's origin is loaded again, with it. Images,
-    scripts and streams (EventSource) get no credential header. Pooled
-    contexts use the egress guard as their proxy, so these fetches pass
-    through it like Chromium's own.
+    would carry the credential there. So every request to the target's
+    origin that does not stream (documents, scripts, styles, images, XHR,
+    fetch, ...) is fetched by the route handler with the credential,
+    without letting Playwright follow redirects (`route.fetch`,
+    `maxRedirects: 0`, bounded by the tier's budget), then fulfilled; each
+    body is released once served. Pages behind Basic auth, an auth proxy
+    or an API-key gateway load their own scripts and styles.
+    * A redirect within the origin is followed by the handler, with the
+      credential, at most 10 hops, each checked by the SSRF guard. A 303,
+      or a 301/302 answering a POST, becomes a GET without a body, as in
+      browsers.
+    * A redirect to another origin goes back to the browser, which
+      follows it without the credential.
+    * A navigation whose redirects the handler followed is loaded once
+      more at the URL it ended on (fragment kept), so the page has its own
+      address for its relative links.
+    * Streams (media, EventSource, WebSocket) are continued by Chromium
+      without the credential.
+
+    Pooled contexts use the egress guard as their proxy, so these fetches
+    pass through it like Chromium's own.
 
 `test/fetch/request-credentials.test.ts` checks this against real servers
 and a real browser:
@@ -306,7 +320,11 @@ and a real browser:
 * a third-party host gets neither;
 * another port of the same host gets no custom headers;
 * a navigation, or an image, that redirects to another origin takes no
-  custom header there; a redirect within the origin keeps the credential;
+  custom header there;
+* every hop of a redirect within the origin keeps the credential: a
+  fragment URL, a chain that would end on a login page or an identity
+  provider without it, an API call redirected to a trailing slash;
+* the page's own scripts and styles behind Basic auth get it;
 * headers browsers send anyway keep Chromium's `Sec-Fetch-*` headers, and
   a stream on the target's origin still streams;
 * the next fetch on the reused context carries nothing over.
@@ -321,10 +339,13 @@ shape.
 record group's answer exceeds the output limit, or the page exceeds the
 input budget. A listing that fits one call on a page that does not (a long
 intro or menu above the grid) is sent as one chunk: the records alone, not
-the top of the page. That happens only when the records match the fields
-at least as well as the top of the page would (BM25, as for selection), so
-a small "related stories" group never replaces a table at the top; an empty
-answer there is a `not_processed` gap. `partitionPlan` sizes chunks to
+the top of the page. That happens unless something the top of the page
+would send matches the fields better than the group's best record (BM25,
+as for selection): a table, or a record of another group. So a small
+"related stories" group never replaces a table at the top. Sums over the
+whole top are not compared (a long menu outscores any grid by its size
+alone), and when nothing names the fields, the largest group is what the
+page lists. An empty answer there is a `not_processed` gap. `partitionPlan` sizes chunks to
 whichever limit is smaller:
 
 * the output limit: the same estimate as `outputRecordCap`;
@@ -344,7 +365,9 @@ ordinary extraction call.
     is put back until one finishes;
   * a chunk alone whose answer (estimated from its cards, and priced as
     the model client prices the call) the rest of the cap cannot pay for
-    is halved before any call, or skipped when it cannot be halved;
+    on any configured model is halved before any call, or skipped when it
+    cannot be halved. When only the primary is too dear, the chunk is
+    sent: the client moves on to a cheaper fallback;
   * the client refuses a call whose expected answer the cap cannot pay for
     (`minOutputTokens`) rather than lowering max_tokens to an answer that
     would be cut off and billed: more budget never returns fewer records;
@@ -360,7 +383,9 @@ ordinary extraction call.
   not into halving.
 * A chunk answered with fewer records than cards, beyond the promo-slot
   tolerance (10%), is asked again for exactly the cards no record cites
-  (once; not at all when a record cites no card of the chunk). A second
+  (once). A stray record that cites no card of the chunk (an empty record
+  for a promo tile, bare values) stands for one card at most; the re-ask
+  is dropped only when more than 20% of the records cite none. A second
   short answer, or an empty answer while other chunks found records, is a
   gap ("returned 54 of 108"). A record that cites one card (a card with a
   single value) is deduplicated by that card.
@@ -476,11 +501,13 @@ on a page that takes 1.5 s to fetch completed in 15 ms.
   host's budget), set by `FETCH_DOMAIN_CONCURRENCY` (default 6).
   * The set's TTL is always its latest lease's expiry: a short job never
     drops other jobs' leases.
-  * A lease is renewed every 5 s while the router is at the site (an HTTP
-    or Lightpanda fetch in flight cannot be aborted at the job deadline)
-    and released when it is done; a crashed worker's lease expires 15 s
-    after its last renewal. Past the deadline the router starts no
-    further tier.
+  * A lease lives 15 s from its grant (`leaseTtlMs`), whatever the job's
+    deadline, and is renewed every 5 s while the router is at the site (an
+    HTTP or Lightpanda fetch in flight cannot be aborted at the job
+    deadline). It is released when the router is done. A slot granted
+    late in a long wait still lives its full 15 s before its first
+    renewal, and a crashed worker's lease expires 15 s after its grant or
+    last renewal. Past the deadline the router starts no further tier.
   * Slots are shared max-min between the tenants waiting for a site: a
     tenant gets a free slot only when no other waiting tenant holds fewer,
     so one tenant's crawl cannot take every slot.
@@ -511,7 +538,7 @@ decides what happens next.
 
 | class | when | next |
 |---|---|---|
-| `server_error` | 5xx with an ordinary error page: no block or vendor challenge markers, and either no scripts or a small page that prints something | Retry the same tier once after 500 ms, then stop with a retryable error. No browser. |
+| `server_error` | 5xx with an ordinary error page: no block or vendor challenge markers, and either no scripts or a small page whose body prints something (its `<head>`, `<title>` and `<noscript>` do not count) | Retry the same tier once after 500 ms, then stop with a retryable error. No browser. |
 | `rate_limited` | 429, 408, or 503 with `Retry-After`, with an ordinary body as above | Take the proxy route (T2) when a proxy is set. Otherwise wait `Retry-After` (at most 3 s, and at most a quarter of the timeout) and retry once, then stop with a retryable error. A longer `Retry-After` stops at once. More engines only add load. |
 | `js_required` | App shell, "JavaScript required" notice, or a client-side redirect | Skip the second HTTP client and go to a browser tier. |
 | `blocked` | Block or challenge page, a 403, or an error status whose body is a challenge: a vendor marker (Kasada's `KPSDK` and `ips.js`, `x-kpsdk-*` headers, ...), scripts with no text at all, or a large page with scripts | The usual ladder: TLS identity and proxy, then browser, then stealth. An error status counts against the tier only with a vendor marker. |
@@ -527,9 +554,12 @@ retries the job with backoff.
   page on the retry goes on up the ladder from that answer.
 * Lightpanda and the browser tiers follow the same rule. A 5xx or 429 at
   T3 or T4 is retried once and then stops retryably, without the stealth
-  tier; a 5xx or 429 at T5 stops retryably whatever an earlier tier was
-  refused. An error status (5xx, 429, 408) is never returned as a result.
-* A re-probe below the learned tier that meets a server error goes on to
+  tier. A 5xx or 429 at T5 stops retryably whatever an earlier tier was
+  refused, unless T4 got a page (status 200, below the bar): that page is
+  the last-resort result. An error status (5xx, 429, 408) is never
+  returned as a result.
+* A re-probe or confirm below the learned tier that meets a server error,
+  at any tier (Lightpanda, or T4 under a learned T5, included), goes on to
   the learned tier instead of failing the request. A rate limit is not
   handed on: it is answered by waiting or another IP.
 
@@ -597,12 +627,17 @@ in `engine.ts` (`groundIn`, `matchByMeaning`):
   the same value. Examples: "3" for class "star-rating Three", `false` for
   "It is not eligible for fully remote work."
   * For a boolean, nothing the block or its record says may read as the
-    opposite: its words, a class token (`outofstock`), an attribute. A
-    bare `0`, `1`, `true` or `false` counts, either way, only in an
-    attribute named for the field (`data-in-stock`); in `data-index` or
-    `data-quantity` it says nothing.
+    opposite: its words, or an attribute named for the field
+    (`data-in-stock`). A card's other attributes and class tokens
+    (`instock`, `outofstock`) speak only to a field about availability
+    (stock, sold out, backorder, ...): a stock class says nothing about
+    `has5g` or `freeShipping`. A bare `0`, `1`, `true` or `false` counts,
+    either way, only in an attribute named for the field; in `data-index`
+    or `data-quantity` it says nothing.
   * For a cited table, only the cells that can hold the value count. A
-    header row of plain `<td>` cells names the columns too.
+    header row of plain `<td>` cells names the columns too, in a table of
+    three or more columns. In a header-less two-column table the first row
+    is a spec ("5G | Yes"), not a header.
     * in a "Spec | Value" table, the value cell of the row whose label
       names the field ("NFC" for `hasNfc`); a two-column table whose
       labels do not name the field is read by its rows, as below;
@@ -640,15 +675,19 @@ and rounded to the printed precision: "3.09 lb" gives 1.4 kg. Otherwise the
 value is `ambiguous`; "1 TB" for GB could mean decimal or binary units.
 
 * One unit after several numbers covers all of them when they form a size
-  ("31.2 x 22.1 x 1.5 cm"), an ascending range or variant list with an
-  unspaced or dash joiner ("2-3 kg", "2 – 3 kg", "128/256/512GB"), or a
-  range in words ("5 to 7 kg", "-5 to -10 kg"): `ambiguous`, not the last
-  number. A spaced hyphen or slash separates ("iPhone 15 - 128 GB" is 128,
-  "EU 42 / 27 cm" is 27). A pack count is not a size: "6 x 330 ml" is
+  ("31.2 x 22.1 x 1.5 cm"), an ascending range or variant list ("2-3 kg",
+  "8 - 10 hours", "2 – 3 kg", "128/256/512GB", "64 / 128 GB"), or a range
+  in words ("5 to 7 kg", "-5 to -10 kg"): `ambiguous`, not the last
+  number. A spaced hyphen or slash right after a product's own number
+  separates ("iPhone 15 - 128 GB" is 128), as does a descending pair ("EU
+  42 / 27 cm" is 27). A pack count is not a size: "6 x 330 ml" is
   330 ml (but "60 x 90 cm" is two lengths). "128/256GB" is two capacities,
   not 128 out of 256.
 * Parts of one quantity add up: 6'2" is 74 in (188 cm), "105 ft 3 in" is
-  32.08 m, "10 h 30 min" is 630 min, "2 kg 500 g" is 2.5 kg.
+  32.08 m, "10 h 30 min" is 630 min, "2 kg 500 g" is 2.5 kg. The parts
+  share a unit system and each is less than one of the unit before it, so
+  a value printed twice ("1.4 kg, 3.09 lb", "15.6 inches 39.6 cm") is not
+  summed.
 * "pounds" is sterling, not a unit, when the field's name is about money,
   or its description is and nothing says weight. "Min" ending a field
   name (`priceMin`) is a minimum unless a time word precedes it

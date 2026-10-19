@@ -118,34 +118,101 @@ describe('createOutboundRouteHandler', () => {
     expect(calls).toEqual(['abort']);
   });
 
-  it('secret headers: documents, XHR and fetch are fetched without following redirects, the body released once served; streams and images are continued', async () => {
+  describe('secret headers', () => {
     const origin = 'http://public.test';
-    const secrets = createOutboundRouteHandler({ blockResources: false, origin, extraHeaders: { 'Accept-Language': 'de' }, secretHeaders: { Authorization: 'Bearer t' } });
-    for (const type of ['document', 'xhr', 'fetch']) {
+    type Reply = { status: number; location?: string };
+    /** A route whose fetches answer `replies` in turn (the last one repeats). */
+    function secretRoute(url: string, type: string, replies: Reply[], req: { method?: string; postData?: string; nav?: boolean } = {}) {
       const order: string[] = [];
-      const response = { dispose: vi.fn(async () => void order.push('dispose')) };
+      const fetched: Array<Record<string, unknown>> = [];
       const route = {
-        request: () => ({ ...fakeRequest(`${origin}/api`, type), headers: () => ({ accept: '*/*' }) }),
-        fetch: vi.fn(async () => (order.push('fetch'), response)),
+        request: () => ({
+          ...fakeRequest(url, type),
+          method: () => req.method ?? 'GET',
+          postDataBuffer: () => (req.postData ? Buffer.from(req.postData) : null),
+          headers: () => ({ accept: '*/*', ...(req.postData ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) }),
+          isNavigationRequest: () => req.nav ?? type === 'document',
+          frame: () => ({ parentFrame: () => null }),
+        }),
+        fetch: vi.fn(async (o: Record<string, unknown>) => {
+          fetched.push(o);
+          const r = replies[Math.min(fetched.length - 1, replies.length - 1)];
+          order.push(`fetch ${String(o.url)}`);
+          return {
+            status: () => r.status,
+            headers: () => (r.location ? { location: r.location } : {}),
+            dispose: vi.fn(async () => void order.push('dispose')),
+          };
+        }),
         fulfill: vi.fn(async () => void order.push('fulfill')),
         continue: vi.fn(async () => void order.push('continue')),
         abort: vi.fn(async () => void order.push('abort')),
       };
-      await secrets(route as unknown as Route);
-      expect(order, type).toEqual(['fetch', 'fulfill', 'dispose']);
-      expect(route.fetch).toHaveBeenCalledWith({ headers: { accept: '*/*', 'Accept-Language': 'de', Authorization: 'Bearer t' }, maxRedirects: 0 });
+      return { route: route as unknown as Route, raw: route, order, fetched };
     }
-    for (const type of ['eventsource', 'image', 'script']) {
-      const route = {
-        request: () => ({ ...fakeRequest(`${origin}/x`, type), headers: () => ({}) }),
-        fetch: vi.fn(),
-        continue: vi.fn(async () => undefined),
-        abort: vi.fn(async () => undefined),
-      };
-      await secrets(route as unknown as Route);
-      expect(route.fetch, type).not.toHaveBeenCalled();
-      expect(route.continue, type).toHaveBeenCalledWith({ headers: { 'Accept-Language': 'de' } });
-    }
+    const handler = (extra: Partial<Parameters<typeof createOutboundRouteHandler>[0]> = {}) =>
+      createOutboundRouteHandler({ blockResources: false, origin, extraHeaders: { 'Accept-Language': 'de' }, secretHeaders: { Authorization: 'Bearer t' }, ...extra });
+
+    it('every request to the origin that does not stream is fetched here with them, without following redirects, the body released once served', async () => {
+      for (const type of ['document', 'xhr', 'fetch', 'script', 'stylesheet', 'image', 'font', 'other']) {
+        const { route, order, fetched } = secretRoute(`${origin}/x`, type, [{ status: 200 }]);
+        await handler()(route);
+        expect(order, type).toEqual([`fetch ${origin}/x`, 'fulfill', 'dispose']);
+        expect(fetched[0], type).toEqual({ url: `${origin}/x`, method: 'GET', headers: { accept: '*/*', 'Accept-Language': 'de', Authorization: 'Bearer t' }, maxRedirects: 0 });
+      }
+    });
+
+    it('streams are continued by Chromium, without them', async () => {
+      for (const type of ['eventsource', 'media', 'websocket']) {
+        const { route, raw } = secretRoute(`${origin}/x`, type, [{ status: 200 }]);
+        await handler()(route);
+        expect(raw.fetch, type).not.toHaveBeenCalled();
+        expect(raw.continue, type).toHaveBeenCalledWith({ headers: { accept: '*/*', 'Accept-Language': 'de' } });
+      }
+    });
+
+    it('a redirect within the origin is followed here with them (each hop checked); the main frame reports where it ended', async () => {
+      const landed: string[] = [];
+      const { route, order, fetched } = secretRoute(`${origin}/reports`, 'document', [{ status: 301, location: '/reports/' }, { status: 302, location: `${origin}/reports/q3` }, { status: 200 }]);
+      await handler({ timeoutMs: 5_000, onRedirected: (u) => landed.push(u) })(route);
+      expect(order).toEqual([`fetch ${origin}/reports`, 'dispose', `fetch ${origin}/reports/`, 'dispose', `fetch ${origin}/reports/q3`, 'fulfill', 'dispose']);
+      expect(fetched.every((f) => (f.headers as Record<string, string>).Authorization === 'Bearer t' && f.maxRedirects === 0 && f.timeout === 5_000)).toBe(true);
+      expect(landed).toEqual([`${origin}/reports/q3`]);
+    });
+
+    it('an XHR redirected within the origin keeps them, and reports nothing', async () => {
+      const landed: string[] = [];
+      const { route, fetched } = secretRoute(`${origin}/api/items`, 'xhr', [{ status: 301, location: '/api/items/' }, { status: 200 }]);
+      await handler({ onRedirected: (u) => landed.push(u) })(route);
+      expect(fetched.map((f) => f.url)).toEqual([`${origin}/api/items`, `${origin}/api/items/`]);
+      expect(landed).toEqual([]);
+    });
+
+    it('a redirect to another origin (or to a blocked address) goes back to the browser, which follows it without them', async () => {
+      for (const location of ['http://idp.public.test/authorize', `http://${INTERNAL_IP}/admin`]) {
+        const { route, order } = secretRoute(`${origin}/app`, 'document', [{ status: 302, location }]);
+        await handler()(route);
+        expect(order, location).toEqual([`fetch ${origin}/app`, 'fulfill', 'dispose']);
+      }
+    });
+
+    it('a 303, or a 301/302 answering a POST, is followed with a GET and no body; a 307 keeps the POST', async () => {
+      for (const [status, method] of [[303, 'GET'], [302, 'GET'], [307, 'POST']] as const) {
+        const { route, fetched } = secretRoute(`${origin}/form`, 'document', [{ status, location: '/done' }, { status: 200 }], { method: 'POST', postData: 'a=1' });
+        await handler()(route);
+        expect(fetched[0], String(status)).toMatchObject({ method: 'POST', postData: Buffer.from('a=1') });
+        expect(fetched[1].method, String(status)).toBe(method);
+        expect('postData' in fetched[1], String(status)).toBe(method === 'POST');
+        expect((fetched[1].headers as Record<string, string>)['content-type'], String(status)).toBe(method === 'POST' ? 'application/x-www-form-urlencoded' : undefined);
+      }
+    });
+
+    it('a same-origin redirect loop stops after a bounded number of hops, served as is', async () => {
+      const { route, raw, fetched } = secretRoute(`${origin}/loop`, 'document', [{ status: 302, location: '/loop' }]);
+      await handler()(route);
+      expect(fetched.length).toBe(11);
+      expect(raw.fulfill).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('keeps the SSRF check when resource blocking is off', async () => {

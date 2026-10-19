@@ -6,7 +6,7 @@ import {
   assertNavigationAllowed,
   ensureContextOutboundGuard,
   installOutboundGuard,
-  needsCredentialedRenavigation,
+  withoutFragment,
   monitorOutbound,
 } from '../browser/outbound-guard.js';
 import {
@@ -116,11 +116,17 @@ export async function tier4StealthFetch(
     // never the SSRF check.
     const credentials = browserCredentials(target, options.headers, options.cookies);
     await addBrowserCookies(context, credentials.cookies);
+    // Where a navigation ended after same-origin redirects the guard followed with the secret headers.
+    let landedOn: string | null = null;
     await installOutboundGuard(page, {
       blockResources: options.blockResources !== false,
       ...(credentials.headers ? { extraHeaders: credentials.headers } : {}),
       ...(credentials.secretHeaders ? { secretHeaders: credentials.secretHeaders } : {}),
       origin: target.origin,
+      timeoutMs: deadline.remaining(),
+      onRedirected: (finalUrl) => {
+        landedOn = finalUrl;
+      },
     });
 
     // Simulate human-like behavior
@@ -141,10 +147,13 @@ export async function tier4StealthFetch(
     // Route handlers never see redirect hops: check the chain before
     // spending any more time on the page.
     await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
-    // A same-origin redirect hop went without the request's secret headers:
-    // the redirect target is loaded again, now with them.
-    if (credentials.secretHeaders && needsCredentialedRenavigation(response, page.url(), target.origin)) {
-      response = await navigate(page.url());
+    // The target redirected within its origin, and the guard followed the
+    // hops with the secret headers: the page holds the right content under
+    // the first URL. Loading the URL it ended on (once) gives it its own
+    // address, for its relative links.
+    const landed = landedOn as string | null;
+    if (landed !== null && withoutFragment(landed) !== withoutFragment(page.url())) {
+      response = await navigate(`${landed}${target.hash}`);
       await deadline.run('checking redirects', () => assertNavigationAllowed(response, page.url()));
     }
 
