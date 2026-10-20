@@ -377,3 +377,21 @@ describe('after the fourth review round', () => {
     expect(out.data).toMatchObject({ has5g: true, nfc: false });
   });
 });
+
+describe('after the fifth review round', () => {
+  it('a field described as being in stock reads the card\'s stock class, whatever its name', async () => {
+    const html =
+      '<html><body><main><h1>Phones</h1><ul class="products">' +
+      [['Alpha', true], ['Beta', false], ['Gamma', true], ['Delta', false]]
+        .map(([n, stock], i) => `<li class="product type-product post-${i} ${stock ? 'instock' : 'outofstock'}"><h2>${n}</h2><span class="price">$${10 + i}.00</span></li>`)
+        .join('') +
+      '</ul></main></body></html>';
+    const doc = buildSourceDocument(html, 'https://shop.example/');
+    const schema = { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, status: { type: 'boolean', description: 'Whether the item is in stock' } } } } } };
+    const out = await run(html, schema, [
+      { name: { v: 'Alpha', b: blockWith(doc, 'Alpha') }, status: { v: true, b: blockWith(doc, 'Alpha') } },
+      { name: { v: 'Beta', b: blockWith(doc, 'Beta') }, status: { v: false, b: blockWith(doc, 'Beta') } },
+    ]);
+    expect(out.data).toMatchObject({ items: [{ name: 'Alpha', status: true }, { name: 'Beta', status: false }] });
+  });
+});

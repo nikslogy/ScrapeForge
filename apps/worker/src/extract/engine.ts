@@ -477,7 +477,7 @@ const AVAILABILITY_WORDS = new Set([
 /** Words that may sit next to them in such a name ("isInStockOnline", "productAvailable"). */
 const AVAILABILITY_NAME_FILLER = new Set(['is', 'has', 'can', 'in', 'on', 'be', 'now', 'currently', 'item', 'product', 'online', 'status', 'to', 'for', 'still', 'level']);
 /** A description about stock, in its positive sense ("Whether the item is in stock"); not a bare "available" ("Whether 5G is available"). */
-const AVAILABILITY_PHRASE = /in[- ]stock|stock (?:status|level)|availability|inventory|available (?:to|for) (?:buy|order|purchase|sale)|can be (?:bought|ordered|purchased)|(?:purchasable|orderable|buyable)/i;
+const AVAILABILITY_PHRASE = /\bin[- ]stock\b|\bstock (?:status|level)\b|\bavailability\b|\binventory\b|\bavailable (?:to|for) (?:buy|order|purchase|sale)\b|\bcan be (?:bought|ordered|purchased)\b|\b(?:purchasable|orderable|buyable)\b/i;
 
 function isAvailabilityField(field: FieldSpec): boolean {
   if (field.type !== 'boolean') return false;
