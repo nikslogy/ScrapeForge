@@ -368,12 +368,21 @@ run of sections (headings). The largest structure is the listing, as for
 the expected record count, and scores are BM25 over the fields, as for
 selection. A rival
 * twice the group's size or more wins, unless it does not name the fields
-  and the group does: a changelog printed as 900 "Version x" headings, or
-  a 12-row release table, is not replaced by three blog cards beside it;
+  and the group does: a 12-row release table is not replaced by three
+  blog cards beside it;
 * of comparable size (half or more) wins when it names the fields better;
 * much smaller never wins: a strip of four deals above a 40-card grid is
-  not the listing, however well its tiles score.
+  not the listing, however well its tiles score. A table that names the
+  fields is the exception when the group names nothing and the table holds
+  at least a quarter as many rows (an 18-row standings table above 40 news
+  cards).
 
+Headings count as a rival only outside the page's navigation and chrome
+(nav and menus, the page header, footer and sidebar), and only when most
+of them name the fields (a changelog of 900 "Version x" headings), or
+when neither side names them and the headings outnumber the records four
+to one (an FAQ beside three related stories). A mega-menu's column
+headings, or a buying guide's sections above a grid, are not a listing.
 Sums over the whole top are not compared: a long menu outscores any grid
 by its size alone. An empty answer there is a `not_processed` gap. `partitionPlan` sizes chunks to
 whichever limit is smaller:
@@ -418,8 +427,11 @@ ordinary extraction call.
 * A chunk answered with fewer records than cards, beyond the promo-slot
   tolerance (10%), is asked again for exactly the cards no record cites
   (once). A record that cites no card of the chunk (bare values, an
-  unknown block id) but whose text is printed on exactly one card covers
-  that card, so it is not asked for again (nor returned twice). Any other
+  unknown block id) but whose values are all printed on exactly one card
+  covers that card, so it is not asked for again (nor returned twice):
+  its strings as a block's text or as whole words within one ("Gadget
+  Model B1" is not in "Gadget Model B105"), its numbers among the card's;
+  a tie goes to the card whose blocks equal the most strings. Any other
   stray record (an empty one for a promo tile) stands for one card at
   most; the re-ask is dropped only when more than 20% of the records are
   such strays. A second
@@ -671,7 +683,9 @@ in `engine.ts` (`groundIn`, `matchByMeaning`):
     named for the field (`data-in-stock`). The card's other attributes and
     class tokens (`instock`, `outofstock`) speak only to a field about
     availability: one named for it (`inStock`, `isAvailable`, `canBuy`,
-    `isOrderable`, `lieferbar`, ...) or described as being in stock. A
+    `isOrderable`, `availableForSale`, `inStockAtStore`, `aufLager`, ...:
+    stock words, plus words such as "sale", "store", "today", "variant")
+    or described as being in stock. A
     stock class says nothing about `has5g` or `freeShipping`, even when
     their description says "available", nor about `isPreorder` or
     `onBackorder`. A bare `0`, `1`, `true` or `false` counts, either way,
@@ -680,14 +694,21 @@ in `engine.ts` (`groundIn`, `matchByMeaning`):
   * A yes/no field true when the item is unavailable (`isSoldOut`,
     `outOfStock`) reads availability phrases the other way: "Sold out" and
     the `outofstock` class are true for it, "Yes" and "No" as written.
+  * A field about being discontinued (`isDiscontinued`) reads only
+    discontinued phrases ("Discontinued", "No longer available", "Not
+    discontinued") and yes/no: out of stock, coming soon or pre-order says
+    nothing about it, nor does the stock class.
   * For a cited table, only the cells that can hold the value count. A
     header row of plain `<td>` cells names the columns too, in a table of
-    three or more columns. In a header-less table of mostly two-cell rows
-    the first row is a spec ("5G | Yes"), not a header, even when a row
-    carries an extra info cell.
+    three or more columns (a first row of three or more filled cells that
+    no row is wider than: a ✓/blank matrix keeps its header though its
+    rows lose their trailing blanks). In a header-less table of mostly
+    two-cell rows the first row is a spec ("5G | Yes"), not a header, even
+    when a row carries an extra info cell.
     * in a "Spec | Value" table, the value cell of the row whose label
-      names the field ("NFC" for `hasNfc`), unless a header names it ("Dish
-      | Vegan": the row "Vegan chili bowl" is a record, not the label); a
+      names the field ("NFC" for `hasNfc`, and for `nfcSupported` in
+      "Feature | Supported"), unless a header names it exactly ("Dish |
+      Vegan": the row "Vegan chili bowl" is a record, not the label); a
       two-column table whose labels do not name the field is read by its
       rows, as below;
     * otherwise, the row holding the most of the answer's own values that
@@ -731,17 +752,21 @@ value is `ambiguous`; "1 TB" for GB could mean decimal or binary units.
   slash separates only after a product's own number: one glued to its
   letters ("Galaxy S24 - 256 GB"), after a count ("Pack of 8 - 200 ml"),
   after a camel-case name ("iPhone 15 - 128 GB"), or after a capitalized
-  name that is not a label ("Weight", "Max.") when the next number is at
-  least five times larger ("Pixel 8 - 128 GB", "Series 9 - 45mm"). A
-  descending pair separates too ("EU 42 / 27 cm" is 27). In doubt it is a
-  range: an upper end read as the value is a confident wrong value. A pack count is not a size: "6 x 330 ml" is
+  name that is not a label ("Weight", "Max.", "Lasts", "Gewicht",
+  "Akkulaufzeit") when the next number is at least five times larger
+  ("Pixel 8 - 128 GB", "Series 9 - 45mm"). A descending pair separates
+  too ("EU 42 / 27 cm" is 27). In doubt it is a range: an upper end read
+  as the value is a confident wrong value. So some product titles that
+  could be read either way are `ambiguous` ("Raspberry Pi 4 - 8 GB",
+  "iphone 15 - 128gb", "Series 9 - 41 mm"). A pack count is not a size: "6 x 330 ml" is
   330 ml (but "60 x 90 cm" is two lengths). "128/256GB" is two capacities,
   not 128 out of 256.
 * Parts of one quantity add up: 6'2" is 74 in (188 cm), "105 ft 3 in" is
   32.08 m, "10 h 30 min" is 630 min, "2 kg 500 g" is 2.5 kg, "1 l 500 ml"
-  is 1500 ml. The parts share a unit system and each is less than one of
-  the unit before it, so a value printed twice ("1.4 kg, 3.09 lb", "15.6
-  inches 39.6 cm") is not summed.
+  is 1500 ml. The parts share a unit system, each is less than one of the
+  unit before it, and none equals the total before it, so a value printed
+  twice ("1.4 kg, 3.09 lb", "15.6 inches 39.6 cm", "0.5 L, 500 ml") is not
+  summed. Frequencies never compound ("2.4 GHz, 900 MHz" is two bands).
 * "pounds" is sterling, not a unit, when the field's name is about money,
   or its description is and nothing says weight. "Min" ending a field
   name (`priceMin`) is a minimum unless a time word precedes it

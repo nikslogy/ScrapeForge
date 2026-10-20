@@ -324,3 +324,34 @@ describe('after the fourth review round: a range unless the number is a product\
     expect(normalized('Out of stock', spec('inStock', 'boolean'))).toMatchObject({ ok: true, value: false });
   });
 });
+
+describe('after the fifth review round', () => {
+  it.each([
+    ['0.5 L, 500 ml', spec('volumeMl', 'number'), 500],
+    ['0.75 L, 750 ml', spec('volumeMl', 'number'), 750],
+    ['0.33 l 330 ml', spec('volumeMl', 'number'), 330],
+    ['0.5 kg, 500 g', spec('weightGrams', 'number'), 500],
+    ['2.4 GHz, 900 MHz', spec('frequencyMhz', 'number'), 900],
+  ])('%s: one amount printed twice is not summed', (raw, field, value) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: true, value });
+  });
+
+  it.each([
+    ['Lasts 2 - 12 hours', spec('batteryLifeHours', 'number')],
+    ['Gewicht 2 - 20 kg', spec('weightKg', 'number')],
+    ['Poids 1 - 5 kg', spec('weightKg', 'number')],
+    ['Akkulaufzeit 2 - 12 h', spec('batteryLifeHours', 'number')],
+    ['Playtime 8 - 10 hours', spec('batteryLifeHours', 'number')],
+  ])('%s: a wide range after a label is a range', (raw, field) => {
+    expect(normalized(raw, field)).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+
+  it('a discontinued field reads discontinued phrases only', () => {
+    const f = spec('isDiscontinued', 'boolean');
+    expect(normalized('Discontinued', f)).toMatchObject({ ok: true, value: true });
+    expect(normalized('No longer available', f)).toMatchObject({ ok: true, value: true });
+    expect(normalized('Not discontinued', f)).toMatchObject({ ok: true, value: false });
+    expect(normalized('No', f)).toMatchObject({ ok: true, value: false });
+    for (const text of ['Out of stock', 'Coming soon', 'Temporarily unavailable', 'In stock']) expect(normalized(text, f), text).toMatchObject({ ok: false });
+  });
+});

@@ -66,7 +66,7 @@ import {
   type SourceDocument,
   type StoredRecipe,
 } from './types.js';
-import { checkGrounding, isUrlField, negatesAvailability, normalizeValue, numberKey, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
+import { checkGrounding, findNumericTokens, isUrlField, localeNumberCandidates, negatesAvailability, normalizeValue, numberKey, prepareText, validateOutput, type GroundingResult, type NormalizeContext, type PreparedText } from './validate/index.js';
 
 export type LearningMode = 'background' | 'await' | 'off';
 
@@ -140,6 +140,13 @@ const MAX_REPORTED_GAPS = 5;
 const REASK_MAX_UNPLACED_ONE_IN = 5;
 /** Shortest value text that places an uncited record on the one card printing it. */
 const MIN_PLACING_TEXT = 4;
+/** Numbers read from one card to place an uncited record. */
+const MAX_CARD_NUMBERS = 50;
+
+interface CardText {
+  texts: string[];
+  numbers: Set<string>;
+}
 /** A retry after truncated output keeps this share of the records sent. */
 const TRUNCATION_RETRY_SHARE = 0.6;
 /** Characters per token assumed for rendered blocks when converting a token budget to maxChars. */
@@ -338,6 +345,23 @@ function mostlyPairs(rows: ReadonlyArray<readonly string[]>): boolean {
   return rows.filter((cells) => cells.length <= 2).length * 2 > rows.length;
 }
 
+/**
+ * Whether the first row reads as a header of plain cells: three or more
+ * filled cells, and no row wider. (Body rows lose their trailing blank
+ * cells, so a ✓/blank matrix looks like pairs once parsed.)
+ */
+function headerRow(rows: ReadonlyArray<readonly string[]>): boolean {
+  const first = rows[0] ?? [];
+  return first.filter((cell) => cell.trim() !== '').length >= 3 && rows.every((cells) => cells.length <= first.length);
+}
+
+/** Whether a label names the field exactly ("Vegan" for vegan), not as part of a longer name ("Supported" for nfcSupported). */
+function namesExactly(label: string, field: FieldSpec): boolean {
+  const name = alnum(field.name);
+  const h = label.slice(0, MAX_HEADER_CHARS);
+  return alnum(h) === name || alnum(h.replace(/\([^()]*\)|\[[^[\]]*\]/g, '')) === name;
+}
+
 function tableIndex(block: SourceBlock): TableIndex | null {
   const cached = tableIndexes.get(block);
   if (cached) return cached;
@@ -350,7 +374,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
     // same. (In a table of mostly two-cell rows the first row is a "Spec |
     // Value" pair, not a header, even when a row has an extra info cell.) It
     // stays a row for the lookups by value.
-    header = block.table.headers.length > 0 ? block.table.headers : mostlyPairs(rows) ? [] : (rows[0] ?? []);
+    header = block.table.headers.length > 0 ? block.table.headers : headerRow(rows) || !mostlyPairs(rows) ? (rows[0] ?? []) : [];
   } else {
     // A table block without its parsed grid: the rendered "a | b | c" lines, first one the header.
     const lines = block.text
@@ -372,7 +396,7 @@ function tableIndex(block: SourceBlock): TableIndex | null {
       else if (at[at.length - 1] !== r) at.push(r);
     }
   });
-  const keyValue = header.length <= 2 && mostlyPairs(rows);
+  const keyValue = header.length <= 2 && mostlyPairs(rows) && !headerRow(rows);
   const index: TableIndex = { header, rows, rowsByCell, columns: new Map(), labels: new Map(), keyValue };
   tableIndexes.set(block, index);
   return index;
@@ -395,9 +419,11 @@ function tableCells(block: SourceBlock, keys: readonly string[], field: FieldSpe
     col = columnFor(t.header, field);
     t.columns.set(field.name, col);
   }
-  // A header naming the field wins: in "Dish | Vegan", the row "Vegan chili
-  // bowl" is a record, not the label of the field.
-  if (col < 0 && t.keyValue) {
+  // A header naming the field exactly wins: in "Dish | Vegan", the row
+  // "Vegan chili bowl" is a record, not the label of the field. A header
+  // naming only part of it does not: in "Feature | Supported", the row "NFC"
+  // is the label of nfcSupported.
+  if (t.keyValue && (col < 0 || !namesExactly(t.header[col] ?? '', field))) {
     let named = t.labels.get(field.name);
     if (named === undefined) {
       named = columnFor(t.rows.map((cells) => cells[0] ?? ''), field);
@@ -470,12 +496,16 @@ const BARE_ATTR_VALUE = /^(?:[+-]?\d+(?:[.,]\d+)?|true|false|yes|no|y|n|on|off)$
  * way; not preorder or backorder, which the stock class does not answer.
  */
 const AVAILABILITY_WORDS = new Set([
-  'available', 'availability', 'avail', 'stock', 'instock', 'stocked', 'orderable', 'order', 'buy', 'buyable', 'purchase', 'purchasable',
+  'available', 'availability', 'avail', 'stock', 'instock', 'stocked', 'orderable', 'order', 'ordered', 'buy', 'bought', 'buyable', 'purchase',
+  'purchased', 'purchasable',
   'inventory', 'lieferbar', 'verfugbar', 'verfuegbar', 'vorratig', 'vorraetig', 'disponible', 'disponibile', 'disponibilidad', 'disponibilite',
-  'beschikbaar', 'leverbaar', 'voorraad', 'estoque', 'existencia', 'existencias',
+  'beschikbaar', 'leverbaar', 'voorraad', 'estoque', 'existencia', 'existencias', 'lager',
 ]);
-/** Words that may sit next to them in such a name ("isInStockOnline", "productAvailable"). */
-const AVAILABILITY_NAME_FILLER = new Set(['is', 'has', 'can', 'in', 'on', 'be', 'now', 'currently', 'item', 'product', 'online', 'status', 'to', 'for', 'still', 'level']);
+/** Words that may sit next to them in such a name ("isInStockOnline", "availableForSale", "inStockAtStore", "aufLager"). */
+const AVAILABILITY_NAME_FILLER = new Set([
+  'is', 'has', 'can', 'in', 'on', 'at', 'be', 'now', 'today', 'currently', 'item', 'product', 'variant', 'sku', 'online', 'store', 'shop',
+  'local', 'status', 'to', 'for', 'sale', 'sell', 'sellable', 'still', 'level', 'en', 'auf', 'op',
+]);
 /** A description about stock, in its positive sense ("Whether the item is in stock"); not a bare "available" ("Whether 5G is available"). */
 const AVAILABILITY_PHRASE = /\bin[- ]stock\b|\bstock (?:status|level)\b|\bavailability\b|\binventory\b|\bavailable (?:to|for) (?:buy|order|purchase|sale)\b|\bcan be (?:bought|ordered|purchased)\b|\b(?:purchasable|orderable|buyable)\b/i;
 
@@ -1266,17 +1296,23 @@ class ExtractionRun {
   /**
    * Whether `group`'s records are what the fields are about, rather than
    * something else a top-of-page rendering would send: a table, another
-   * group's records, or a run of sections (headings). Scores are BM25 over
-   * the field names, descriptions and related words (document/select.ts).
-   * The largest structure is the listing (as for the expected record
-   * count), so a rival
+   * group's records, or a run of sections (headings outside the page's
+   * navigation and chrome). Scores are BM25 over the field names,
+   * descriptions and related words (document/select.ts). The largest
+   * structure is the listing (as for the expected record count), so a rival
    * - much larger than the group (twice its size or more) wins, unless it
    *   does not name the fields and the group does;
    * - of comparable size (half or more) wins when it names them better;
    * - much smaller never wins: a strip of four deals above a grid of 40 is
    *   not the listing, however well its tiles score.
-   * Sums over the whole top are not compared: a long menu outscores any
-   * grid by its size alone.
+   * A table that names the fields also wins over a group that names nothing
+   * when it holds at least a quarter as many rows (a standings table above
+   * 40 news cards). A run of headings counts only when most of them name
+   * the fields ("Version 3.2"), or when neither side names them and the
+   * headings outnumber the records four to one (an FAQ beside three
+   * related stories): a guide's or a mega-menu's headings are not a
+   * listing. Sums over the whole top are not compared: a long menu
+   * outscores any grid by its size alone.
    */
   private groupMatchesFields(group: RecordGroup, fields: FieldSpec[], topIds: readonly string[]): boolean {
     const scores = scoreBlocks(this.doc, queryTerms(fields));
@@ -1302,7 +1338,7 @@ class ExtractionRun {
     for (const g of this.doc.recordGroups) sizes.set(g.id, g.recordIds.length);
     const otherGroups = new Map<string, number>();
     let headings = 0;
-    let headingScore = 0;
+    let namingHeadings = 0;
     for (const id of topIds) {
       const i = index.get(id);
       if (i === undefined) continue;
@@ -1312,14 +1348,16 @@ class ExtractionRun {
         const g = groupOf.get(r) as string;
         if (g !== group.id) otherGroups.set(g, Math.max(otherGroups.get(g) ?? 0, recordScore.get(r) ?? 0));
       } else if (b.kind === 'table') {
-        if (beats(b.table?.rows.length ?? 0, scores[i])) return false;
-      } else if (b.kind === 'heading') {
+        const rows = b.table?.rows.length ?? 0;
+        if (beats(rows, scores[i]) || (best === 0 && scores[i] > 0 && rows * 4 >= size)) return false;
+      } else if (b.kind === 'heading' && !b.chrome) {
         headings++;
-        headingScore = Math.max(headingScore, scores[i]);
+        if (scores[i] > 0) namingHeadings++;
       }
     }
     for (const [g, score] of otherGroups) if (beats(sizes.get(g) ?? 0, score)) return false;
-    return !beats(headings, headingScore);
+    if (headings >= size * 2 && namingHeadings * 2 >= headings) return false;
+    return !(best === 0 && namingHeadings === 0 && headings >= size * 4);
   }
 
   private async runPartitioned(call: ModelCall, plan: PartitionPlan, maxChars: number): Promise<LlmStageResult> {
@@ -1575,7 +1613,7 @@ class ExtractionRun {
     const inChunk = new Set(cards);
     const covered = new Set<string>();
     let unplaced = 0;
-    let cardTexts: Map<string, string> | undefined;
+    let cardTexts: Map<string, CardText> | undefined;
     for (const r of records) {
       const cited = [...this.citedCards(r, fields)].filter((id) => inChunk.has(id));
       if (cited.length === 0) {
@@ -1591,38 +1629,51 @@ class ExtractionRun {
     return cards.filter((id) => !covered.has(id));
   }
 
-  /** Each card's text (its own block and the blocks inside it), compared loosely. */
-  private cardTexts(cards: readonly string[]): Map<string, string> {
+  /** Each card's block texts (compared loosely) and the numbers it prints. */
+  private cardTexts(cards: readonly string[]): Map<string, CardText> {
     const inChunk = new Set(cards);
-    const parts = new Map<string, string[]>();
+    const out = new Map<string, CardText>();
     for (const b of this.doc.blocks) {
       const card = inChunk.has(b.id) ? b.id : b.parentId !== undefined && inChunk.has(b.parentId) ? b.parentId : undefined;
       if (card === undefined || !b.text) continue;
-      const list = parts.get(card);
-      if (list) list.push(b.text);
-      else parts.set(card, [b.text]);
+      let entry = out.get(card);
+      if (!entry) out.set(card, (entry = { texts: [], numbers: new Set() }));
+      entry.texts.push(looseText(b.text));
+      for (const token of findNumericTokens(b.text, MAX_CARD_NUMBERS)) {
+        for (const n of localeNumberCandidates(token.text)) entry.numbers.add(numberKey(n));
+      }
     }
-    return new Map([...parts].map(([card, texts]) => [card, looseText(texts.join(' '))]));
+    return out;
   }
 
-  /** The one card whose text prints every string value of `record` (at least one, MIN_PLACING_TEXT long), if any. */
-  private cardPrinting(record: ParsedRecord, fields: FieldSpec[], cardTexts: ReadonlyMap<string, string>): string | undefined {
-    const values: string[] = [];
+  /**
+   * The one card that prints every value of `record`: its strings as a
+   * block's whole text or as words within one ("Gadget Model B1" is not in
+   * "Gadget Model B105"), its numbers among the card's. When several do, the
+   * one whose blocks equal the most strings; none when that does not decide.
+   */
+  private cardPrinting(record: ParsedRecord, fields: FieldSpec[], cardTexts: ReadonlyMap<string, CardText>): string | undefined {
+    const strings: string[] = [];
+    const numbers: string[] = [];
     for (const field of fields) {
       if (!hasOwn(record, field.name)) continue;
       const v = record[field.name].v;
-      if (typeof v !== 'string') continue;
-      const text = looseText(v);
-      if (text.length >= MIN_PLACING_TEXT) values.push(text);
+      if (typeof v === 'number' && Number.isFinite(v)) numbers.push(numberKey(v));
+      else if (typeof v === 'string' && looseText(v).length >= MIN_PLACING_TEXT) strings.push(looseText(v));
     }
-    if (values.length === 0) return undefined;
+    if (strings.length === 0) return undefined;
+    const words = strings.map((v) => new RegExp(`(?<![\\p{L}\\p{N}])${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'u'));
     let found: string | undefined;
+    let foundExact = -1;
+    let tie = false;
     for (const [card, text] of cardTexts) {
-      if (!values.every((v) => text.includes(v))) continue;
-      if (found !== undefined) return undefined;
-      found = card;
+      if (!numbers.every((n) => text.numbers.has(n))) continue;
+      if (!words.every((w) => text.texts.some((t) => w.test(t)))) continue;
+      const exact = strings.filter((v) => text.texts.includes(v)).length;
+      if (exact > foundExact) [found, foundExact, tie] = [card, exact, false];
+      else if (exact === foundExact) tie = true;
     }
-    return found;
+    return tie ? undefined : found;
   }
 
   /** Listing records (cards) the cells of a parsed record cite. */

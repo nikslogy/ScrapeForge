@@ -34,6 +34,8 @@ export interface SourceBlock {
   end: number;
   /** Enclosing record block (product card, table row group) when any. */
   parentId?: string;
+  /** Inside navigation or page chrome: a nav or menu, the page's header, footer or sidebar. */
+  chrome?: true;
   /** Repeated-structure group this record belongs to (see RecordGroup). */
   recordGroupId?: string;
   /** Present when kind === 'table'. Header row repeated for every row. */

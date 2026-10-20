@@ -400,3 +400,67 @@ describe('records alone against the size of what competes, and stray records pla
     expect(len(out.data, 'items')).toBe(400);
   });
 });
+
+// After the fifth review round.
+describe('records alone against chrome headings, small tables that name the fields, and strays placed by every value', () => {
+  const sentTo = (onUser: (user: string) => void) =>
+    fakeClient((_caps, req) => {
+      onUser(req.user);
+      return { text: '{"records":[]}', finishReason: 'stop', inputTokens: 1, outputTokens: 1, costUsd: 0, latencyMs: 1 };
+    }, { maxOutputTokens: 4_096, contextTokens: 8_000 }).client;
+  const banner = Array.from({ length: 40 }, (_, i) => `Story ${i}: ${'Our team has been building gadgets in a small workshop since 1998, and every one is tested by hand. '.repeat(3)}`).join(' ');
+
+  it('a mega-menu of 24 headed columns in the page header does not take the place of a 40-card grid', async () => {
+    const heads = ['Sale', 'Shop by price', 'Sale picks', 'Price drops', 'Women', 'Men', 'Kids', 'Home', 'Outdoor', 'Kitchen', 'Garden', 'Audio', 'Cameras', 'Phones', 'Laptops', 'Gaming', 'Wearables', 'Smart home', 'Office', 'Travel', 'Fitness', 'Beauty', 'Pets', 'Toys'];
+    const menu = heads.map((h, c) => `<div class="menu-col"><h4 class="mega-title">${h}</h4><ul>${Array.from({ length: 6 }, (_, i) => `<li><a href="/c/${c}-${i}">Category ${c}-${i} under $${10 + i}</a></li>`).join('')}</ul></div>`).join('');
+    const html = listing(items(40), { priceClass: 'price price-item', banner }).replace('<header>', `<header><nav class="mega-menu">${menu}</nav>`);
+    const { client } = fakeClient(listingModel, { maxOutputTokens: 4_096, contextTokens: 8_000 });
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(out.status).toBe('complete');
+    expect(len(out.data, 'items')).toBe(40);
+  });
+
+  it("a buying guide's 48 section headings (one about the price) do not take the place of a 24-card grid", async () => {
+    const guide = Array.from({ length: 48 }, (_, i) => `<h3>${i === 7 ? 'What does the price include?' : `Choosing well, part ${i}`}</h3><p>${'Pick the gadget that fits how you work, and check the warranty terms before you buy. '.repeat(2)}</p>`).join('');
+    const html = listing(items(24)).replace('<h1>All gadgets</h1>', `<h1>All gadgets</h1>${guide}`);
+    let cards = 0;
+    const client = sentTo((user) => (cards = Math.max(cards, items(24).filter((it) => user.includes(it.title)).length)));
+    const out = await extractStructured(request(html, LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(cards).toBe(24);
+    expect(out.scope.strategy).toBe('partitioned');
+  });
+
+  it('a standings table that names the fields is sent, not the 40 news cards below it that name nothing', async () => {
+    const teams = Array.from({ length: 18 }, (_, i) => `Club ${String.fromCharCode(65 + (i % 26))}${i}`);
+    const table = `<table class="standings"><thead><tr><th>Pos</th><th>Team</th><th>Played</th><th>Points</th></tr></thead><tbody>${teams.map((t, i) => `<tr><td>${i + 1}</td><td>${t}</td><td>30</td><td>${80 - i * 3}</td></tr>`).join('')}</tbody></table>`;
+    const prose = Array.from({ length: 120 }, (_, i) => `<p>Match report ${i}: ${'The visitors pressed high from the first whistle and kept the ball well in midfield all afternoon. '.repeat(3)}</p>`).join('');
+    const cards = Array.from({ length: 40 }, (_, i) => `<article class="news-card"><h3><a href="/news/${i}">Weekend roundup part ${i}</a></h3><p>Published ${i + 1} hours ago by the newsroom.</p></article>`).join('');
+    const html = page(`<main><h1>League table</h1>${table}${prose}<section class="latest"><h2>Latest news</h2>${cards}</section></main>`);
+    let sawTable = false;
+    const client = sentTo((user) => (sawTable ||= user.includes('Club A0')));
+    const out = await extractStructured(request(html, { standings: [{ team: 'string — team name', points: 'number — points' }] }), { modelClient: client, recipeStore: null, learning: 'off' });
+    expect(sawTable).toBe(true);
+    expect(out.scope.strategy).not.toBe('partitioned');
+  });
+
+  it.each([
+    ['its title also begins another card\'s title', (list: ReturnType<typeof items>) => list, 1],
+    ['its title is shared by another card', (list: ReturnType<typeof items>) => list.map((it, i) => (i === 101 ? { ...it, title: list[100].title } : it)), 100],
+  ])('a stray record with a numeric price whose title %s is placed by its price too: not returned twice', async (_label, edit, at) => {
+    const list = edit(items(400));
+    const lazy: FakeHandler = (caps, req, i) => {
+      const r = listingModel(caps, req, i) as Sync;
+      if (cardsIn(req.user) < 100) return r;
+      const parsed = JSON.parse(r.text) as { records: Array<Record<string, { v: unknown; b: unknown }>> };
+      const kept: unknown[] = parsed.records.slice(0, Math.floor(parsed.records.length * 0.7));
+      const rec = parsed.records[at];
+      if (rec && req.user.includes(list[at].title)) kept[at] = { title: rec.title.v, price: Number(String(rec.price.v).replace(/[^0-9.]/g, '')) };
+      return { ...r, text: JSON.stringify({ records: kept }) };
+    };
+    const { client } = fakeClient(lazy, { maxOutputTokens: 8_192, contextTokens: 128_000 });
+    const out = await extractStructured(request(listing(list), LISTING_SCHEMA, { url: LISTING_URL }), { modelClient: client, recipeStore: null, learning: 'off' });
+    const keys = (out.data as { items: Array<{ title: string; price: number }> }).items.map((r) => `${r.title}|${r.price}`);
+    expect(keys).toHaveLength(400);
+    expect(new Set(keys).size).toBe(400);
+  });
+});

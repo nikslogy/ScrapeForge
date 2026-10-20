@@ -395,3 +395,59 @@ describe('after the fifth review round', () => {
     expect(out.data).toMatchObject({ items: [{ name: 'Alpha', status: true }, { name: 'Beta', status: false }] });
   });
 });
+
+describe('after the fifth review round: names, discontinued, key/value headers, sparse matrices', () => {
+  const CARDS: Array<[string, boolean]> = [['Alpha', true], ['Beta', false], ['Gamma', true], ['Delta', false]];
+  const html =
+    '<html><body><main><h1>Phones</h1><ul class="products">' +
+    CARDS.map(([n, stock], i) => `<li class="product type-product post-${i} ${stock ? 'instock' : 'outofstock'}"><h2>${n}</h2><span class="price">$${10 + i}.00</span></li>`).join('') +
+    '</ul></main></body></html>';
+  const doc = buildSourceDocument(html, 'https://shop.example/');
+  const listOf = (field: string, description?: string) => ({
+    type: 'object',
+    properties: { items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, [field]: { type: 'boolean', ...(description ? { description } : {}) } } } } },
+  });
+
+  it.each(['availableForSale', 'variantAvailable', 'enStock', 'availableToday', 'inStockAtStore', 'canBeOrdered', 'canBeBought', 'aufLager'])(
+    "%s is about stock: the card's stock class grounds it",
+    async (field) => {
+      const out = await run(html, listOf(field), CARDS.map(([n, stock]) => ({ name: { v: n, b: blockWith(doc, n) }, [field]: { v: stock, b: blockWith(doc, n) } })));
+      expect(out.data).toMatchObject({ items: CARDS.map(([n, stock]) => ({ name: n, [field]: stock })) });
+    },
+  );
+
+  it('a discontinued field reads only discontinued phrases: the stock class and "Out of stock" say nothing about it', async () => {
+    const out = await run(html, listOf('isDiscontinued', 'Whether the product has been discontinued'), CARDS.map(([n, stock]) => ({ name: { v: n, b: blockWith(doc, n) }, isDiscontinued: { v: !stock, b: blockWith(doc, n) } })));
+    expect((out.data as { items: Array<Record<string, unknown>> }).items.every((r) => !('isDiscontinued' in r))).toBe(true);
+    const page = '<html><body><main><h1>Nova X2 Phone</h1><p class="status">Discontinued</p><p>Replaced by the X3.</p></main></body></html>';
+    const d = buildSourceDocument(page, 'https://shop.example/');
+    const yes = await run(page, { type: 'object', properties: { isDiscontinued: { type: 'boolean' } } }, [{ isDiscontinued: { v: true, b: blockWith(d, 'Discontinued') } }]);
+    expect(yes.data).toEqual({ isDiscontinued: true });
+  });
+
+  it('in a "Feature | Supported" table, the label row names nfcSupported (the header names only part of it)', async () => {
+    const page =
+      '<html><body><main><h1>Nova X1</h1><table><thead><tr><th>Feature</th><th>Supported</th></tr></thead><tbody>' +
+      '<tr><td>NFC</td><td>Yes</td></tr><tr><td>Wireless charging</td><td>No</td></tr><tr><td>5G</td><td>Yes</td></tr></tbody></table></main></body></html>';
+    const t = buildSourceDocument(page, 'https://shop.example/').blocks.find((b) => b.kind === 'table')!.id;
+    const schema = { type: 'object', properties: { nfcSupported: { type: 'boolean' }, wirelessChargingSupported: { type: 'boolean' } } };
+    const out = await run(page, schema, [{ nfcSupported: { v: true, b: t }, wirelessChargingSupported: { v: false, b: t } }]);
+    expect(out.data).toEqual({ nfcSupported: true, wirelessChargingSupported: false });
+  });
+
+  it('a ✓/blank matrix keeps its plain-cell header: one column\'s ✓ does not ground another', async () => {
+    const page =
+      '<html><body><main><h1>Menu</h1><table><tbody><tr><td>Dish</td><td>Vegan</td><td>Gluten-free</td></tr>' +
+      '<tr><td>Tofu stir fry</td><td>✓</td><td></td></tr><tr><td>Garden salad</td><td>✓</td><td></td></tr><tr><td>Lentil soup</td><td>✓</td><td>✓</td></tr>' +
+      '<tr><td>Beef burger</td><td></td><td></td></tr><tr><td>Rice bowl</td><td></td><td>✓</td></tr><tr><td>Veggie wrap</td><td>✓</td><td></td></tr></tbody></table></main></body></html>';
+    const t = buildSourceDocument(page, 'https://shop.example/').blocks.find((b) => b.kind === 'table')!.id;
+    const schema = { type: 'object', properties: { dishes: { type: 'array', items: { type: 'object', properties: { dish: { type: 'string' }, vegan: { type: 'boolean' }, glutenFree: { type: 'boolean' } } } } } };
+    const out = await run(page, schema, [
+      { dish: { v: 'Tofu stir fry', b: t }, vegan: { v: true, b: t }, glutenFree: { v: true, b: t } },
+      { dish: { v: 'Rice bowl', b: t }, vegan: { v: true, b: t }, glutenFree: { v: true, b: t } },
+    ]);
+    expect(reasonAt(out, '/dishes/0/glutenFree')).toBe('rejected_ungrounded');
+    expect(reasonAt(out, '/dishes/1/vegan')).toBe('rejected_ungrounded');
+    expect(out.data).toMatchObject({ dishes: [{ vegan: true }, { glutenFree: true }] });
+  });
+});

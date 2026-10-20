@@ -9,7 +9,7 @@ import {
   resolveUrl,
 } from './dom.js';
 import { HINT_NONE, HINT_STRONG } from './hints.js';
-import { EVIDENCE_ITEMPROP, type Layout, type NodeInfo } from './layout.js';
+import { EVIDENCE_ITEMPROP, F_IN_NAV, type Layout, type NodeInfo } from './layout.js';
 import { DOCUMENT_LIMITS } from './limits.js';
 import { selectorOf } from './selector.js';
 import { buildTable, tableText, visibleText } from './table.js';
@@ -419,6 +419,7 @@ class BlockEmitter {
         rec.lastEnd = this.offset;
       }
     }
+    if (info.flags & F_IN_NAV) block.chrome = true;
     const groupId = recordGroupId ?? rec?.block.recordGroupId;
     if (groupId) block.recordGroupId = groupId;
     if (table) block.table = table;

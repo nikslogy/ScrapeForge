@@ -10,7 +10,7 @@
 // with the step 'no-value', so a correct answer to such a page is complete.
 
 import type { FieldSpec, FieldType, JsonSchema } from '../types.js';
-import { negatesAvailability, readAvailability, readUnavailability, readWorkplace, workplaceTopic } from './booleans.js';
+import { isDiscontinuedField, negatesAvailability, readAvailability, readDiscontinued, readUnavailability, readWorkplace, workplaceTopic } from './booleans.js';
 import {
   findNumericTokens,
   hasCurrencyMarker,
@@ -265,7 +265,9 @@ const COUNT_OF = /(?<![\p{L}\p{N}])(?:pack|set|box|case|kit|bundle|lot|carton|tr
 const LABEL_WORDS = new Set([
   'weight', 'weighs', 'capacity', 'size', 'sizes', 'age', 'ages', 'max', 'min', 'approx', 'typ', 'ca', 'range', 'battery', 'life', 'runtime',
   'time', 'power', 'load', 'length', 'width', 'height', 'depth', 'volume', 'speed', 'temp', 'temperature', 'voltage', 'input', 'output',
-  'duration', 'storage', 'memory', 'ram', 'from', 'up', 'between',
+  'duration', 'storage', 'memory', 'ram', 'from', 'up', 'between', 'lasts', 'holds', 'supports', 'runs', 'charges', 'playtime',
+  'talktime', 'standby', 'gewicht', 'poids', 'peso', 'akkulaufzeit', 'laufzeit', 'autonomie', 'kapazitat', 'capacite', 'groesse', 'grosse', 'große',
+  'taille', 'alter', 'edad', 'age',
 ]);
 /** A product's number is far below the spec after it ("Series 9 - 45mm"); a range's ends are closer ("Ages 3 - 12 years"). */
 const NAME_NUMBER_RATIO = 5;
@@ -280,7 +282,7 @@ function followsName(text: string, start: number, a: number, b: number): boolean
   const before = text.slice(Math.max(0, start - 40), start);
   if (/\p{L}$/u.test(before) || COUNT_OF.test(before)) return true;
   const word = /(\p{L}[\p{L}\d.]*)\s+$/u.exec(before)?.[1];
-  if (word === undefined || LABEL_WORDS.has(word.toLowerCase().replace(/\.$/, ''))) return false;
+  if (word === undefined || LABEL_WORDS.has(word.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\.$/, ''))) return false;
   if (/\p{Ll}\p{Lu}/u.test(word)) return true;
   return /^\p{Lu}/u.test(word) && a > 0 && b / a >= NAME_NUMBER_RATIO;
 }
@@ -332,8 +334,9 @@ const UNIT_SYSTEM: Readonly<Record<string, string>> = {
   kg: 'metric-mass', g: 'metric-mass', mg: 'metric-mass',
   km: 'metric-length', m: 'metric-length', cm: 'metric-length', mm: 'metric-length',
   l: 'metric-volume', ml: 'metric-volume',
-  ghz: 'frequency', mhz: 'frequency', khz: 'frequency', hz: 'frequency',
 };
+/** A part this close to the total before it is that total printed again ("0.5 kg, 500 g"), within rounding. */
+const DUAL_PRINT_TOLERANCE = 0.02;
 
 /**
  * "10 h 30 min" for a field in minutes is 630, not 30: every number carries
@@ -353,6 +356,8 @@ function compoundValue(text: string, tokens: NumericToken[], readings: Reading[]
       if ((prev.toBase as number) <= u.toBase) return null;
       if (UNIT_SYSTEM[prev.id] === undefined || UNIT_SYSTEM[prev.id] !== UNIT_SYSTEM[u.id]) return null;
       if (readings[i].value * u.toBase >= (prev.toBase as number)) return null;
+      // "0.5 L, 500 ml": the same amount printed twice, not two parts.
+      if (Math.abs(readings[i].value * u.toBase - base) <= base * DUAL_PRINT_TOLERANCE) return null;
       if (!COMPOUND_JOINER.test(text.slice(tokens[i - 1].end, tokens[i].start).replace(/^\s*\p{L}+\.?/u, ''))) return null;
     }
     base += readings[i].value * u.toBase;
@@ -453,7 +458,13 @@ function normalizeBoolean(raw: unknown, field: FieldSpec): NormalizeResult {
   const text = raw.length > MAX_BOOLEAN_TEXT * 4 ? raw : cleanText(raw).toLowerCase();
   if (text.length > MAX_BOOLEAN_TEXT) return fail('unparseable', 'text is too long for a yes/no value');
   const workplace = workplaceTopic(field);
-  const parsed = workplace ? readWorkplace(text, workplace) : negatesAvailability(field) ? readUnavailability(text) : readAvailability(text);
+  const parsed = workplace
+    ? readWorkplace(text, workplace)
+    : isDiscontinuedField(field)
+      ? readDiscontinued(text)
+      : negatesAvailability(field)
+        ? readUnavailability(text)
+        : readAvailability(text);
   if (parsed === 'ambiguous') {
     return fail('ambiguous', workplace ? `no clear remote/on-site answer in ${quote(text)}` : `both available and unavailable in ${quote(text)}`);
   }

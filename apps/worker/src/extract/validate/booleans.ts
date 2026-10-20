@@ -105,8 +105,16 @@ export function readAvailability(text: string): BooleanReading {
   return weigh(bare, UNAVAILABLE_PATTERNS, AVAILABLE_PATTERNS);
 }
 
-/** A field named for the item being unavailable ("soldOut", "isOutOfStock", "unavailable", "discontinued"). */
-const UNAVAILABILITY_NAME = /(?<![\p{L}\p{N}])(?:sold ?out|out ?of ?stock|unavailable|not available|discontinued)(?![\p{L}\p{N}])/u;
+/** A field named for the item being unavailable ("soldOut", "isOutOfStock", "unavailable"). Not "discontinued": out of stock or coming soon is not that. */
+const UNAVAILABILITY_NAME = /(?<![\p{L}\p{N}])(?:sold ?out|out ?of ?stock|unavailable|not available)(?![\p{L}\p{N}])/u;
+/** A field about the product being discontinued ("isDiscontinued", "discontinued"). */
+const DISCONTINUED_NAME = /(?<![\p{L}\p{N}])discontinued(?![\p{L}\p{N}])/u;
+const DISCONTINUED_TEXT = phrases(
+  'discontinued', 'no longer (?:available|sold|produced|made|manufactured|in production|offered)', 'end of life', 'out of production',
+  'nicht mehr (?:erhältlich|lieferbar|verfügbar|im sortiment)', 'auslaufmodell', 'abgekündigt', "n'est plus (?:fabriqué|commercialisé|disponible)",
+  'descatalogado', 'ya no (?:está disponible|se fabrica)', 'fuori produzione', 'uit (?:het )?assortiment',
+);
+const NOT_DISCONTINUED_TEXT = phrases('not discontinued', 'nicht abgekündigt');
 
 /**
  * Whether a yes/no field is true when the item is NOT available: its
@@ -115,6 +123,28 @@ const UNAVAILABILITY_NAME = /(?<![\p{L}\p{N}])(?:sold ?out|out ?of ?stock|unavai
  */
 export function negatesAvailability(field: Pick<FieldSpec, 'name'>): boolean {
   return UNAVAILABILITY_NAME.test(splitName(typeof field.name === 'string' ? field.name : ''));
+}
+
+/** Whether a yes/no field is about the product being discontinued: only discontinued phrases (or yes/no) answer it. */
+export function isDiscontinuedField(field: Pick<FieldSpec, 'name'>): boolean {
+  return DISCONTINUED_NAME.test(splitName(typeof field.name === 'string' ? field.name : ''));
+}
+
+/**
+ * "Discontinued", "No longer available", schema.org/Discontinued → true;
+ * "Not discontinued" → false; yes/no as written. Being out of stock, coming
+ * soon or on pre-order answers nothing: a product can be all of those and
+ * still be made.
+ */
+export function readDiscontinued(text: string): BooleanReading {
+  const bare = text.replace(/[.!]+$/, '').trim();
+  if (YES.has(bare)) return true;
+  if (NO.has(bare)) return false;
+  if (/^(?:https?:\/\/)?(?:www\.)?schema\.org\/discontinued$/.test(bare)) return true;
+  NOT_DISCONTINUED_TEXT.lastIndex = 0;
+  if (NOT_DISCONTINUED_TEXT.test(bare)) return false;
+  DISCONTINUED_TEXT.lastIndex = 0;
+  return DISCONTINUED_TEXT.test(bare) ? true : null;
 }
 
 /** readAvailability for a field true when the item is unavailable: "Out of stock" → true, "In stock" → false, "Yes" → true. */
