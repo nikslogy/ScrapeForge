@@ -228,8 +228,9 @@ const CHALLENGE_TITLE =
   /^(?:just a moment|attention required|access denied|checking your browser|please wait\b|verifying you are human|verify you are (?:a )?human|security check|one more step|are you a robot|pardon our interruption|request blocked|you have been blocked|human verification|bot verification|ddos-guard)/i;
 const CHALLENGE_TEXT =
   /verifying you are human|verify you are (?:a )?human|checking (?:your browser|if the site connection is secure)|needs to review the security of your connection|enable javascript and cookies to continue|please complete the security check|press (?:&|and) hold to confirm|you have been blocked|unusual traffic from your computer network|request unsuccessful\. incapsula|access to this page has been denied|pardon our interruption/i;
+// Not Cloudflare's passive JS-detection script (/cdn-cgi/challenge-platform/scripts/jsd/), which ordinary pages carry.
 const CHALLENGE_MARKUP =
-  /cdn-cgi\/challenge-platform|_cf_chl_opt|\bcf-chl-|\bcf_chl_|challenges\.cloudflare\.com|\bcf-turnstile\b|captcha-delivery\.com|\bpx-captcha\b|_Incapsula_Resource|ddos-guard\.net\/|\/_sec\/cp_challenge|\bsec-if-cpt\b/i;
+  /cdn-cgi\/challenge-platform(?!\/scripts\/jsd\/)|_cf_chl_opt|\bcf-chl-|\bcf_chl_|challenges\.cloudflare\.com|\bcf-turnstile\b|captcha-delivery\.com|\bpx-captcha\b|_Incapsula_Resource|ddos-guard\.net\/|\/_sec\/cp_challenge|\bsec-if-cpt\b/i;
 
 /**
  * Challenge / interstitial detection on the built document. Conservative:

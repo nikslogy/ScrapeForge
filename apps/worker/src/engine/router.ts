@@ -164,8 +164,12 @@ export function isTransientClass(cls: RejectionClass | undefined): cls is 'serve
 const PLAIN_ERROR_BODY_BYTES = 4_096;
 /** A small error page that runs scripts is plain when it prints anything at all (a challenge prints nothing). */
 const PLAIN_ERROR_MIN_TEXT_CHARS = 1;
-/** Bot-defence vendors whose challenge comes as a 429 or 5xx (Kasada answers 429 with its ips.js loader). */
-const CHALLENGE_SIGNATURE = /\bKPSDK\b|\/ips\.js\b|_Incapsula_Resource|cdn-cgi\/challenge-platform|captcha-delivery\.com|\bpx-captcha\b|\/_sec\/cp_challenge/i;
+/**
+ * Bot-defence vendors whose challenge comes as a 429 or 5xx (Kasada answers
+ * 429 with its ips.js loader). Not Cloudflare's passive JS-detection script
+ * (/cdn-cgi/challenge-platform/scripts/jsd/), which it adds to ordinary pages.
+ */
+const CHALLENGE_SIGNATURE = /\bKPSDK\b|\/ips\.js\b|_Incapsula_Resource|cdn-cgi\/challenge-platform(?!\/scripts\/jsd\/)|captcha-delivery\.com|\bpx-captcha\b|\/_sec\/cp_challenge/i;
 
 /**
  * Text a small HTML body prints: the <head> (and its <title>), <noscript>,
@@ -193,12 +197,16 @@ function isPlainErrorPage(html: string, statusCode: number, headers: Readonly<Re
 }
 
 /**
- * A page that only fell below the quality bar (little content, or more
- * JavaScript needed), with a 2xx status: not a block or challenge page, nor
- * an error. The last-resort result when the stealth tier meets a failing site.
+ * A page from T4 that can stand as the result when the stealth tier does no
+ * better: real content that only fell below the quality bar (2xx, valid
+ * content by the gate, no vendor challenge; a passive DataDome or
+ * PerimeterX tag does not make it a block page), or a definitive "not
+ * found" (404, 410). Not a block or challenge page, nor an error.
  */
-function isSubBarPage(r: TierResponse | null, cls: RejectionClass | undefined): r is TierResponse {
-  return r !== null && r.statusCode >= 200 && r.statusCode < 300 && (cls === 'thin' || cls === 'js_required');
+function isLastResortPage(r: TierResponse | null, valid: boolean): r is TierResponse {
+  if (r === null) return false;
+  if (r.statusCode === 404 || r.statusCode === 410) return true;
+  return r.statusCode >= 200 && r.statusCode < 300 && valid && !hasChallengeSignature(r.html, r.headers);
 }
 
 /** A bot-defence vendor's challenge marker in the body or the headers. */
@@ -750,7 +758,8 @@ class ContextAcquireError extends Error {
 }
 
 type AttemptResult =
-  | { kind: 'response'; r: TierResponse; ok: boolean; cls?: RejectionClass }
+  /** `valid`: the gate found real content (whatever its score). */
+  | { kind: 'response'; r: TierResponse; ok: boolean; valid: boolean; cls?: RejectionClass }
   | { kind: 'error'; error: unknown; acquire: boolean };
 
 /** Per-request state shared by the tier attempts. */
@@ -963,7 +972,7 @@ export class SmartRouter {
 
     // ─── Tier 4: full Patchright headless browser ───
     let t4Result: TierResponse | null = null;
-    let t4Cls: RejectionClass | undefined;
+    let t4Valid = false;
     if (from <= 4) {
       const fetch4 = () =>
         this.withContext(c, (ctx) =>
@@ -987,10 +996,10 @@ export class SmartRouter {
           const t = await this.retryTransient(c, 4, a.r, a.cls, fetch4);
           if (t.ok) return { ...t.r, tierUsed: 4, ...proxyMeta };
           t4Result = t.r;
-          t4Cls = t.cls;
+          t4Valid = t.valid;
         } else {
           t4Result = a.r;
-          t4Cls = a.cls;
+          t4Valid = a.valid;
         }
       } else if (a.acquire) {
         // The stealth tier needs a context from the same pool; waiting for it
@@ -1040,10 +1049,11 @@ export class SmartRouter {
 
     // The site is failing for the stealth browser too: retryable, whatever
     // an earlier tier was refused, unless T4 got a page that only fell below
-    // the bar. A block or challenge page is no result here: the retry may
-    // well get past it, since T5 itself was not blocked.
+    // the bar, or a definitive 404/410. A block or challenge page is no
+    // result here: the retry may well get past it, since T5 itself was not
+    // blocked.
     if (a5.kind === 'response' && isTransientClass(a5.cls)) {
-      if (isSubBarPage(t4Result, t4Cls)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
+      if (isLastResortPage(t4Result, t4Valid)) return { ...t4Result, tierUsed: 4, ...proxyMeta };
       throw this.exhausted(c, true);
     }
 
@@ -1070,14 +1080,14 @@ export class SmartRouter {
     const a4 = await this.attempt(c, 4, fetch4);
     if (a4.kind === 'response' && a4.ok) return { ...a4.r, tierUsed: 4, ...proxyMeta };
     if (a4.kind === 'error' && a4.acquire) throw a4.error;
-    // A page that only fell below the bar: the result should T5 meet a failing site, or fail.
+    // A page that only fell below the bar (or a 404): the result should T5 do no better.
     let t4Page: TierResponse | null = a4.kind === 'response' ? a4.r : null;
-    let t4Cls = a4.kind === 'response' ? a4.cls : undefined;
+    let t4Valid = a4.kind === 'response' && a4.valid;
     if (a4.kind === 'response' && isTransientClass(a4.cls)) {
       const t = await this.retryTransient(c, 4, a4.r, a4.cls, fetch4);
       if (t.ok) return { ...t.r, tierUsed: 4, ...proxyMeta };
       t4Page = t.r;
-      t4Cls = t.cls;
+      t4Valid = t.valid;
     }
 
     // ── T5: stealth (terminal — accept whatever we get) ──
@@ -1097,16 +1107,13 @@ export class SmartRouter {
         ),
       true,
     );
-    if (a5.kind === 'error') {
-      if (!a5.acquire && isSubBarPage(t4Page, t4Cls)) return { ...t4Page, tierUsed: 4, ...proxyMeta };
-      throw a5.error;
-    }
-    // A 5xx or 429 from the stealth tier too is the site failing: a retryable
-    // error, not a result (T4's sub-bar page is, as in escalate()).
-    if (!a5.ok && isTransientClass(a5.cls)) {
-      if (isSubBarPage(t4Page, t4Cls)) return { ...t4Page, tierUsed: 4, ...proxyMeta };
-      throw this.exhausted(c, true);
-    }
+    // T5 did no better (it failed, found no context, or its page was
+    // refused: a 5xx, a rate-limit or challenge page, a block): T4's page
+    // is the result, as in escalate().
+    if ((a5.kind === 'error' || !a5.ok) && isLastResortPage(t4Page, t4Valid)) return { ...t4Page, tierUsed: 4, ...proxyMeta };
+    if (a5.kind === 'error') throw a5.error;
+    // A 5xx or 429 from the stealth tier too is the site failing: a retryable error, not a result.
+    if (!a5.ok && isTransientClass(a5.cls)) throw this.exhausted(c, true);
     if (!a5.ok && isErrorStatus(a5.r.statusCode)) throw this.exhausted(c, hasChallengeSignature(a5.r.html, a5.r.headers) ? undefined : true);
     return { ...a5.r, tierUsed: 5, ...proxyMeta };
   }
@@ -1171,7 +1178,7 @@ export class SmartRouter {
       if (definitive) c.contentRejected = true;
     }
     const returnable = accepted || (terminal && g.valid && g.score >= TERMINAL_TIER_ACCEPT_QUALITY);
-    return { kind: 'response', r, ok: returnable, ...(cls ? { cls } : {}) };
+    return { kind: 'response', r, ok: returnable, valid: g.valid, ...(cls ? { cls } : {}) };
   }
 
   /**
@@ -1187,7 +1194,7 @@ export class SmartRouter {
     r: TierResponse,
     cls: 'server_error' | 'rate_limited',
     fetch: () => Promise<TierResponse | null>,
-  ): Promise<{ ok: true; r: TierResponse } | { ok: false; cls: RejectionClass; r: TierResponse }> {
+  ): Promise<{ ok: true; r: TierResponse } | { ok: false; cls: RejectionClass; r: TierResponse; valid: boolean }> {
     const cap = Math.min(MAX_TRANSIENT_WAIT_MS, (c.options.timeout ?? 60_000) / 4);
     const wait = cls === 'rate_limited' ? retryAfterMs(r.headers, this.now(), cap, cap) : Math.min(SERVER_ERROR_BACKOFF_MS, cap);
     const asked = cls === 'rate_limited' ? retryAfterMs(r.headers, this.now(), Number.POSITIVE_INFINITY, 0) : 0;
@@ -1200,7 +1207,7 @@ export class SmartRouter {
     if (again.kind === 'response' && again.ok) return { ok: true, r: again.r };
     if (again.kind === 'response' && again.cls !== undefined && !isTransientClass(again.cls)) {
       c.notes.push(`T${tier}:${cls}, then ${again.cls} on the retry`);
-      return { ok: false, cls: again.cls, r: again.r };
+      return { ok: false, cls: again.cls, r: again.r, valid: again.valid };
     }
     c.notes.push(`T${tier}:${cls} again after ${wait} ms; no other engine can fix this`);
     throw this.exhausted(c, true);

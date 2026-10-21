@@ -177,7 +177,8 @@ async function fetchWithSecrets(route: Route, request: Request, options: SecretO
   const { context } = options;
   if (context) pendingSecretFetches.set(context, (pendingSecretFetches.get(context) ?? 0) + 1);
   try {
-    const releasePage = await pageSlots.acquire();
+    // The page's own navigation does not wait behind its slow scripts (the worker's limit still holds).
+    const releasePage = isMainFrameNavigation(request) ? () => undefined : await pageSlots.acquire();
     try {
       const releaseWorker = await workerSecretSlots.acquire();
       try {

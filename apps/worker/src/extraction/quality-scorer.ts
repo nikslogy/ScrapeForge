@@ -597,7 +597,8 @@ function withoutData(lower: string, ranges: ReadonlyArray<[number, number]>): st
 function findBlockMarkers(s: Scan): string[] {
   const a = s.analysis;
   if (a.textLen >= MARKER_TEXT_LIMIT) return [];
-  const markup = withoutData(s.lower, s.dataRanges);
+  // Cloudflare's passive JS-detection script sits on ordinary pages: only its challenge is a marker.
+  const markup = withoutData(s.lower, s.dataRanges).replaceAll('challenge-platform/scripts/jsd', 'cf-jsd');
   const found = STRUCTURAL_MARKERS.filter((m) => markup.includes(m));
   const haystack = `${a.textSample} ${a.auxText}`;
   for (const p of BLOCK_PHRASES) {

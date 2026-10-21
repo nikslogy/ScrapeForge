@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { assessTier } from '../../src/engine/router.js';
 import { isValidContent } from '../../src/engine/tier1-http.js';
+import { calculateQualityScore } from '../../src/extraction/quality-scorer.js';
 
 const URL_ = 'https://news.example.org/2026/10/harbour-reopens';
 
@@ -76,5 +77,25 @@ describe('isValidContent: vendor challenge markup is still a block', () => {
     ],
   ])('%s', (_name, html) => {
     expect(isValidContent(html, 200, URL_)).toBe(false);
+  });
+});
+
+describe("Cloudflare's passive JS-detection script", () => {
+  const CF_JSD =
+    "<script>(function(){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.display='none';document.body.appendChild(a);" +
+    "var d=a.contentDocument.createElement('script');d.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';a.contentDocument.head.appendChild(d);})();</script>";
+  const CF_CHALLENGE =
+    '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1?ray=8c1d"></script></head>' +
+    '<body><div id="challenge-running"></div></body></html>';
+
+  it('on a short article is valid content, in the head or at the end of the body', () => {
+    expect(isValidContent(article(CF_JSD), 200, URL_)).toBe(true);
+    expect(isValidContent(article('', CF_JSD), 200, URL_)).toBe(true);
+    expect(calculateQualityScore(article('', CF_JSD), 200, 4, 10).signals.join(' ')).not.toMatch(/challenge-platform|Bot detection/);
+  });
+
+  it("Cloudflare's challenge itself is still a block", () => {
+    expect(isValidContent(CF_CHALLENGE, 200, URL_)).toBe(false);
+    expect(isValidContent(article(`<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1"></script>`), 200, URL_)).toBe(false);
   });
 });

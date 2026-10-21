@@ -1224,3 +1224,68 @@ describe('the last-resort T4 page after the fourth review round', () => {
     expect((await failure(router.route(URL_, { screenshot: true }))).transient).toBe(true);
   });
 });
+
+describe('the last-resort T4 page after the fifth review round', () => {
+  const quick = () =>
+    new SmartRouter(new FakeRedis() as unknown as Redis, vi.fn(async () => ({}) as BrowserContext), vi.fn(), {
+      now: () => T0, random: () => 0.99, logger: { warn: vi.fn() }, sleep: async () => undefined,
+    });
+  const NGINX503 = '<html><head><title>503 Service Temporarily Unavailable</title></head><body><center><h1>503 Service Temporarily Unavailable</h1></center><hr><center>nginx</center></body></html>';
+  const NGINX404 = '<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n';
+  const CF1015 =
+    '<!DOCTYPE html><html lang="en-US"><head><title>Access denied | shop.example used Cloudflare to restrict access</title><link rel="stylesheet" href="/cdn-cgi/styles/cf.errors.css"></head>' +
+    '<body><div id="cf-wrapper"><h1><span class="cf-error-type">Error</span> <span class="cf-error-code">1015</span></h1><h2 class="cf-subheadline">You are being rate limited</h2>' +
+    '<p>The owner of this website (shop.example) has banned you temporarily from accessing this website.</p></div></body></html>';
+  const CF503 =
+    '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1?ray=8c1d"></script></head>' +
+    '<body><div class="main-content"><h1>shop.example</h1><p>Checking if the site connection is secure</p><div id="challenge-running"></div></div></body></html>';
+  const BODY =
+    `<header><nav>${Array.from({ length: 40 }, (_, i) => `<a href="/c/${i}">Category ${i}</a>`).join(' ')}</nav></header><main><h1>Results for widgets</h1>` +
+    `${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${i}">Widget model ${i}</a><span>$${10 + i}.99</span></div>`).join('')}</main>` +
+    `<footer>${Array.from({ length: 30 }, (_, i) => `<a href="/f/${i}">Footer link ${i}</a>`).join(' ')}</footer>`;
+  const thin = (head = '') => `<!doctype html><html><head><title>Search results</title>${'<script src="/s.js"></script>'.repeat(10)}${head}</head><body>${BODY}</body></html>`;
+  const DATADOME = '<script>!function(a,b,c,d){var m=b.createElement(c);m.async=1;m.src=d;b.head.appendChild(m)}(window,document,"script","https://js.datadome.co/tags.js");</script>';
+  const CF_JSD = "<script>(function(){var s=document.createElement('script');s.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.head.appendChild(s);})();</script>";
+
+  it.each([
+    ['a DataDome loader', DATADOME],
+    ["Cloudflare's JS-detection script", CF_JSD],
+  ])('a real sub-bar page carrying %s is kept when T5 meets a 503, on the ladder and the browser-only path', async (_label, tag) => {
+    for (const options of [{}, { screenshot: true }]) {
+      vi.resetAllMocks();
+      m.proxySelect.mockResolvedValue(null);
+      m.proxyEscalate.mockResolvedValue(null);
+      const router = quick();
+      m.tier1Fetch.mockImplementation(shell);
+      m.tier2Fetch.mockImplementation(shell);
+      m.tier4Fetch.mockImplementation(() => Promise.resolve(page(thin(tag))));
+      m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(NGINX503, 503)));
+      expect(await router.route(URL_, options), JSON.stringify(options)).toMatchObject({ tierUsed: 4, statusCode: 200 });
+    }
+  });
+
+  it.each([
+    ["Cloudflare's 1015 rate-limit page (429)", CF1015, 429],
+    ["Cloudflare's challenge (503)", CF503, 503],
+    ['a 403', '<html><body><h1>Access Denied</h1></body></html>', 403],
+  ])('the browser-only path keeps T4\'s sub-bar page when T5 gets %s', async (_label, body, code) => {
+    for (const options of [{ waitFor: '#results' }, { screenshot: true }]) {
+      vi.resetAllMocks();
+      m.proxySelect.mockResolvedValue(null);
+      m.proxyEscalate.mockResolvedValue(null);
+      const router = quick();
+      m.tier4Fetch.mockImplementation(() => Promise.resolve(page(thin())));
+      m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page(body, code)));
+      expect(await router.route(URL_, options), JSON.stringify(options)).toMatchObject({ tierUsed: 4, statusCode: 200 });
+    }
+  });
+
+  it('a 404 from T4 is the answer when T5 meets a 429: the dead URL is not retried', async () => {
+    const router = quick();
+    m.tier1Fetch.mockImplementation(() => Promise.resolve(page(NGINX404, 404)));
+    m.tier2Fetch.mockImplementation(() => Promise.resolve(page(NGINX404, 404)));
+    m.tier4Fetch.mockImplementation(() => Promise.resolve(page(NGINX404, 404)));
+    m.tier4StealthFetch.mockImplementation(() => Promise.resolve(page('Too Many Requests', 429)));
+    expect(await router.route(URL_, {})).toMatchObject({ tierUsed: 4, statusCode: 404 });
+  });
+});

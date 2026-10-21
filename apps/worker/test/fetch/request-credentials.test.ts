@@ -451,6 +451,18 @@ describe.skipIf(!chromiumPath)('browser tiers', () => {
     expect(site.requests.filter((x) => x.url === '/acs/').map((x) => x.method)).toEqual(['POST']);
   }, 60_000);
 
+  it('redirect hops followed with the credential go through the egress guard too', async () => {
+    // "public.test" resolves only through the egress proxy's (test) resolver.
+    const ctx = await pool.acquire();
+    try {
+      const r = await tier4Fetch(`http://public.test:${site.port}/reports`, ctx, { ...OPTIONS, timeout: 15_000 });
+      expect(r.html).toContain('Quarterly reports');
+    } finally {
+      pool.release(ctx);
+    }
+    expect(site.requests.filter((x) => x.url === '/reports/').every((x) => x.headers.authorization === 'Bearer secret-token')).toBe(true);
+  }, 60_000);
+
   it('a redirect to a non-ASCII path is followed once, with the credential (its UTF-8 Location not encoded twice)', async () => {
     const ctx = await pool.acquire();
     try {

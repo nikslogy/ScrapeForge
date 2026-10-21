@@ -155,6 +155,15 @@ const STRUCTURAL_MARKERS = [
   '_incapsula_resource',
 ];
 
+/**
+ * Lower-cased markup without Cloudflare's passive JS-detection script path
+ * (/cdn-cgi/challenge-platform/scripts/jsd/), which it adds to ordinary
+ * pages: only its challenge pages are blocks.
+ */
+export function withoutPassiveScripts(lowerHtml: string): string {
+  return lowerHtml.includes('challenge-platform/scripts/jsd') ? lowerHtml.replaceAll('challenge-platform/scripts/jsd', 'cf-jsd') : lowerHtml;
+}
+
 // Real block pages are almost always under ~10 KB; prose mentions of these
 // words in long articles must not count.
 const SMALL_PAGE_BYTES = 10_000;
@@ -198,14 +207,14 @@ export function isValidContent(
   // "PerimeterX"), CAPTCHA, and phrases like "access denied" — Wikipedia's
   // "Web scraping" article is the canonical example.
   if (html.length < SMALL_PAGE_BYTES) {
-    const lowerHtml = html.toLowerCase();
+    const lowerHtml = withoutPassiveScripts(html.toLowerCase());
     if (BLOCK_INDICATORS.some((indicator) => lowerHtml.includes(indicator))) {
       return false;
     }
   } else {
     // On large pages, still catch the obvious Cloudflare / DataDome challenge
     // markers that appear in page <head> regardless of body size.
-    const head = html.slice(0, LARGE_PAGE_HEAD_BYTES).toLowerCase();
+    const head = withoutPassiveScripts(html.slice(0, LARGE_PAGE_HEAD_BYTES).toLowerCase());
     if (STRUCTURAL_MARKERS.some((m) => head.includes(m))) {
       return false;
     }

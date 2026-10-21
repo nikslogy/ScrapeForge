@@ -341,14 +341,14 @@ describe('SmartRouter tracing: browser path', () => {
     expect(tracer.snapshot().attempts).toEqual([{ tier: 4, ms: 17, outcome: 'accepted' }]);
   });
 
-  it('returns a rejected terminal T5 response and traces it as rejected', async () => {
+  it('traces a rejected terminal T5 response as rejected; T4\'s real (thin) page is the result over it', async () => {
     const { router, tracer, redis } = setup({ acquireMs: 1 });
     m.tier4Fetch.mockImplementation(takes(10, page('<p>THIN</p>')));
     m.tier4StealthFetch.mockImplementation(takes(20, page('BLOCKED')));
 
     const r = await router.route(URL_, { screenshot: true }, tracer);
 
-    expect(r).toMatchObject({ tierUsed: 5, html: 'BLOCKED' });
+    expect(r).toMatchObject({ tierUsed: 4, html: '<p>THIN</p>' });
     expect(tracer.snapshot()).toMatchObject({
       stages: { browser_acquire: 2 },
       attempts: [

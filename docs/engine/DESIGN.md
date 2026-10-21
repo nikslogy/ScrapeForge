@@ -302,8 +302,9 @@ throws `TypeError` only for a malformed request/deps object. Stage times go to
     body is released once served. Pages behind Basic auth, an auth proxy
     or an API-key gateway load their own scripts and styles.
     * At most 6 such fetches run at once per page (Chromium's own limit
-      per host) and 64 per worker: each opens its own connection through
-      the egress guard.
+      per host; the page's own navigation does not wait behind them) and
+      64 per worker: each opens its own connection through the egress
+      guard, redirect hops included.
     * Images, fonts, media and streams are continued by Chromium without
       the credential: a fetch here would hold every image in the worker's
       memory, and they hold no text.
@@ -590,7 +591,7 @@ decides what happens next.
 | `server_error` | 5xx with an ordinary error page: no block or vendor challenge markers, and either no scripts or a small page whose body prints something (its `<head>`, `<title>` and `<noscript>` do not count) | Retry the same tier once after 500 ms, then stop with a retryable error. No browser. |
 | `rate_limited` | 429, 408, or 503 with `Retry-After`, with an ordinary body as above | Take the proxy route (T2) when a proxy is set. Otherwise wait `Retry-After` (at most 3 s, and at most a quarter of the timeout) and retry once, then stop with a retryable error. A longer `Retry-After` stops at once. More engines only add load. |
 | `js_required` | App shell, "JavaScript required" notice, or a client-side redirect | Skip the second HTTP client and go to a browser tier. |
-| `blocked` | Block or challenge page, a 403, or an error status whose body is a challenge: a vendor marker (Kasada's `KPSDK` and `ips.js`, `x-kpsdk-*` headers, ...), scripts with no text at all, or a large page with scripts | The usual ladder: TLS identity and proxy, then browser, then stealth. An error status counts against the tier only with a vendor marker. |
+| `blocked` | Block or challenge page, a 403, or an error status whose body is a challenge: a vendor marker (Kasada's `KPSDK` and `ips.js`, `x-kpsdk-*` headers, Cloudflare's challenge platform but not its passive `/cdn-cgi/challenge-platform/scripts/jsd/` detection script, ...), scripts with no text at all, or a large page with scripts | The usual ladder: TLS identity and proxy, then browser, then stealth. An error status counts against the tier only with a vendor marker. |
 | `thin` | Little content for other reasons | The usual ladder. |
 
 The class prefixes the reason in `metadata.timings.attempts` and in the
@@ -604,11 +605,15 @@ retries the job with backoff.
 * Lightpanda and the browser tiers follow the same rule. A 5xx or 429 at
   T3 or T4 is retried once and then stops retryably, without the stealth
   tier. A 5xx or 429 at T5 stops retryably whatever an earlier tier was
-  refused, unless T4 got a page that only fell below the bar (2xx, thin
-  or needing JavaScript): that page is the last-resort result, on the
-  browser-only path too (and there also when T5 fails outright). A block
-  or challenge page from T4 is no result then: the retry may get past it.
-  An error status (5xx, 429, 408) is never returned as a result.
+  refused, unless T4 got a page that can stand as the result: real content
+  that only fell below the bar (2xx, valid by the gate, no vendor
+  challenge; a passive DataDome, PerimeterX or Cloudflare detection tag
+  does not make it a block page), or a definitive 404/410. On the
+  browser-only path that page is also the result when T5 fails outright,
+  finds no context, or gets a block, challenge or rate-limit page of its
+  own (Cloudflare's 1015 at 429, its challenge at 503), as on the ladder.
+  A block or challenge page from T4 is no result: the retry may get past
+  it. An error status (5xx, 429, 408) is never returned as a result.
 * A re-probe or confirm below the learned tier that meets a server error,
   at any tier (Lightpanda, or T4 under a learned T5, included), goes on to
   the learned tier instead of failing the request. A rate limit is not
